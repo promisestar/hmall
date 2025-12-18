@@ -1,0 +1,9 @@
+hm:
+  db:
+    host: 192.168.100.128:3308 # 修改为你自己的虚拟机IP地址
+    pw: 123 # 修改为docker中的MySQL密码
+logging:
+  pattern:
+    dateformat: MM-dd HH:mm:ss:SSS
+  level:
+    com.hmall.cart: debug
