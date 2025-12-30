@@ -89,7 +89,6 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         } catch (Exception e) {
             throw new RuntimeException("库存不足！");
         }
-
         // 5. 发送延迟消息
         rabbitTemplate.convertAndSend(
                 MQConstants.DELAY_EXCHANGE_NAME,

@@ -1,542 +1,360 @@
-09:23:01:897  INFO 15852 --- [main] com.hmall.pay.PayApplication             : The following 1 profile is active: "local"
-09:23:02:817  INFO 15852 --- [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=2340f113-15e5-36d4-89e3-9fca7d71b34a
-09:23:03:147  INFO 15852 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port(s): 8085 (http)
-09:23:03:155  INFO 15852 --- [main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
-09:23:03:156  INFO 15852 --- [main] org.apache.catalina.core.StandardEngine  : Starting Servlet engine: [Apache Tomcat/9.0.75]
-09:23:03:271  INFO 15852 --- [main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
-09:23:03:272  INFO 15852 --- [main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 1355 ms
-09:23:03:537  INFO 15852 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'user-service' URL not provided. Will try picking an instance via load-balancing.
-09:23:03:926  INFO 15852 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'trade-service' URL not provided. Will try picking an instance via load-balancing.
-09:23:06:960  INFO 15852 --- [main] pertySourcedRequestMappingHandlerMapping : Mapped URL path [/v2/api-docs] onto method [springfox.documentation.swagger2.web.Swagger2ControllerWebMvc#getDocumentation(String, HttpServletRequest)]
-09:23:07:874  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [RpcClientFactory] create a new rpc client of baff01a8-7d7d-49bc-9d33-69af423cf997
-09:23:07:874  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] RpcClient init label, labels = {module=naming, source=sdk}
-09:23:07:876  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] RpcClient init, ServerListFactory = com.alibaba.nacos.client.naming.core.ServerListManager
-09:23:07:876  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] Registry connection listener to current client:com.alibaba.nacos.client.naming.remote.gprc.redo.NamingGrpcRedoService
-09:23:07:877  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] Register server push request handler:com.alibaba.nacos.client.naming.remote.gprc.NamingPushRequestHandler
-09:23:07:878  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] Try to connect to server on start up, server: {serverIp = '192.168.100.128', server main port = 8848}
-09:23:08:025  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] Success to connect to server [192.168.100.128:8848] on start up, connectionId = 1764206587286_192.168.100.1_12707
-09:23:08:025  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$ConnectResetRequestHandler
-09:23:08:025  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$$Lambda$470/0x000000080049e840
-09:23:08:025  INFO 15852 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] Notify connected event to listeners.
-09:23:08:062  WARN 15852 --- [main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.context.ApplicationContextException: Failed to start bean 'webServerStartStop'; nested exception is org.springframework.boot.web.server.PortInUseException: Port 8085 is already in use
-09:23:08:597  INFO 15852 --- [nacos-grpc-client-executor-4] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] Receive server push request, request = NotifySubscriberRequest, requestId = 4
-09:23:08:600  INFO 15852 --- [nacos-grpc-client-executor-4] com.alibaba.nacos.common.remote.client   : [baff01a8-7d7d-49bc-9d33-69af423cf997] Ack server push request, request = NotifySubscriberRequest, requestId = 4
-09:23:08:671  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : Shutdown rpc client, set status to shutdown
-09:23:08:671  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : Shutdown client event executor java.util.concurrent.ScheduledThreadPoolExecutor@f4c3e9[Running, pool size = 2, active threads = 2, queued tasks = 0, completed tasks = 0]
-09:23:08:671  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : Close current connection 1764206587286_192.168.100.1_12707
-09:23:08:677  INFO 15852 --- [main] c.a.n.c.remote.client.grpc.GrpcClient    : Shutdown grpc executor java.util.concurrent.ThreadPoolExecutor@7f39ad3f[Running, pool size = 5, active threads = 0, queued tasks = 0, completed tasks = 5]
-09:23:08:681  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [RpcClientFactory] create a new rpc client of 393e03a9-0e21-4c00-9714-ec1e938abb93
-09:23:08:681  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [393e03a9-0e21-4c00-9714-ec1e938abb93] RpcClient init label, labels = {module=naming, source=sdk}
-09:23:08:681  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [393e03a9-0e21-4c00-9714-ec1e938abb93] RpcClient init, ServerListFactory = com.alibaba.nacos.client.naming.core.ServerListManager
-09:23:08:681  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [393e03a9-0e21-4c00-9714-ec1e938abb93] Registry connection listener to current client:com.alibaba.nacos.client.naming.remote.gprc.redo.NamingGrpcRedoService
-09:23:08:681  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [393e03a9-0e21-4c00-9714-ec1e938abb93] Register server push request handler:com.alibaba.nacos.client.naming.remote.gprc.NamingPushRequestHandler
-09:23:08:682  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [393e03a9-0e21-4c00-9714-ec1e938abb93] Try to connect to server on start up, server: {serverIp = '192.168.100.128', server main port = 8848}
-09:23:08:693  INFO 15852 --- [grpc-nio-worker-ELG-1-4] c.a.n.s.i.g.i.AbstractClientStream       : Received trailers on closed stream:
- Metadata()
- {2}
-09:23:08:813  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [393e03a9-0e21-4c00-9714-ec1e938abb93] Success to connect to server [192.168.100.128:8848] on start up, connectionId = 1764206588094_192.168.100.1_12715
-09:23:08:813  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [393e03a9-0e21-4c00-9714-ec1e938abb93] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$ConnectResetRequestHandler
-09:23:08:813  INFO 15852 --- [main] com.alibaba.nacos.common.remote.client   : [393e03a9-0e21-4c00-9714-ec1e938abb93] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$$Lambda$470/0x000000080049e840
-09:23:08:813  INFO 15852 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [393e03a9-0e21-4c00-9714-ec1e938abb93] Notify connected event to listeners.
-09:23:08:832  INFO 15852 --- [main] o.apache.catalina.core.StandardService   : Stopping service [Tomcat]
-09:23:08:847  INFO 15852 --- [main] ConditionEvaluationReportLoggingListener : 
-
-Error starting ApplicationContext. To display the conditions report re-run your application with 'debug' enabled.
-09:23:08:883 ERROR 15852 --- [main] o.s.b.d.LoggingFailureAnalysisReporter   : 
-
-***************************
-APPLICATION FAILED TO START
-***************************
-
-Description:
-
-Web server failed to start. Port 8085 was already in use.
-
-Action:
-
-Identify and stop the process that's listening on port 8085 or configure this application to listen on another port.
-
-09:23:08:885  WARN 15852 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Start destroying common HttpClient
-09:23:08:885  WARN 15852 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Start destroying Publisher
-09:23:08:886  WARN 15852 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Destruction of the end
-09:23:08:886  WARN 15852 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Destruction of the end
-09:24:25:314  INFO 40656 --- [main] com.hmall.pay.PayApplication             : The following 1 profile is active: "local"
-09:24:26:546  INFO 40656 --- [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=2340f113-15e5-36d4-89e3-9fca7d71b34a
-09:24:26:883  INFO 40656 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port(s): 8085 (http)
-09:24:26:893  INFO 40656 --- [main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
-09:24:26:894  INFO 40656 --- [main] org.apache.catalina.core.StandardEngine  : Starting Servlet engine: [Apache Tomcat/9.0.75]
-09:24:27:003  INFO 40656 --- [main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
-09:24:27:003  INFO 40656 --- [main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 1668 ms
-09:24:27:169  INFO 40656 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'user-service' URL not provided. Will try picking an instance via load-balancing.
-09:24:27:380  INFO 40656 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'trade-service' URL not provided. Will try picking an instance via load-balancing.
-09:24:29:551  INFO 40656 --- [main] pertySourcedRequestMappingHandlerMapping : Mapped URL path [/v2/api-docs] onto method [springfox.documentation.swagger2.web.Swagger2ControllerWebMvc#getDocumentation(String, HttpServletRequest)]
-09:24:30:246  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [RpcClientFactory] create a new rpc client of 452d2e56-eaf6-4d66-8fb2-6a79790cc44b
-09:24:30:246  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] RpcClient init label, labels = {module=naming, source=sdk}
-09:24:30:248  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] RpcClient init, ServerListFactory = com.alibaba.nacos.client.naming.core.ServerListManager
-09:24:30:248  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] Registry connection listener to current client:com.alibaba.nacos.client.naming.remote.gprc.redo.NamingGrpcRedoService
-09:24:30:248  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] Register server push request handler:com.alibaba.nacos.client.naming.remote.gprc.NamingPushRequestHandler
-09:24:30:249  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] Try to connect to server on start up, server: {serverIp = '192.168.100.128', server main port = 8848}
-09:24:30:363  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] Success to connect to server [192.168.100.128:8848] on start up, connectionId = 1764206669647_192.168.100.1_13578
-09:24:30:363  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$ConnectResetRequestHandler
-09:24:30:363  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$$Lambda$470/0x000000080049e840
-09:24:30:363  INFO 40656 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] Notify connected event to listeners.
-09:24:30:390  WARN 40656 --- [main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.context.ApplicationContextException: Failed to start bean 'webServerStartStop'; nested exception is org.springframework.boot.web.server.PortInUseException: Port 8085 is already in use
-09:24:30:888  INFO 40656 --- [nacos-grpc-client-executor-5] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] Receive server push request, request = NotifySubscriberRequest, requestId = 17
-09:24:30:889  INFO 40656 --- [nacos-grpc-client-executor-5] com.alibaba.nacos.common.remote.client   : [452d2e56-eaf6-4d66-8fb2-6a79790cc44b] Ack server push request, request = NotifySubscriberRequest, requestId = 17
-09:24:30:999  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : Shutdown rpc client, set status to shutdown
-09:24:31:000  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : Shutdown client event executor java.util.concurrent.ScheduledThreadPoolExecutor@7b38db21[Running, pool size = 2, active threads = 2, queued tasks = 0, completed tasks = 0]
-09:24:31:000  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : Close current connection 1764206669647_192.168.100.1_13578
-09:24:31:002  INFO 40656 --- [main] c.a.n.c.remote.client.grpc.GrpcClient    : Shutdown grpc executor java.util.concurrent.ThreadPoolExecutor@1cc42abe[Running, pool size = 6, active threads = 0, queued tasks = 0, completed tasks = 6]
-09:24:31:005  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [RpcClientFactory] create a new rpc client of 7f49f3f0-e87e-44df-b4ba-efa120f067d9
-09:24:31:005  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [7f49f3f0-e87e-44df-b4ba-efa120f067d9] RpcClient init label, labels = {module=naming, source=sdk}
-09:24:31:005  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [7f49f3f0-e87e-44df-b4ba-efa120f067d9] RpcClient init, ServerListFactory = com.alibaba.nacos.client.naming.core.ServerListManager
-09:24:31:005  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [7f49f3f0-e87e-44df-b4ba-efa120f067d9] Registry connection listener to current client:com.alibaba.nacos.client.naming.remote.gprc.redo.NamingGrpcRedoService
-09:24:31:005  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [7f49f3f0-e87e-44df-b4ba-efa120f067d9] Register server push request handler:com.alibaba.nacos.client.naming.remote.gprc.NamingPushRequestHandler
-09:24:31:006  INFO 40656 --- [grpc-nio-worker-ELG-1-4] c.a.n.s.i.g.i.AbstractClientStream       : Received trailers on closed stream:
- Metadata()
- {2}
-09:24:31:006  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [7f49f3f0-e87e-44df-b4ba-efa120f067d9] Try to connect to server on start up, server: {serverIp = '192.168.100.128', server main port = 8848}
-09:24:31:120  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [7f49f3f0-e87e-44df-b4ba-efa120f067d9] Success to connect to server [192.168.100.128:8848] on start up, connectionId = 1764206670404_192.168.100.1_13634
-09:24:31:120  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [7f49f3f0-e87e-44df-b4ba-efa120f067d9] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$ConnectResetRequestHandler
-09:24:31:120  INFO 40656 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [7f49f3f0-e87e-44df-b4ba-efa120f067d9] Notify connected event to listeners.
-09:24:31:120  INFO 40656 --- [main] com.alibaba.nacos.common.remote.client   : [7f49f3f0-e87e-44df-b4ba-efa120f067d9] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$$Lambda$470/0x000000080049e840
-09:24:31:132  INFO 40656 --- [main] o.apache.catalina.core.StandardService   : Stopping service [Tomcat]
-09:24:31:142  INFO 40656 --- [main] ConditionEvaluationReportLoggingListener : 
-
-Error starting ApplicationContext. To display the conditions report re-run your application with 'debug' enabled.
-09:24:31:154 ERROR 40656 --- [main] o.s.b.d.LoggingFailureAnalysisReporter   : 
-
-***************************
-APPLICATION FAILED TO START
-***************************
-
-Description:
-
-Web server failed to start. Port 8085 was already in use.
-
-Action:
-
-Identify and stop the process that's listening on port 8085 or configure this application to listen on another port.
-
-09:24:31:156  WARN 40656 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Start destroying Publisher
-09:24:31:156  WARN 40656 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Start destroying common HttpClient
-09:24:31:156  WARN 40656 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Destruction of the end
-09:24:31:156  WARN 40656 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Destruction of the end
-19:26:06:542  INFO 8200 --- [main] com.hmall.pay.PayApplication             : The following 1 profile is active: "local"
-19:26:07:418  INFO 8200 --- [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=2340f113-15e5-36d4-89e3-9fca7d71b34a
-19:26:07:719  INFO 8200 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port(s): 8085 (http)
-19:26:07:727  INFO 8200 --- [main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
-19:26:07:727  INFO 8200 --- [main] org.apache.catalina.core.StandardEngine  : Starting Servlet engine: [Apache Tomcat/9.0.75]
-19:26:07:862  INFO 8200 --- [main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
-19:26:07:863  INFO 8200 --- [main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 1305 ms
-19:26:08:012  INFO 8200 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'user-service' URL not provided. Will try picking an instance via load-balancing.
-19:26:08:179  INFO 8200 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'trade-service' URL not provided. Will try picking an instance via load-balancing.
-19:26:10:930  INFO 8200 --- [main] pertySourcedRequestMappingHandlerMapping : Mapped URL path [/v2/api-docs] onto method [springfox.documentation.swagger2.web.Swagger2ControllerWebMvc#getDocumentation(String, HttpServletRequest)]
-19:26:11:751  INFO 8200 --- [main] com.alibaba.nacos.common.remote.client   : [RpcClientFactory] create a new rpc client of bc3afc3b-58b6-4830-8564-63807d174db0
-19:26:11:751  INFO 8200 --- [main] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] RpcClient init label, labels = {module=naming, source=sdk}
-19:26:11:752  INFO 8200 --- [main] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] RpcClient init, ServerListFactory = com.alibaba.nacos.client.naming.core.ServerListManager
-19:26:11:752  INFO 8200 --- [main] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] Registry connection listener to current client:com.alibaba.nacos.client.naming.remote.gprc.redo.NamingGrpcRedoService
-19:26:11:753  INFO 8200 --- [main] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] Register server push request handler:com.alibaba.nacos.client.naming.remote.gprc.NamingPushRequestHandler
-19:26:11:753  INFO 8200 --- [main] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] Try to connect to server on start up, server: {serverIp = '192.168.100.128', server main port = 8848}
-19:26:11:866  INFO 8200 --- [main] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] Success to connect to server [192.168.100.128:8848] on start up, connectionId = 1764242770826_192.168.100.1_7466
-19:26:11:866  INFO 8200 --- [main] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$ConnectResetRequestHandler
-19:26:11:866  INFO 8200 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] Notify connected event to listeners.
-19:26:11:866  INFO 8200 --- [main] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$$Lambda$470/0x0000000800486840
-19:26:11:901  INFO 8200 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port(s): 8085 (http) with context path ''
-19:26:11:909  INFO 8200 --- [main] c.a.c.n.registry.NacosServiceRegistry    : nacos registry, DEFAULT_GROUP pay-service 216.1.1.22:8085 register finished
-19:26:12:457  INFO 8200 --- [nacos-grpc-client-executor-7] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] Receive server push request, request = NotifySubscriberRequest, requestId = 10
-19:26:12:460  INFO 8200 --- [nacos-grpc-client-executor-7] com.alibaba.nacos.common.remote.client   : [bc3afc3b-58b6-4830-8564-63807d174db0] Ack server push request, request = NotifySubscriberRequest, requestId = 10
-19:26:12:480  INFO 8200 --- [main] d.s.w.p.DocumentationPluginsBootstrapper : Documentation plugins bootstrapped
-19:26:12:481  INFO 8200 --- [main] d.s.w.p.DocumentationPluginsBootstrapper : Found 1 custom documentation plugin(s)
-19:26:12:497  INFO 8200 --- [main] s.d.s.w.s.ApiListingReferenceScanner     : Scanning for api listing references
-19:26:12:505  INFO 8200 --- [main] com.hmall.pay.PayApplication             : Started PayApplication in 11.227 seconds (JVM running for 12.319)
-19:26:12:509  INFO 8200 --- [main] c.a.c.n.refresh.NacosContextRefresher    : [Nacos Config] Listening config: dataId=pay-service, group=DEFAULT_GROUP
-19:26:12:509  INFO 8200 --- [main] c.a.c.n.refresh.NacosContextRefresher    : [Nacos Config] Listening config: dataId=pay-service.yaml, group=DEFAULT_GROUP
-19:26:12:510  INFO 8200 --- [main] c.a.c.n.refresh.NacosContextRefresher    : [Nacos Config] Listening config: dataId=pay-service-local.yaml, group=DEFAULT_GROUP
-19:31:23:935  WARN 8200 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Start destroying common HttpClient
-19:31:23:935  WARN 8200 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Start destroying Publisher
-19:31:23:935  WARN 8200 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Destruction of the end
-19:31:23:936  WARN 8200 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Destruction of the end
-19:31:24:380  INFO 8200 --- [SpringApplicationShutdownHook] c.a.c.n.registry.NacosServiceRegistry    : De-registering from Nacos Server now...
-19:31:24:383  INFO 8200 --- [SpringApplicationShutdownHook] c.a.c.n.registry.NacosServiceRegistry    : De-registration finished.
-19:31:24:690  INFO 8200 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Shutdown rpc client, set status to shutdown
-19:31:24:690  INFO 8200 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Shutdown client event executor java.util.concurrent.ScheduledThreadPoolExecutor@54c3e6a8[Running, pool size = 2, active threads = 2, queued tasks = 0, completed tasks = 0]
-19:31:24:690  INFO 8200 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Close current connection 1764242770826_192.168.100.1_7466
-19:31:24:692  INFO 8200 --- [nacos-grpc-client-executor-77] c.a.n.c.remote.client.grpc.GrpcClient    : [1764242770826_192.168.100.1_7466]Ignore complete event,isRunning:false,isAbandon=false
-19:31:24:695  INFO 8200 --- [SpringApplicationShutdownHook] c.a.n.c.remote.client.grpc.GrpcClient    : Shutdown grpc executor java.util.concurrent.ThreadPoolExecutor@159ad9fb[Running, pool size = 4, active threads = 0, queued tasks = 0, completed tasks = 78]
-19:31:32:519  INFO 3024 --- [main] com.hmall.pay.PayApplication             : The following 1 profile is active: "local"
-19:31:33:102  INFO 3024 --- [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=2340f113-15e5-36d4-89e3-9fca7d71b34a
-19:31:33:330  INFO 3024 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port(s): 8085 (http)
-19:31:33:337  INFO 3024 --- [main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
-19:31:33:338  INFO 3024 --- [main] org.apache.catalina.core.StandardEngine  : Starting Servlet engine: [Apache Tomcat/9.0.75]
-19:31:33:433  INFO 3024 --- [main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
-19:31:33:433  INFO 3024 --- [main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 904 ms
-19:31:33:570  INFO 3024 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'user-service' URL not provided. Will try picking an instance via load-balancing.
-19:31:33:732  INFO 3024 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'trade-service' URL not provided. Will try picking an instance via load-balancing.
-19:31:35:682  INFO 3024 --- [main] pertySourcedRequestMappingHandlerMapping : Mapped URL path [/v2/api-docs] onto method [springfox.documentation.swagger2.web.Swagger2ControllerWebMvc#getDocumentation(String, HttpServletRequest)]
-19:31:36:269  INFO 3024 --- [main] com.alibaba.nacos.common.remote.client   : [RpcClientFactory] create a new rpc client of 403e542c-9edc-4633-82a1-4f19fc23bbfa
-19:31:36:269  INFO 3024 --- [main] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] RpcClient init label, labels = {module=naming, source=sdk}
-19:31:36:271  INFO 3024 --- [main] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] RpcClient init, ServerListFactory = com.alibaba.nacos.client.naming.core.ServerListManager
-19:31:36:271  INFO 3024 --- [main] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Registry connection listener to current client:com.alibaba.nacos.client.naming.remote.gprc.redo.NamingGrpcRedoService
-19:31:36:271  INFO 3024 --- [main] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Register server push request handler:com.alibaba.nacos.client.naming.remote.gprc.NamingPushRequestHandler
-19:31:36:271  INFO 3024 --- [main] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Try to connect to server on start up, server: {serverIp = '192.168.100.128', server main port = 8848}
-19:31:36:382  INFO 3024 --- [main] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Success to connect to server [192.168.100.128:8848] on start up, connectionId = 1764243095330_192.168.100.1_7868
-19:31:36:382  INFO 3024 --- [main] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$ConnectResetRequestHandler
-19:31:36:382  INFO 3024 --- [main] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$$Lambda$470/0x0000000800486840
-19:31:36:382  INFO 3024 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Notify connected event to listeners.
-19:31:36:412  INFO 3024 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port(s): 8085 (http) with context path ''
-19:31:36:419  INFO 3024 --- [main] c.a.c.n.registry.NacosServiceRegistry    : nacos registry, DEFAULT_GROUP pay-service 216.1.1.22:8085 register finished
-19:31:36:883  INFO 3024 --- [main] d.s.w.p.DocumentationPluginsBootstrapper : Documentation plugins bootstrapped
-19:31:36:885  INFO 3024 --- [main] d.s.w.p.DocumentationPluginsBootstrapper : Found 1 custom documentation plugin(s)
-19:31:36:900  INFO 3024 --- [main] s.d.s.w.s.ApiListingReferenceScanner     : Scanning for api listing references
-19:31:36:900  INFO 3024 --- [nacos-grpc-client-executor-6] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Receive server push request, request = NotifySubscriberRequest, requestId = 16
-19:31:36:903  INFO 3024 --- [nacos-grpc-client-executor-6] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Ack server push request, request = NotifySubscriberRequest, requestId = 16
-19:31:36:909  INFO 3024 --- [main] com.hmall.pay.PayApplication             : Started PayApplication in 8.489 seconds (JVM running for 9.373)
-19:31:36:913  INFO 3024 --- [main] c.a.c.n.refresh.NacosContextRefresher    : [Nacos Config] Listening config: dataId=pay-service, group=DEFAULT_GROUP
-19:31:36:914  INFO 3024 --- [main] c.a.c.n.refresh.NacosContextRefresher    : [Nacos Config] Listening config: dataId=pay-service.yaml, group=DEFAULT_GROUP
-19:31:36:914  INFO 3024 --- [main] c.a.c.n.refresh.NacosContextRefresher    : [Nacos Config] Listening config: dataId=pay-service-local.yaml, group=DEFAULT_GROUP
-19:31:42:040  INFO 3024 --- [http-nio-8085-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
-19:31:42:040  INFO 3024 --- [http-nio-8085-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
-19:31:42:043  INFO 3024 --- [http-nio-8085-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 2 ms
-19:31:42:148  INFO 3024 --- [http-nio-8085-exec-1] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
-19:31:42:293  INFO 3024 --- [http-nio-8085-exec-1] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
-19:31:42:298 DEBUG 3024 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.selectOne  : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE (biz_order_no = ?)
-19:31:42:312 DEBUG 3024 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.selectOne  : ==> Parameters: 1994006206815813633(Long)
-19:31:42:330 DEBUG 3024 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.selectOne  : <==      Total: 0
-19:31:42:364 DEBUG 3024 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.insert     : ==>  Preparing: INSERT INTO pay_order ( id, biz_order_no, pay_order_no, biz_user_id, pay_channel_code, amount, pay_type, status, pay_over_time ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ? )
-19:31:42:366 DEBUG 3024 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.insert     : ==> Parameters: 1994006211676995585(Long), 1994006206815813633(Long), 1994006211664412673(Long), 1(Long), balance(String), 13700(Integer), 5(Integer), 1(Integer), 2025-11-27T21:31:42.360423600(LocalDateTime)
-19:31:42:370 DEBUG 3024 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.insert     : <==    Updates: 1
-19:31:46:056 DEBUG 3024 --- [http-nio-8085-exec-2] c.h.p.mapper.PayOrderMapper.selectById   : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE id=?
-19:31:46:057 DEBUG 3024 --- [http-nio-8085-exec-2] c.h.p.mapper.PayOrderMapper.selectById   : ==> Parameters: 1994006211676995585(Long)
-19:31:46:061 DEBUG 3024 --- [http-nio-8085-exec-2] c.h.p.mapper.PayOrderMapper.selectById   : <==      Total: 1
-19:31:46:063 DEBUG 3024 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] ---> PUT http://user-service/users/money/deduct?pw=123&amount=13700 HTTP/1.1
-19:31:46:063 DEBUG 3024 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] user-info: 1
-19:31:46:063 DEBUG 3024 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] ---> END HTTP (0-byte body)
-19:31:46:229 DEBUG 3024 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] <--- HTTP/1.1 200  (165ms)
-19:31:46:229 DEBUG 3024 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] connection: keep-alive
-19:31:46:230 DEBUG 3024 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] content-length: 0
-19:31:46:230 DEBUG 3024 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] date: Thu, 27 Nov 2025 11:31:46 GMT
-19:31:46:230 DEBUG 3024 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] keep-alive: timeout=60
-19:31:46:230 DEBUG 3024 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] <--- END HTTP (0-byte body)
-19:31:46:234 DEBUG 3024 --- [http-nio-8085-exec-2] c.h.pay.mapper.PayOrderMapper.update     : ==>  Preparing: UPDATE pay_order SET status=?,pay_success_time=? WHERE (id = ? AND status IN (?,?))
-19:31:46:235 DEBUG 3024 --- [http-nio-8085-exec-2] c.h.pay.mapper.PayOrderMapper.update     : ==> Parameters: 3(Integer), 2025-11-27T19:31:46.230064900(LocalDateTime), 1994006211676995585(Long), 0(Integer), 1(Integer)
-19:31:46:236 DEBUG 3024 --- [http-nio-8085-exec-2] c.h.pay.mapper.PayOrderMapper.update     : <==    Updates: 1
-19:31:46:686  INFO 3024 --- [nacos-grpc-client-executor-10] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Receive server push request, request = NotifySubscriberRequest, requestId = 21
-19:31:46:686  INFO 3024 --- [nacos-grpc-client-executor-10] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Ack server push request, request = NotifySubscriberRequest, requestId = 21
-19:43:06:294 DEBUG 3024 --- [http-nio-8085-exec-3] c.h.pay.mapper.PayOrderMapper.selectOne  : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE (biz_order_no = ?)
-19:43:06:294 DEBUG 3024 --- [http-nio-8085-exec-3] c.h.pay.mapper.PayOrderMapper.selectOne  : ==> Parameters: 1994006206815813633(Long)
-19:43:06:296 DEBUG 3024 --- [http-nio-8085-exec-3] c.h.pay.mapper.PayOrderMapper.selectOne  : <==      Total: 1
-19:43:54:313 DEBUG 3024 --- [http-nio-8085-exec-5] c.h.pay.mapper.PayOrderMapper.selectOne  : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE (biz_order_no = ?)
-19:43:54:314 DEBUG 3024 --- [http-nio-8085-exec-5] c.h.pay.mapper.PayOrderMapper.selectOne  : ==> Parameters: 1994009279693004802(Long)
-19:43:54:315 DEBUG 3024 --- [http-nio-8085-exec-5] c.h.pay.mapper.PayOrderMapper.selectOne  : <==      Total: 0
-19:43:54:317 DEBUG 3024 --- [http-nio-8085-exec-5] c.h.pay.mapper.PayOrderMapper.insert     : ==>  Preparing: INSERT INTO pay_order ( id, biz_order_no, pay_order_no, biz_user_id, pay_channel_code, amount, pay_type, status, pay_over_time ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ? )
-19:43:54:318 DEBUG 3024 --- [http-nio-8085-exec-5] c.h.pay.mapper.PayOrderMapper.insert     : ==> Parameters: 1994009281710391297(Long), 1994009279693004802(Long), 1994009281702002690(Long), 1(Long), balance(String), 379500(Integer), 5(Integer), 1(Integer), 2025-11-27T21:43:54.316308800(LocalDateTime)
-19:43:54:321 DEBUG 3024 --- [http-nio-8085-exec-5] c.h.pay.mapper.PayOrderMapper.insert     : <==    Updates: 1
-19:44:04:100 DEBUG 3024 --- [http-nio-8085-exec-6] c.h.pay.mapper.PayOrderMapper.selectOne  : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE (biz_order_no = ?)
-19:44:04:101 DEBUG 3024 --- [http-nio-8085-exec-6] c.h.pay.mapper.PayOrderMapper.selectOne  : ==> Parameters: 1994009279693004802(Long)
-19:44:04:102 DEBUG 3024 --- [http-nio-8085-exec-6] c.h.pay.mapper.PayOrderMapper.selectOne  : <==      Total: 1
-19:45:47:699 DEBUG 3024 --- [http-nio-8085-exec-9] c.h.p.mapper.PayOrderMapper.selectById   : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE id=?
-19:45:47:699 DEBUG 3024 --- [http-nio-8085-exec-9] c.h.p.mapper.PayOrderMapper.selectById   : ==> Parameters: 1994009281710391297(Long)
-19:45:47:700 DEBUG 3024 --- [http-nio-8085-exec-9] c.h.p.mapper.PayOrderMapper.selectById   : <==      Total: 1
-19:45:47:701 DEBUG 3024 --- [http-nio-8085-exec-9] com.hmall.api.client.UserClient          : [UserClient#deductMoney] ---> PUT http://user-service/users/money/deduct?pw=123&amount=379500 HTTP/1.1
-19:45:47:701 DEBUG 3024 --- [http-nio-8085-exec-9] com.hmall.api.client.UserClient          : [UserClient#deductMoney] user-info: 1
-19:45:47:701 DEBUG 3024 --- [http-nio-8085-exec-9] com.hmall.api.client.UserClient          : [UserClient#deductMoney] ---> END HTTP (0-byte body)
-19:45:47:776 DEBUG 3024 --- [http-nio-8085-exec-9] com.hmall.api.client.UserClient          : [UserClient#deductMoney] <--- HTTP/1.1 200  (74ms)
-19:45:47:776 DEBUG 3024 --- [http-nio-8085-exec-9] com.hmall.api.client.UserClient          : [UserClient#deductMoney] connection: keep-alive
-19:45:47:776 DEBUG 3024 --- [http-nio-8085-exec-9] com.hmall.api.client.UserClient          : [UserClient#deductMoney] content-length: 0
-19:45:47:776 DEBUG 3024 --- [http-nio-8085-exec-9] com.hmall.api.client.UserClient          : [UserClient#deductMoney] date: Thu, 27 Nov 2025 11:45:47 GMT
-19:45:47:776 DEBUG 3024 --- [http-nio-8085-exec-9] com.hmall.api.client.UserClient          : [UserClient#deductMoney] keep-alive: timeout=60
-19:45:47:776 DEBUG 3024 --- [http-nio-8085-exec-9] com.hmall.api.client.UserClient          : [UserClient#deductMoney] <--- END HTTP (0-byte body)
-19:45:47:777 DEBUG 3024 --- [http-nio-8085-exec-9] c.h.pay.mapper.PayOrderMapper.update     : ==>  Preparing: UPDATE pay_order SET status=?,pay_success_time=? WHERE (id = ? AND status IN (?,?))
-19:45:47:778 DEBUG 3024 --- [http-nio-8085-exec-9] c.h.pay.mapper.PayOrderMapper.update     : ==> Parameters: 3(Integer), 2025-11-27T19:45:47.776676700(LocalDateTime), 1994009281710391297(Long), 0(Integer), 1(Integer)
-19:45:47:779 DEBUG 3024 --- [http-nio-8085-exec-9] c.h.pay.mapper.PayOrderMapper.update     : <==    Updates: 1
-21:05:18:902 ERROR 3024 --- [nacos-grpc-client-executor-1161] c.a.n.c.remote.client.grpc.GrpcClient    : [1764243091306_192.168.100.1_7866]Request stream error, switch server,error={}
-
-com.alibaba.nacos.shaded.io.grpc.StatusRuntimeException: CANCELLED: HTTP/2 error code: CANCEL
-Received Rst Stream
-	at com.alibaba.nacos.shaded.io.grpc.Status.asRuntimeException(Status.java:533) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.stub.ClientCalls$StreamObserverToCallListenerAdapter.onClose(ClientCalls.java:442) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.CensusStatsModule$StatsClientInterceptor$1$1.onClose(CensusStatsModule.java:700) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.CensusTracingModule$TracingClientInterceptor$1$1.onClose(CensusTracingModule.java:399) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl.closeObserver(ClientCallImpl.java:510) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl.access$300(ClientCallImpl.java:66) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.close(ClientCallImpl.java:630) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.access$700(ClientCallImpl.java:518) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInternal(ClientCallImpl.java:692) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInContext(ClientCallImpl.java:681) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ContextRunnable.run(ContextRunnable.java:37) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.SerializingExecutor.run(SerializingExecutor.java:123) ~[nacos-client-2.0.4.jar:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628) ~[na:na]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-
-21:05:18:902 ERROR 3024 --- [nacos-grpc-client-executor-1163] c.a.n.c.remote.client.grpc.GrpcClient    : [1764243095330_192.168.100.1_7868]Request stream error, switch server,error={}
-
-com.alibaba.nacos.shaded.io.grpc.StatusRuntimeException: UNAVAILABLE: HTTP/2 error code: NO_ERROR
-Received Goaway
-app_requested
-	at com.alibaba.nacos.shaded.io.grpc.Status.asRuntimeException(Status.java:533) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.stub.ClientCalls$StreamObserverToCallListenerAdapter.onClose(ClientCalls.java:442) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.CensusStatsModule$StatsClientInterceptor$1$1.onClose(CensusStatsModule.java:700) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.CensusTracingModule$TracingClientInterceptor$1$1.onClose(CensusTracingModule.java:399) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl.closeObserver(ClientCallImpl.java:510) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl.access$300(ClientCallImpl.java:66) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.close(ClientCallImpl.java:630) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.access$700(ClientCallImpl.java:518) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInternal(ClientCallImpl.java:692) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInContext(ClientCallImpl.java:681) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ContextRunnable.run(ContextRunnable.java:37) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.SerializingExecutor.run(SerializingExecutor.java:123) ~[nacos-client-2.0.4.jar:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628) ~[na:na]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-
-21:05:18:908  INFO 3024 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [d5463202-7f38-488c-9bce-86361e951fc3_config-0] Try to reconnect to a new server, server is  not appointed, will choose a random server.
-21:05:18:908  INFO 3024 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Try to reconnect to a new server, server is  not appointed, will choose a random server.
-21:05:20:937 ERROR 3024 --- [com.alibaba.nacos.client.remote.worker] c.a.n.c.remote.client.grpc.GrpcClient    : Server check fail, please check server 192.168.100.128 ,port 9848 is available , error ={}
-
-java.util.concurrent.ExecutionException: com.alibaba.nacos.shaded.io.grpc.StatusRuntimeException: UNAVAILABLE: io exception
-	at com.alibaba.nacos.shaded.com.google.common.util.concurrent.AbstractFuture.getDoneValue(AbstractFuture.java:566) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.com.google.common.util.concurrent.AbstractFuture.get(AbstractFuture.java:445) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.serverCheck(GrpcClient.java:148) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.connectToServer(GrpcClient.java:264) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.reconnect(RpcClient.java:522) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.lambda$start$2(RpcClient.java:370) ~[nacos-client-2.0.4.jar:na]
-	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:515) ~[na:na]
-	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264) ~[na:na]
-	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:304) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628) ~[na:na]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-Caused by: com.alibaba.nacos.shaded.io.grpc.StatusRuntimeException: UNAVAILABLE: io exception
-	at com.alibaba.nacos.shaded.io.grpc.Status.asRuntimeException(Status.java:533) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.stub.ClientCalls$UnaryStreamToFuture.onClose(ClientCalls.java:490) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.CensusStatsModule$StatsClientInterceptor$1$1.onClose(CensusStatsModule.java:700) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.CensusTracingModule$TracingClientInterceptor$1$1.onClose(CensusTracingModule.java:399) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl.closeObserver(ClientCallImpl.java:510) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl.access$300(ClientCallImpl.java:66) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.close(ClientCallImpl.java:630) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.access$700(ClientCallImpl.java:518) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInternal(ClientCallImpl.java:692) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInContext(ClientCallImpl.java:681) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ContextRunnable.run(ContextRunnable.java:37) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.SerializingExecutor.run(SerializingExecutor.java:123) ~[nacos-client-2.0.4.jar:na]
-	... 3 common frames omitted
-Caused by: com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.AbstractChannel$AnnotatedConnectException: Connection refused: no further information: /192.168.100.128:9848
-Caused by: java.net.ConnectException: Connection refused: no further information
-	at java.base/sun.nio.ch.SocketChannelImpl.checkConnect(Native Method) ~[na:na]
-	at java.base/sun.nio.ch.SocketChannelImpl.finishConnect(SocketChannelImpl.java:779) ~[na:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.socket.nio.NioSocketChannel.doFinishConnect(NioSocketChannel.java:327) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.AbstractNioChannel$AbstractNioUnsafe.finishConnect(AbstractNioChannel.java:336) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.processSelectedKey(NioEventLoop.java:685) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.processSelectedKeysOptimized(NioEventLoop.java:632) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.processSelectedKeys(NioEventLoop.java:549) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:511) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.concurrent.SingleThreadEventExecutor$5.run(SingleThreadEventExecutor.java:918) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30) ~[nacos-client-2.0.4.jar:na]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-
-21:05:20:937 ERROR 3024 --- [com.alibaba.nacos.client.remote.worker] c.a.n.c.remote.client.grpc.GrpcClient    : Server check fail, please check server 192.168.100.128 ,port 9848 is available , error ={}
-
-java.util.concurrent.ExecutionException: com.alibaba.nacos.shaded.io.grpc.StatusRuntimeException: UNAVAILABLE: io exception
-	at com.alibaba.nacos.shaded.com.google.common.util.concurrent.AbstractFuture.getDoneValue(AbstractFuture.java:566) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.com.google.common.util.concurrent.AbstractFuture.get(AbstractFuture.java:445) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.serverCheck(GrpcClient.java:148) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.connectToServer(GrpcClient.java:264) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.reconnect(RpcClient.java:522) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.lambda$start$2(RpcClient.java:370) ~[nacos-client-2.0.4.jar:na]
-	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:515) ~[na:na]
-	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264) ~[na:na]
-	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:304) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628) ~[na:na]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-Caused by: com.alibaba.nacos.shaded.io.grpc.StatusRuntimeException: UNAVAILABLE: io exception
-	at com.alibaba.nacos.shaded.io.grpc.Status.asRuntimeException(Status.java:533) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.stub.ClientCalls$UnaryStreamToFuture.onClose(ClientCalls.java:490) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.CensusStatsModule$StatsClientInterceptor$1$1.onClose(CensusStatsModule.java:700) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.PartialForwardingClientCallListener.onClose(PartialForwardingClientCallListener.java:39) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener.onClose(ForwardingClientCallListener.java:23) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.ForwardingClientCallListener$SimpleForwardingClientCallListener.onClose(ForwardingClientCallListener.java:40) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.CensusTracingModule$TracingClientInterceptor$1$1.onClose(CensusTracingModule.java:399) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl.closeObserver(ClientCallImpl.java:510) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl.access$300(ClientCallImpl.java:66) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.close(ClientCallImpl.java:630) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl.access$700(ClientCallImpl.java:518) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInternal(ClientCallImpl.java:692) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInContext(ClientCallImpl.java:681) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.ContextRunnable.run(ContextRunnable.java:37) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.internal.SerializingExecutor.run(SerializingExecutor.java:123) ~[nacos-client-2.0.4.jar:na]
-	... 3 common frames omitted
-Caused by: com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.AbstractChannel$AnnotatedConnectException: Connection refused: no further information: /192.168.100.128:9848
-Caused by: java.net.ConnectException: Connection refused: no further information
-	at java.base/sun.nio.ch.SocketChannelImpl.checkConnect(Native Method) ~[na:na]
-	at java.base/sun.nio.ch.SocketChannelImpl.finishConnect(SocketChannelImpl.java:779) ~[na:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.socket.nio.NioSocketChannel.doFinishConnect(NioSocketChannel.java:327) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.AbstractNioChannel$AbstractNioUnsafe.finishConnect(AbstractNioChannel.java:336) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.processSelectedKey(NioEventLoop.java:685) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.processSelectedKeysOptimized(NioEventLoop.java:632) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.processSelectedKeys(NioEventLoop.java:549) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:511) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.concurrent.SingleThreadEventExecutor$5.run(SingleThreadEventExecutor.java:918) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30) ~[nacos-client-2.0.4.jar:na]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-
-21:05:24:047 ERROR 3024 --- [com.alibaba.nacos.client.remote.worker] c.a.n.c.remote.client.grpc.GrpcClient    : Server check fail, please check server 192.168.100.128 ,port 9848 is available , error ={}
-
-java.util.concurrent.TimeoutException: Waited 3000 milliseconds (plus 1 milliseconds, 477100 nanoseconds delay) for com.alibaba.nacos.shaded.io.grpc.stub.ClientCalls$GrpcFuture@263acd21[status=PENDING, info=[GrpcFuture{clientCall={delegate={delegate=ClientCallImpl{method=MethodDescriptor{fullMethodName=Request/request, type=UNARY, idempotent=false, safe=false, sampledToLocalTracing=true, requestMarshaller=com.alibaba.nacos.shaded.io.grpc.protobuf.lite.ProtoLiteUtils$MessageMarshaller@7d8f9287, responseMarshaller=com.alibaba.nacos.shaded.io.grpc.protobuf.lite.ProtoLiteUtils$MessageMarshaller@76c4caae, schemaDescriptor=com.alibaba.nacos.api.grpc.auto.RequestGrpc$RequestMethodDescriptorSupplier@56a56a80}}}}}]]
-	at com.alibaba.nacos.shaded.com.google.common.util.concurrent.AbstractFuture.get(AbstractFuture.java:508) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.serverCheck(GrpcClient.java:148) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.connectToServer(GrpcClient.java:264) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.reconnect(RpcClient.java:522) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.lambda$start$2(RpcClient.java:370) ~[nacos-client-2.0.4.jar:na]
-	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:515) ~[na:na]
-	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264) ~[na:na]
-	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:304) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628) ~[na:na]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-
-21:05:24:047 ERROR 3024 --- [com.alibaba.nacos.client.remote.worker] c.a.n.c.remote.client.grpc.GrpcClient    : Server check fail, please check server 192.168.100.128 ,port 9848 is available , error ={}
-
-java.util.concurrent.TimeoutException: Waited 3000 milliseconds (plus 120000 nanoseconds delay) for com.alibaba.nacos.shaded.io.grpc.stub.ClientCalls$GrpcFuture@68e9b1a0[status=PENDING, info=[GrpcFuture{clientCall={delegate={delegate=ClientCallImpl{method=MethodDescriptor{fullMethodName=Request/request, type=UNARY, idempotent=false, safe=false, sampledToLocalTracing=true, requestMarshaller=com.alibaba.nacos.shaded.io.grpc.protobuf.lite.ProtoLiteUtils$MessageMarshaller@7d8f9287, responseMarshaller=com.alibaba.nacos.shaded.io.grpc.protobuf.lite.ProtoLiteUtils$MessageMarshaller@76c4caae, schemaDescriptor=com.alibaba.nacos.api.grpc.auto.RequestGrpc$RequestMethodDescriptorSupplier@56a56a80}}}}}]]
-	at com.alibaba.nacos.shaded.com.google.common.util.concurrent.AbstractFuture.get(AbstractFuture.java:508) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.serverCheck(GrpcClient.java:148) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.connectToServer(GrpcClient.java:264) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.reconnect(RpcClient.java:522) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.lambda$start$2(RpcClient.java:370) ~[nacos-client-2.0.4.jar:na]
-	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:515) ~[na:na]
-	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264) ~[na:na]
-	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:304) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628) ~[na:na]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-
-21:05:24:048  INFO 3024 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Fail to connect server, after trying 1 times, last try server is {serverIp = '192.168.100.128', server main port = 8848}, error = unknown
-21:05:24:048  INFO 3024 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [d5463202-7f38-488c-9bce-86361e951fc3_config-0] Fail to connect server, after trying 1 times, last try server is {serverIp = '192.168.100.128', server main port = 8848}, error = unknown
-21:05:24:409  WARN 3024 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Start destroying common HttpClient
-21:05:24:409  WARN 3024 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Start destroying Publisher
-21:05:24:409  WARN 3024 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Destruction of the end
-21:05:24:412  WARN 3024 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Destruction of the end
-21:05:25:408 ERROR 3024 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Send request fail, request = SubscribeServiceRequest{headers={app=unknown}, requestId='null'}, retryTimes = 0, errorMessage = Client not connected, current status:UNHEALTHY
-21:05:25:508 ERROR 3024 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Send request fail, request = SubscribeServiceRequest{headers={app=unknown}, requestId='null'}, retryTimes = 1, errorMessage = Client not connected, current status:UNHEALTHY
-21:05:25:608 ERROR 3024 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Send request fail, request = SubscribeServiceRequest{headers={app=unknown}, requestId='null'}, retryTimes = 2, errorMessage = Client not connected, current status:UNHEALTHY
-21:05:25:610 ERROR 3024 --- [SpringApplicationShutdownHook] c.a.cloud.nacos.discovery.NacosWatch     : namingService unsubscribe failed, properties:NacosDiscoveryProperties{serverAddr='192.168.100.128:8848', username='', password='', endpoint='', namespace='', watchDelay=30000, logName='', service='pay-service', weight=1.0, clusterName='DEFAULT', group='DEFAULT_GROUP', namingLoadCacheAtStart='false', metadata={preserved.register.source=SPRING_CLOUD}, registerEnabled=true, ip='216.1.1.22', networkInterface='', port=8085, secure=false, accessKey='', secretKey='', heartBeatInterval=null, heartBeatTimeout=null, ipDeleteTimeout=null, instanceEnabled=true, ephemeral=true, failureToleranceEnabled=false}, ipDeleteTimeout=null, failFast=true}
-
-com.alibaba.nacos.api.exception.NacosException: Request nacos server failed: 
-	at com.alibaba.nacos.client.naming.remote.gprc.NamingGrpcClientProxy.requestToServer(NamingGrpcClientProxy.java:290) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.remote.gprc.NamingGrpcClientProxy.doUnsubscribe(NamingGrpcClientProxy.java:260) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.remote.gprc.NamingGrpcClientProxy.unsubscribe(NamingGrpcClientProxy.java:241) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.remote.NamingClientProxyDelegate.unsubscribe(NamingClientProxyDelegate.java:157) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.NacosNamingService.unsubscribe(NacosNamingService.java:417) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.cloud.nacos.discovery.NacosWatch.stop(NacosWatch.java:174) ~[spring-cloud-starter-alibaba-nacos-discovery-2021.0.4.0.jar:2021.0.4.0]
-	at com.alibaba.cloud.nacos.discovery.NacosWatch.stop(NacosWatch.java:107) ~[spring-cloud-starter-alibaba-nacos-discovery-2021.0.4.0.jar:2021.0.4.0]
-	at org.springframework.context.support.DefaultLifecycleProcessor.doStop(DefaultLifecycleProcessor.java:234) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.context.support.DefaultLifecycleProcessor.access$300(DefaultLifecycleProcessor.java:54) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.context.support.DefaultLifecycleProcessor$LifecycleGroup.stop(DefaultLifecycleProcessor.java:373) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.context.support.DefaultLifecycleProcessor.stopBeans(DefaultLifecycleProcessor.java:206) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.context.support.DefaultLifecycleProcessor.onClose(DefaultLifecycleProcessor.java:129) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.context.support.AbstractApplicationContext.doClose(AbstractApplicationContext.java:1069) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext.doClose(ServletWebServerApplicationContext.java:174) ~[spring-boot-2.7.12.jar:2.7.12]
-	at org.springframework.context.support.AbstractApplicationContext.close(AbstractApplicationContext.java:1023) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.boot.SpringApplicationShutdownHook.closeAndWait(SpringApplicationShutdownHook.java:145) ~[spring-boot-2.7.12.jar:2.7.12]
-	at java.base/java.lang.Iterable.forEach(Iterable.java:75) ~[na:na]
-	at org.springframework.boot.SpringApplicationShutdownHook.run(SpringApplicationShutdownHook.java:114) ~[spring-boot-2.7.12.jar:2.7.12]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-Caused by: com.alibaba.nacos.api.exception.NacosException: Client not connected, current status:UNHEALTHY
-	at com.alibaba.nacos.common.remote.client.RpcClient.request(RpcClient.java:650) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.request(RpcClient.java:630) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.remote.gprc.NamingGrpcClientProxy.requestToServer(NamingGrpcClientProxy.java:280) ~[nacos-client-2.0.4.jar:na]
-	... 18 common frames omitted
-
-21:05:25:622  INFO 3024 --- [SpringApplicationShutdownHook] c.a.c.n.registry.NacosServiceRegistry    : De-registering from Nacos Server now...
-21:05:25:724 ERROR 3024 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Send request fail, request = InstanceRequest{headers={app=unknown}, requestId='null'}, retryTimes = 0, errorMessage = Client not connected, current status:UNHEALTHY
-21:05:25:824 ERROR 3024 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Send request fail, request = InstanceRequest{headers={app=unknown}, requestId='null'}, retryTimes = 1, errorMessage = Client not connected, current status:UNHEALTHY
-21:05:25:925 ERROR 3024 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Send request fail, request = InstanceRequest{headers={app=unknown}, requestId='null'}, retryTimes = 2, errorMessage = Client not connected, current status:UNHEALTHY
-21:05:25:927 ERROR 3024 --- [SpringApplicationShutdownHook] c.a.c.n.registry.NacosServiceRegistry    : ERR_NACOS_DEREGISTER, de-register failed...NacosRegistration{nacosDiscoveryProperties=NacosDiscoveryProperties{serverAddr='192.168.100.128:8848', username='', password='', endpoint='', namespace='', watchDelay=30000, logName='', service='pay-service', weight=1.0, clusterName='DEFAULT', group='DEFAULT_GROUP', namingLoadCacheAtStart='false', metadata={preserved.register.source=SPRING_CLOUD}, registerEnabled=true, ip='216.1.1.22', networkInterface='', port=8085, secure=false, accessKey='', secretKey='', heartBeatInterval=null, heartBeatTimeout=null, ipDeleteTimeout=null, instanceEnabled=true, ephemeral=true, failureToleranceEnabled=false}, ipDeleteTimeout=null, failFast=true}},
-
-com.alibaba.nacos.api.exception.NacosException: Request nacos server failed: 
-	at com.alibaba.nacos.client.naming.remote.gprc.NamingGrpcClientProxy.requestToServer(NamingGrpcClientProxy.java:290) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.remote.gprc.NamingGrpcClientProxy.doDeregisterService(NamingGrpcClientProxy.java:153) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.remote.gprc.NamingGrpcClientProxy.deregisterService(NamingGrpcClientProxy.java:139) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.remote.NamingClientProxyDelegate.deregisterService(NamingClientProxyDelegate.java:99) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.NacosNamingService.deregisterInstance(NacosNamingService.java:180) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.NacosNamingService.deregisterInstance(NacosNamingService.java:170) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.cloud.nacos.registry.NacosServiceRegistry.deregister(NacosServiceRegistry.java:106) ~[spring-cloud-starter-alibaba-nacos-discovery-2021.0.4.0.jar:2021.0.4.0]
-	at org.springframework.cloud.client.serviceregistry.AbstractAutoServiceRegistration.deregister(AbstractAutoServiceRegistration.java:249) ~[spring-cloud-commons-3.1.3.jar:3.1.3]
-	at org.springframework.cloud.client.serviceregistry.AbstractAutoServiceRegistration.stop(AbstractAutoServiceRegistration.java:264) ~[spring-cloud-commons-3.1.3.jar:3.1.3]
-	at org.springframework.cloud.client.serviceregistry.AbstractAutoServiceRegistration.destroy(AbstractAutoServiceRegistration.java:201) ~[spring-cloud-commons-3.1.3.jar:3.1.3]
-	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
-	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62) ~[na:na]
-	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
-	at java.base/java.lang.reflect.Method.invoke(Method.java:566) ~[na:na]
-	at org.springframework.beans.factory.annotation.InitDestroyAnnotationBeanPostProcessor$LifecycleElement.invoke(InitDestroyAnnotationBeanPostProcessor.java:389) ~[spring-beans-5.3.27.jar:5.3.27]
-	at org.springframework.beans.factory.annotation.InitDestroyAnnotationBeanPostProcessor$LifecycleMetadata.invokeDestroyMethods(InitDestroyAnnotationBeanPostProcessor.java:347) ~[spring-beans-5.3.27.jar:5.3.27]
-	at org.springframework.beans.factory.annotation.InitDestroyAnnotationBeanPostProcessor.postProcessBeforeDestruction(InitDestroyAnnotationBeanPostProcessor.java:177) ~[spring-beans-5.3.27.jar:5.3.27]
-	at org.springframework.beans.factory.support.DisposableBeanAdapter.destroy(DisposableBeanAdapter.java:197) ~[spring-beans-5.3.27.jar:5.3.27]
-	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.destroyBean(DefaultSingletonBeanRegistry.java:587) ~[spring-beans-5.3.27.jar:5.3.27]
-	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.destroySingleton(DefaultSingletonBeanRegistry.java:559) ~[spring-beans-5.3.27.jar:5.3.27]
-	at org.springframework.beans.factory.support.DefaultListableBeanFactory.destroySingleton(DefaultListableBeanFactory.java:1163) ~[spring-beans-5.3.27.jar:5.3.27]
-	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.destroySingletons(DefaultSingletonBeanRegistry.java:520) ~[spring-beans-5.3.27.jar:5.3.27]
-	at org.springframework.beans.factory.support.DefaultListableBeanFactory.destroySingletons(DefaultListableBeanFactory.java:1156) ~[spring-beans-5.3.27.jar:5.3.27]
-	at org.springframework.context.support.AbstractApplicationContext.destroyBeans(AbstractApplicationContext.java:1108) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.context.support.AbstractApplicationContext.doClose(AbstractApplicationContext.java:1077) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext.doClose(ServletWebServerApplicationContext.java:174) ~[spring-boot-2.7.12.jar:2.7.12]
-	at org.springframework.context.support.AbstractApplicationContext.close(AbstractApplicationContext.java:1023) ~[spring-context-5.3.27.jar:5.3.27]
-	at org.springframework.boot.SpringApplicationShutdownHook.closeAndWait(SpringApplicationShutdownHook.java:145) ~[spring-boot-2.7.12.jar:2.7.12]
-	at java.base/java.lang.Iterable.forEach(Iterable.java:75) ~[na:na]
-	at org.springframework.boot.SpringApplicationShutdownHook.run(SpringApplicationShutdownHook.java:114) ~[spring-boot-2.7.12.jar:2.7.12]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-Caused by: com.alibaba.nacos.api.exception.NacosException: Client not connected, current status:UNHEALTHY
-	at com.alibaba.nacos.common.remote.client.RpcClient.request(RpcClient.java:650) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.request(RpcClient.java:630) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.client.naming.remote.gprc.NamingGrpcClientProxy.requestToServer(NamingGrpcClientProxy.java:280) ~[nacos-client-2.0.4.jar:na]
-	... 30 common frames omitted
-
-21:05:25:928  INFO 3024 --- [SpringApplicationShutdownHook] c.a.c.n.registry.NacosServiceRegistry    : De-registration finished.
-21:05:26:237  INFO 3024 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Shutdown rpc client, set status to shutdown
-21:05:26:237  INFO 3024 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Shutdown client event executor java.util.concurrent.ScheduledThreadPoolExecutor@4916d17c[Running, pool size = 2, active threads = 2, queued tasks = 0, completed tasks = 0]
-21:05:26:237  INFO 3024 --- [SpringApplicationShutdownHook] com.alibaba.nacos.common.remote.client   : Close current connection 1764243095330_192.168.100.1_7868
-21:05:26:238 ERROR 3024 --- [com.alibaba.nacos.client.remote.worker] c.a.n.c.remote.client.grpc.GrpcClient    : Server check fail, please check server 192.168.100.128 ,port 9848 is available , error ={}
-
-java.lang.InterruptedException: null
-	at com.alibaba.nacos.shaded.com.google.common.util.concurrent.AbstractFuture.get(AbstractFuture.java:438) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.serverCheck(GrpcClient.java:148) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.grpc.GrpcClient.connectToServer(GrpcClient.java:264) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.reconnect(RpcClient.java:522) ~[nacos-client-2.0.4.jar:na]
-	at com.alibaba.nacos.common.remote.client.RpcClient.lambda$start$2(RpcClient.java:370) ~[nacos-client-2.0.4.jar:na]
-	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:515) ~[na:na]
-	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264) ~[na:na]
-	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:304) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128) ~[na:na]
-	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628) ~[na:na]
-	at java.base/java.lang.Thread.run(Thread.java:834) ~[na:na]
-
-21:05:26:238  INFO 3024 --- [SpringApplicationShutdownHook] c.a.n.c.remote.client.grpc.GrpcClient    : Shutdown grpc executor java.util.concurrent.ThreadPoolExecutor@77c85c90[Running, pool size = 4, active threads = 0, queued tasks = 0, completed tasks = 1167]
-21:05:26:239  INFO 3024 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : Close current connection 1764243095330_192.168.100.1_7868
-21:05:26:239  INFO 3024 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [403e542c-9edc-4633-82a1-4f19fc23bbfa] Fail to connect server, after trying 2 times, last try server is {serverIp = '192.168.100.128', server main port = 8848}, error = unknown
-21:05:26:254  INFO 3024 --- [SpringApplicationShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
-21:05:26:279  INFO 3024 --- [SpringApplicationShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+11:34:19:153  INFO 36764 --- [main] com.hmall.pay.PayApplication             : The following 1 profile is active: "local"
+11:34:20:385  INFO 36764 --- [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=ded5cced-3925-320b-b0b6-75eb6e60482d
+11:34:20:442  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'io.seata.spring.boot.autoconfigure.SeataCoreAutoConfiguration' of type [io.seata.spring.boot.autoconfigure.SeataCoreAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:443  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'springApplicationContextProvider' of type [io.seata.spring.boot.autoconfigure.provider.SpringApplicationContextProvider] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:443  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'io.seata.spring.boot.autoconfigure.SeataAutoConfiguration' of type [io.seata.spring.boot.autoconfigure.SeataAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:474  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'failureHandler' of type [io.seata.tm.api.DefaultFailureHandlerImpl] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:477  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'org.springframework.cloud.commons.config.CommonsConfigAutoConfiguration' of type [org.springframework.cloud.commons.config.CommonsConfigAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:478  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'org.springframework.cloud.client.loadbalancer.LoadBalancerDefaultMappingsProviderAutoConfiguration' of type [org.springframework.cloud.client.loadbalancer.LoadBalancerDefaultMappingsProviderAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:479  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'loadBalancerClientsDefaultsMappingsProvider' of type [org.springframework.cloud.client.loadbalancer.LoadBalancerDefaultMappingsProviderAutoConfiguration$$Lambda$562/0x000000080067fc40] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:480  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'defaultsBindHandlerAdvisor' of type [org.springframework.cloud.commons.config.DefaultsBindHandlerAdvisor] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:484  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'springCloudAlibabaConfiguration' of type [io.seata.spring.boot.autoconfigure.properties.SpringCloudAlibabaConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:487  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'seataProperties' of type [io.seata.spring.boot.autoconfigure.properties.SeataProperties] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:20:491  INFO 36764 --- [main] i.s.s.b.a.SeataAutoConfiguration         : Automatically configure Seata
+11:34:20:540  INFO 36764 --- [main] io.seata.config.ConfigurationFactory     : load Configuration from :Spring Configuration
+11:34:20:544  INFO 36764 --- [main] io.seata.config.ConfigurationFactory     : load Configuration from :Spring Configuration
+11:34:20:621  INFO 36764 --- [main] i.s.s.a.GlobalTransactionScanner         : Initializing Global Transaction Clients ... 
+11:34:20:715  INFO 36764 --- [main] i.s.core.rpc.netty.NettyClientBootstrap  : NettyClientBootstrap has started
+11:34:20:870  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [RpcClientFactory] create a new rpc client of 92d0430d-2d72-485e-b58a-21843938009c
+11:34:20:871  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] RpcClient init label, labels = {module=naming, source=sdk}
+11:34:20:872  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] RpcClient init, ServerListFactory = com.alibaba.nacos.client.naming.core.ServerListManager
+11:34:20:872  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] Registry connection listener to current client:com.alibaba.nacos.client.naming.remote.gprc.redo.NamingGrpcRedoService
+11:34:20:872  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] Register server push request handler:com.alibaba.nacos.client.naming.remote.gprc.NamingPushRequestHandler
+11:34:20:872  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] Try to connect to server on start up, server: {serverIp = '192.168.100.128', server main port = 8848}
+11:34:20:987  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] Success to connect to server [192.168.100.128:8848] on start up, connectionId = 1767065659315_192.168.100.1_7566
+11:34:20:987  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$ConnectResetRequestHandler
+11:34:20:987  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$$Lambda$470/0x000000080049e840
+11:34:20:987  INFO 36764 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] Notify connected event to listeners.
+11:34:21:017  INFO 36764 --- [main] i.s.c.r.netty.NettyClientChannelManager  : will connect to 192.168.100.128:8099
+11:34:21:485  INFO 36764 --- [main] i.s.core.rpc.netty.NettyPoolableFactory  : NettyPool create channel to transactionRole:TMROLE,address:192.168.100.128:8099,msg:< RegisterTMRequest{applicationId='pay-service', transactionServiceGroup='hmall'} >
+11:34:21:602  INFO 36764 --- [nacos-grpc-client-executor-5] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] Receive server push request, request = NotifySubscriberRequest, requestId = 9
+11:34:21:604  INFO 36764 --- [nacos-grpc-client-executor-5] com.alibaba.nacos.common.remote.client   : [92d0430d-2d72-485e-b58a-21843938009c] Ack server push request, request = NotifySubscriberRequest, requestId = 9
+11:34:22:020  INFO 36764 --- [main] i.s.c.rpc.netty.TmNettyRemotingClient    : register TM success. client version:1.5.2, server version:1.5.2,channel:[id: 0x12987804, L:/192.168.100.1:7569 - R:/192.168.100.128:8099]
+11:34:22:037  INFO 36764 --- [main] i.s.core.rpc.netty.NettyPoolableFactory  : register success, cost 69 ms, version:1.5.2,role:TMROLE,channel:[id: 0x12987804, L:/192.168.100.1:7569 - R:/192.168.100.128:8099]
+11:34:22:038  INFO 36764 --- [main] i.s.s.a.GlobalTransactionScanner         : Transaction Manager Client is initialized. applicationId[pay-service] txServiceGroup[hmall]
+11:34:22:050  INFO 36764 --- [main] io.seata.rm.datasource.AsyncWorker       : Async Commit Buffer Limit: 10000
+11:34:22:050  INFO 36764 --- [main] i.s.rm.datasource.xa.ResourceManagerXA   : ResourceManagerXA init ...
+11:34:22:057  INFO 36764 --- [main] i.s.core.rpc.netty.NettyClientBootstrap  : NettyClientBootstrap has started
+11:34:22:057  INFO 36764 --- [main] i.s.s.a.GlobalTransactionScanner         : Resource Manager is initialized. applicationId[pay-service] txServiceGroup[hmall]
+11:34:22:057  INFO 36764 --- [main] i.s.s.a.GlobalTransactionScanner         : Global Transaction Clients are initialized. 
+11:34:22:059  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'io.seata.spring.boot.autoconfigure.SeataDataSourceAutoConfiguration' of type [io.seata.spring.boot.autoconfigure.SeataDataSourceAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:22:239  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'com.alibaba.cloud.seata.feign.SeataFeignClientAutoConfiguration$FeignBeanPostProcessorConfiguration' of type [com.alibaba.cloud.seata.feign.SeataFeignClientAutoConfiguration$FeignBeanPostProcessorConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:22:243  INFO 36764 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'seataFeignObjectWrapper' of type [com.alibaba.cloud.seata.feign.SeataFeignObjectWrapper] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+11:34:22:570  INFO 36764 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port(s): 8085 (http)
+11:34:22:580  INFO 36764 --- [main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+11:34:22:581  INFO 36764 --- [main] org.apache.catalina.core.StandardEngine  : Starting Servlet engine: [Apache Tomcat/9.0.75]
+11:34:22:743  INFO 36764 --- [main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+11:34:22:743  INFO 36764 --- [main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 3566 ms
+11:34:22:963  INFO 36764 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'user-service' URL not provided. Will try picking an instance via load-balancing.
+11:34:23:207  INFO 36764 --- [main] o.s.c.openfeign.FeignClientFactoryBean   : For 'trade-service' URL not provided. Will try picking an instance via load-balancing.
+11:34:23:399  INFO 36764 --- [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+11:34:23:598  INFO 36764 --- [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+11:34:23:683  INFO 36764 --- [main] i.s.c.r.netty.NettyClientChannelManager  : will connect to 192.168.100.128:8099
+11:34:23:683  INFO 36764 --- [main] i.s.c.rpc.netty.RmNettyRemotingClient    : RM will register :jdbc:mysql://192.168.100.128:3308/hm-pay
+11:34:23:684  INFO 36764 --- [main] i.s.core.rpc.netty.NettyPoolableFactory  : NettyPool create channel to transactionRole:RMROLE,address:192.168.100.128:8099,msg:< RegisterRMRequest{resourceIds='jdbc:mysql://192.168.100.128:3308/hm-pay', applicationId='pay-service', transactionServiceGroup='hmall'} >
+11:34:23:691  INFO 36764 --- [main] i.s.c.rpc.netty.RmNettyRemotingClient    : register RM success. client version:1.5.2, server version:1.5.2,channel:[id: 0xbd803aed, L:/192.168.100.1:7579 - R:/192.168.100.128:8099]
+11:34:23:691  INFO 36764 --- [main] i.s.core.rpc.netty.NettyPoolableFactory  : register success, cost 5 ms, version:1.5.2,role:RMROLE,channel:[id: 0xbd803aed, L:/192.168.100.1:7579 - R:/192.168.100.128:8099]
+11:34:25:361  INFO 36764 --- [main] i.s.s.a.GlobalTransactionScanner         : Bean[com.hmall.pay.service.impl.PayOrderServiceImpl$$EnhancerBySpringCGLIB$$b46103a2] with name [payOrderServiceImpl] would use interceptor [io.seata.spring.annotation.GlobalTransactionalInterceptor]
+11:34:26:398  INFO 36764 --- [main] pertySourcedRequestMappingHandlerMapping : Mapped URL path [/v2/api-docs] onto method [springfox.documentation.swagger2.web.Swagger2ControllerWebMvc#getDocumentation(String, HttpServletRequest)]
+11:34:27:142  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [RpcClientFactory] create a new rpc client of 2600c217-b275-409b-8774-82b2193e2c43
+11:34:27:142  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] RpcClient init label, labels = {module=naming, source=sdk}
+11:34:27:142  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] RpcClient init, ServerListFactory = com.alibaba.nacos.client.naming.core.ServerListManager
+11:34:27:143  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Registry connection listener to current client:com.alibaba.nacos.client.naming.remote.gprc.redo.NamingGrpcRedoService
+11:34:27:143  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Register server push request handler:com.alibaba.nacos.client.naming.remote.gprc.NamingPushRequestHandler
+11:34:27:143  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Try to connect to server on start up, server: {serverIp = '192.168.100.128', server main port = 8848}
+11:34:27:260  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Success to connect to server [192.168.100.128:8848] on start up, connectionId = 1767065665588_192.168.100.1_7604
+11:34:27:260  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$ConnectResetRequestHandler
+11:34:27:260  INFO 36764 --- [main] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Register server push request handler:com.alibaba.nacos.common.remote.client.RpcClient$$Lambda$470/0x000000080049e840
+11:34:27:260  INFO 36764 --- [com.alibaba.nacos.client.remote.worker] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Notify connected event to listeners.
+11:34:27:275  INFO 36764 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port(s): 8085 (http) with context path ''
+11:34:27:283  INFO 36764 --- [main] c.a.c.n.registry.NacosServiceRegistry    : nacos registry, DEFAULT_GROUP pay-service 169.254.111.236:8085 register finished
+11:34:27:848  INFO 36764 --- [nacos-grpc-client-executor-7] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Receive server push request, request = NotifySubscriberRequest, requestId = 11
+11:34:27:849  INFO 36764 --- [nacos-grpc-client-executor-7] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Ack server push request, request = NotifySubscriberRequest, requestId = 11
+11:34:27:864  INFO 36764 --- [main] d.s.w.p.DocumentationPluginsBootstrapper : Documentation plugins bootstrapped
+11:34:27:866  INFO 36764 --- [main] d.s.w.p.DocumentationPluginsBootstrapper : Found 1 custom documentation plugin(s)
+11:34:27:884  INFO 36764 --- [main] s.d.s.w.s.ApiListingReferenceScanner     : Scanning for api listing references
+11:34:27:897  INFO 36764 --- [main] com.hmall.pay.PayApplication             : Started PayApplication in 14.823 seconds (JVM running for 16.286)
+11:34:27:903  INFO 36764 --- [main] c.a.c.n.refresh.NacosContextRefresher    : [Nacos Config] Listening config: dataId=pay-service, group=DEFAULT_GROUP
+11:34:27:904  INFO 36764 --- [main] c.a.c.n.refresh.NacosContextRefresher    : [Nacos Config] Listening config: dataId=pay-service.yaml, group=DEFAULT_GROUP
+11:34:27:905  INFO 36764 --- [main] c.a.c.n.refresh.NacosContextRefresher    : [Nacos Config] Listening config: dataId=pay-service-local.yaml, group=DEFAULT_GROUP
+11:34:27:954 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:34:27:971 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:34:27:985 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:34:37:990 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:34:37:991 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:34:37:992 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:34:47:994 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:34:47:995 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:34:47:996 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:34:58:000 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:34:58:000 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:34:58:001 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:35:08:003 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:35:08:004 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:35:08:005 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:35:18:007 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:35:18:008 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:35:18:008 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:35:28:013 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:35:28:013 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:35:28:015 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:35:38:017 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:35:38:018 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:35:38:019 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:35:48:021 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:35:48:022 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:35:48:023 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:35:58:027 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:35:58:028 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:35:58:029 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:36:08:032 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:36:08:033 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:36:08:034 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:36:18:036 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:36:18:037 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:36:18:038 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:36:28:039 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:36:28:039 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:36:28:040 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:36:38:043 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:36:38:044 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:36:38:045 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:36:38:474  INFO 36764 --- [http-nio-8085-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+11:36:38:474  INFO 36764 --- [http-nio-8085-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+11:36:38:476  INFO 36764 --- [http-nio-8085-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 2 ms
+11:36:38:528 DEBUG 36764 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.selectOne  : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE (biz_order_no = ?)
+11:36:38:529 DEBUG 36764 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.selectOne  : ==> Parameters: 2005845451784294402(Long)
+11:36:38:554 DEBUG 36764 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.selectOne  : <==      Total: 0
+11:36:38:595 DEBUG 36764 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.insert     : ==>  Preparing: INSERT INTO pay_order ( id, biz_order_no, pay_order_no, biz_user_id, pay_channel_code, amount, pay_type, status, pay_over_time ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ? )
+11:36:38:597 DEBUG 36764 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.insert     : ==> Parameters: 2005845457765339138(Long), 2005845451784294402(Long), 2005845457748561921(Long), 1(Long), balance(String), 379500(Integer), 5(Integer), 1(Integer), 2025-12-30T13:36:38.589667(LocalDateTime)
+11:36:38:602 DEBUG 36764 --- [http-nio-8085-exec-1] c.h.pay.mapper.PayOrderMapper.insert     : <==    Updates: 1
+11:36:42:012  INFO 36764 --- [http-nio-8085-exec-2] io.seata.tm.TransactionManagerHolder     : TransactionManager Singleton io.seata.tm.DefaultTransactionManager@3c792d74
+11:36:42:024  INFO 36764 --- [http-nio-8085-exec-2] i.seata.tm.api.DefaultGlobalTransaction  : Begin new global transaction [192.168.100.128:8099:27753261064335373]
+11:36:42:028 DEBUG 36764 --- [http-nio-8085-exec-2] c.h.p.mapper.PayOrderMapper.selectById   : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE id=?
+11:36:42:076 DEBUG 36764 --- [http-nio-8085-exec-2] c.h.p.mapper.PayOrderMapper.selectById   : ==> Parameters: 2005845457765339138(Long)
+11:36:42:083 DEBUG 36764 --- [http-nio-8085-exec-2] c.h.p.mapper.PayOrderMapper.selectById   : <==      Total: 1
+11:36:42:087 DEBUG 36764 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] ---> PUT http://user-service/users/money/deduct?pw=123&amount=379500 HTTP/1.1
+11:36:42:087 DEBUG 36764 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] user-info: 1
+11:36:42:087 DEBUG 36764 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] ---> END HTTP (0-byte body)
+11:36:42:550 DEBUG 36764 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] <--- HTTP/1.1 200  (463ms)
+11:36:42:550 DEBUG 36764 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] connection: keep-alive
+11:36:42:550 DEBUG 36764 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] content-length: 0
+11:36:42:550 DEBUG 36764 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] date: Tue, 30 Dec 2025 03:36:42 GMT
+11:36:42:550 DEBUG 36764 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] keep-alive: timeout=60
+11:36:42:550 DEBUG 36764 --- [http-nio-8085-exec-2] com.hmall.api.client.UserClient          : [UserClient#deductMoney] <--- END HTTP (0-byte body)
+11:36:42:554 DEBUG 36764 --- [http-nio-8085-exec-2] c.h.pay.mapper.PayOrderMapper.update     : ==>  Preparing: UPDATE pay_order SET status=?,pay_success_time=? WHERE (id = ? AND status IN (?,?))
+11:36:42:567 DEBUG 36764 --- [http-nio-8085-exec-2] c.h.pay.mapper.PayOrderMapper.update     : ==> Parameters: 3(Integer), 2025-12-30T11:36:42.550970600(LocalDateTime), 2005845457765339138(Long), 0(Integer), 1(Integer)
+11:36:42:666 DEBUG 36764 --- [http-nio-8085-exec-2] c.h.pay.mapper.PayOrderMapper.update     : <==    Updates: 1
+11:36:42:667 DEBUG 36764 --- [http-nio-8085-exec-2] c.h.p.mapper.LocalMessageMapper.insert   : ==>  Preparing: INSERT INTO t_local_message ( message_id, exchange, routing_key, message_body, status, try_count ) VALUES ( ?, ?, ?, ?, ?, ? )
+11:36:42:667 DEBUG 36764 --- [http-nio-8085-exec-2] c.h.p.mapper.LocalMessageMapper.insert   : ==> Parameters: 2005845451784294402_pay_success(String), pay.direct(String), pay.success(String), 2005845451784294402(Long), 0(Integer), 0(Integer)
+11:36:42:719 DEBUG 36764 --- [http-nio-8085-exec-2] c.h.p.mapper.LocalMessageMapper.insert   : <==    Updates: 1
+11:36:42:731  INFO 36764 --- [http-nio-8085-exec-2] i.seata.tm.api.DefaultGlobalTransaction  : Suspending current transaction, xid = 192.168.100.128:8099:27753261064335373
+11:36:42:731  INFO 36764 --- [http-nio-8085-exec-2] i.seata.tm.api.DefaultGlobalTransaction  : [192.168.100.128:8099:27753261064335373] commit status: Committed
+11:36:42:732  INFO 36764 --- [nacos-grpc-client-executor-37] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Receive server push request, request = NotifySubscriberRequest, requestId = 21
+11:36:42:732  INFO 36764 --- [nacos-grpc-client-executor-37] com.alibaba.nacos.common.remote.client   : [2600c217-b275-409b-8774-82b2193e2c43] Ack server push request, request = NotifySubscriberRequest, requestId = 21
+11:36:42:832  INFO 36764 --- [rpcDispatch_RMROLE_1_1_24] i.s.c.r.p.c.RmBranchCommitProcessor      : rm client handle branch commit process:xid=192.168.100.128:8099:27753261064335373,branchId=27753261064335377,branchType=AT,resourceId=jdbc:mysql://192.168.100.128:3308/hm-pay,applicationData=null
+11:36:42:834  INFO 36764 --- [rpcDispatch_RMROLE_1_1_24] io.seata.rm.AbstractRMHandler            : Branch committing: 192.168.100.128:8099:27753261064335373 27753261064335377 jdbc:mysql://192.168.100.128:3308/hm-pay null
+11:36:42:835  INFO 36764 --- [rpcDispatch_RMROLE_1_1_24] io.seata.rm.AbstractRMHandler            : Branch commit result: PhaseTwo_Committed
+11:36:42:841  INFO 36764 --- [rpcDispatch_RMROLE_1_2_24] i.s.c.r.p.c.RmBranchCommitProcessor      : rm client handle branch commit process:xid=192.168.100.128:8099:27753261064335373,branchId=27753261064335379,branchType=AT,resourceId=jdbc:mysql://192.168.100.128:3308/hm-pay,applicationData={"skipCheckLock":true}
+11:36:42:841  INFO 36764 --- [rpcDispatch_RMROLE_1_2_24] io.seata.rm.AbstractRMHandler            : Branch committing: 192.168.100.128:8099:27753261064335373 27753261064335379 jdbc:mysql://192.168.100.128:3308/hm-pay {"skipCheckLock":true}
+11:36:42:841  INFO 36764 --- [rpcDispatch_RMROLE_1_2_24] io.seata.rm.AbstractRMHandler            : Branch commit result: PhaseTwo_Committed
+11:36:48:049 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:36:48:050 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:36:48:051 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 1
+11:36:48:055  INFO 36764 --- [scheduling-1] o.s.a.r.c.CachingConnectionFactory       : Attempting to connect to: [192.168.100.128:5672]
+11:36:48:082  INFO 36764 --- [scheduling-1] o.s.a.r.c.CachingConnectionFactory       : Created new connection: rabbitConnectionFactory#47f5ab58:0/SimpleConnection@625857ac [delegate=amqp://hmall@192.168.100.128:5672//hmall, localPort= 8139]
+11:36:48:103 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.updateById    : ==>  Preparing: UPDATE t_local_message SET message_id=?, exchange=?, routing_key=?, message_body=?, status=?, try_count=?, create_time=?, update_time=? WHERE id=?
+11:36:48:103 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.updateById    : ==> Parameters: 2005845451784294402_pay_success(String), pay.direct(String), pay.success(String), 2005845451784294402(Long), 1(Integer), 0(Integer), 2025-12-30T11:36:41(LocalDateTime), 2025-12-30T11:36:48.101591400(LocalDateTime), 1(Long)
+11:36:48:107 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.updateById    : <==    Updates: 1
+11:36:48:107  INFO 36764 --- [scheduling-1] com.hmall.pay.utils.LocalMessageSender   : 消息发送成功，messageId=2005845451784294402_pay_success
+11:36:58:111 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:36:58:111 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:36:58:112 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:37:08:115 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:37:08:115 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:37:08:116 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:37:18:118 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:37:18:118 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:37:18:119 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:37:28:122 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:37:28:122 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:37:28:123 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:37:38:127 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:37:38:127 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:37:38:128 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:37:48:130 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:37:48:131 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:37:48:132 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:37:58:133 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:37:58:133 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:37:58:134 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:38:08:137 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:38:08:137 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:38:08:138 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:38:18:140 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:38:18:140 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:38:18:141 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:38:28:144 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:38:28:144 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:38:28:145 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:38:38:147 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:38:38:147 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:38:38:148 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:38:48:151 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:38:48:151 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:38:48:152 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:38:58:154 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:38:58:154 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:38:58:155 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:39:08:157 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:39:08:157 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:39:08:158 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:39:18:160 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:39:18:161 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:39:18:162 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:39:28:164 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:39:28:164 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:39:28:165 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:39:38:168 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:39:38:168 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:39:38:169 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:39:48:171 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:39:48:171 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:39:48:172 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:39:58:175 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:39:58:175 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:39:58:176 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:40:08:183 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:40:08:183 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:40:08:184 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:40:18:187 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:40:18:187 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:40:18:188 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:40:28:191 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:40:28:191 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:40:28:192 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:40:38:194 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:40:38:194 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:40:38:195 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:40:48:199 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:40:48:199 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:40:48:200 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:40:58:203 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:40:58:203 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:40:58:204 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:41:08:207 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:41:08:207 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:41:08:208 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:41:18:211 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:41:18:211 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:41:18:212 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:41:28:213 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:41:28:213 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:41:28:214 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:41:38:218 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:41:38:219 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:41:38:220 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:41:48:223 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:41:48:223 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:41:48:225 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:41:58:228 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:41:58:228 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:41:58:229 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:42:08:232 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:42:08:232 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:42:08:233 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:42:18:236 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:42:18:236 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:42:18:237 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:42:28:239 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:42:28:239 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:42:28:240 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:42:38:243 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:42:38:243 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:42:38:244 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:42:48:246 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:42:48:246 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:42:48:247 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:42:58:249 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:42:58:249 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:42:58:250 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:43:08:252 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:43:08:253 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:43:08:254 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:43:18:256 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:43:18:256 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:43:18:257 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:43:28:260 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:43:28:260 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:43:28:261 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:43:38:262 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:43:38:262 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:43:38:263 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:43:48:266 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:43:48:266 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:43:48:267 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:43:56:079 DEBUG 36764 --- [http-nio-8085-exec-4] c.h.pay.mapper.PayOrderMapper.selectOne  : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE (biz_order_no = ?)
+11:43:56:080 DEBUG 36764 --- [http-nio-8085-exec-4] c.h.pay.mapper.PayOrderMapper.selectOne  : ==> Parameters: 2005847291343114242(Long)
+11:43:56:081 DEBUG 36764 --- [http-nio-8085-exec-4] c.h.pay.mapper.PayOrderMapper.selectOne  : <==      Total: 0
+11:43:56:082 DEBUG 36764 --- [http-nio-8085-exec-4] c.h.pay.mapper.PayOrderMapper.insert     : ==>  Preparing: INSERT INTO pay_order ( id, biz_order_no, pay_order_no, biz_user_id, pay_channel_code, amount, pay_type, status, pay_over_time ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ? )
+11:43:56:082 DEBUG 36764 --- [http-nio-8085-exec-4] c.h.pay.mapper.PayOrderMapper.insert     : ==> Parameters: 2005847292723007490(Long), 2005847291343114242(Long), 2005847292714618882(Long), 1(Long), balance(String), 379500(Integer), 5(Integer), 1(Integer), 2025-12-30T13:43:56.081266600(LocalDateTime)
+11:43:56:086 DEBUG 36764 --- [http-nio-8085-exec-4] c.h.pay.mapper.PayOrderMapper.insert     : <==    Updates: 1
+11:43:57:848  INFO 36764 --- [http-nio-8085-exec-5] i.seata.tm.api.DefaultGlobalTransaction  : Begin new global transaction [192.168.100.128:8099:27753261064335394]
+11:43:57:850 DEBUG 36764 --- [http-nio-8085-exec-5] c.h.p.mapper.PayOrderMapper.selectById   : ==>  Preparing: SELECT id,biz_order_no,pay_order_no,biz_user_id,pay_channel_code,amount,pay_type,status,expand_json,result_code,result_msg,pay_success_time,pay_over_time,qr_code_url,create_time,update_time,creater,updater,is_delete FROM pay_order WHERE id=?
+11:43:57:850 DEBUG 36764 --- [http-nio-8085-exec-5] c.h.p.mapper.PayOrderMapper.selectById   : ==> Parameters: 2005847292723007490(Long)
+11:43:57:852 DEBUG 36764 --- [http-nio-8085-exec-5] c.h.p.mapper.PayOrderMapper.selectById   : <==      Total: 1
+11:43:57:852 DEBUG 36764 --- [http-nio-8085-exec-5] com.hmall.api.client.UserClient          : [UserClient#deductMoney] ---> PUT http://user-service/users/money/deduct?pw=123&amount=379500 HTTP/1.1
+11:43:57:852 DEBUG 36764 --- [http-nio-8085-exec-5] com.hmall.api.client.UserClient          : [UserClient#deductMoney] user-info: 1
+11:43:57:852 DEBUG 36764 --- [http-nio-8085-exec-5] com.hmall.api.client.UserClient          : [UserClient#deductMoney] ---> END HTTP (0-byte body)
+11:43:57:959 DEBUG 36764 --- [http-nio-8085-exec-5] com.hmall.api.client.UserClient          : [UserClient#deductMoney] <--- HTTP/1.1 200  (106ms)
+11:43:57:959 DEBUG 36764 --- [http-nio-8085-exec-5] com.hmall.api.client.UserClient          : [UserClient#deductMoney] connection: keep-alive
+11:43:57:959 DEBUG 36764 --- [http-nio-8085-exec-5] com.hmall.api.client.UserClient          : [UserClient#deductMoney] content-length: 0
+11:43:57:959 DEBUG 36764 --- [http-nio-8085-exec-5] com.hmall.api.client.UserClient          : [UserClient#deductMoney] date: Tue, 30 Dec 2025 03:43:57 GMT
+11:43:57:959 DEBUG 36764 --- [http-nio-8085-exec-5] com.hmall.api.client.UserClient          : [UserClient#deductMoney] keep-alive: timeout=60
+11:43:57:959 DEBUG 36764 --- [http-nio-8085-exec-5] com.hmall.api.client.UserClient          : [UserClient#deductMoney] <--- END HTTP (0-byte body)
+11:43:57:961 DEBUG 36764 --- [http-nio-8085-exec-5] c.h.pay.mapper.PayOrderMapper.update     : ==>  Preparing: UPDATE pay_order SET status=?,pay_success_time=? WHERE (id = ? AND status IN (?,?))
+11:43:57:961 DEBUG 36764 --- [http-nio-8085-exec-5] c.h.pay.mapper.PayOrderMapper.update     : ==> Parameters: 3(Integer), 2025-12-30T11:43:57.959595700(LocalDateTime), 2005847292723007490(Long), 0(Integer), 1(Integer)
+11:43:57:985 DEBUG 36764 --- [http-nio-8085-exec-5] c.h.pay.mapper.PayOrderMapper.update     : <==    Updates: 1
+11:43:57:986 DEBUG 36764 --- [http-nio-8085-exec-5] c.h.p.mapper.LocalMessageMapper.insert   : ==>  Preparing: INSERT INTO t_local_message ( message_id, exchange, routing_key, message_body, status, try_count ) VALUES ( ?, ?, ?, ?, ?, ? )
+11:43:57:986 DEBUG 36764 --- [http-nio-8085-exec-5] c.h.p.mapper.LocalMessageMapper.insert   : ==> Parameters: 2005847291343114242_pay_success(String), pay.direct(String), pay.success(String), 2005847291343114242(Long), 0(Integer), 0(Integer)
+11:43:58:004 DEBUG 36764 --- [http-nio-8085-exec-5] c.h.p.mapper.LocalMessageMapper.insert   : <==    Updates: 1
+11:43:58:014  INFO 36764 --- [http-nio-8085-exec-5] i.seata.tm.api.DefaultGlobalTransaction  : Suspending current transaction, xid = 192.168.100.128:8099:27753261064335394
+11:43:58:014  INFO 36764 --- [http-nio-8085-exec-5] i.seata.tm.api.DefaultGlobalTransaction  : [192.168.100.128:8099:27753261064335394] commit status: Committed
+11:43:58:270 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:43:58:270 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:43:58:272 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 1
+11:43:58:273 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.updateById    : ==>  Preparing: UPDATE t_local_message SET message_id=?, exchange=?, routing_key=?, message_body=?, status=?, try_count=?, create_time=?, update_time=? WHERE id=?
+11:43:58:274 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.updateById    : ==> Parameters: 2005847291343114242_pay_success(String), pay.direct(String), pay.success(String), 2005847291343114242(Long), 1(Integer), 0(Integer), 2025-12-30T11:43:56(LocalDateTime), 2025-12-30T11:43:58.273175(LocalDateTime), 2(Long)
+11:43:58:278 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.updateById    : <==    Updates: 1
+11:43:58:278  INFO 36764 --- [scheduling-1] com.hmall.pay.utils.LocalMessageSender   : 消息发送成功，messageId=2005847291343114242_pay_success
+11:43:58:809  INFO 36764 --- [rpcDispatch_RMROLE_1_3_24] i.s.c.r.p.c.RmBranchCommitProcessor      : rm client handle branch commit process:xid=192.168.100.128:8099:27753261064335394,branchId=27753261064335398,branchType=AT,resourceId=jdbc:mysql://192.168.100.128:3308/hm-pay,applicationData=null
+11:43:58:809  INFO 36764 --- [rpcDispatch_RMROLE_1_3_24] io.seata.rm.AbstractRMHandler            : Branch committing: 192.168.100.128:8099:27753261064335394 27753261064335398 jdbc:mysql://192.168.100.128:3308/hm-pay null
+11:43:58:809  INFO 36764 --- [rpcDispatch_RMROLE_1_3_24] io.seata.rm.AbstractRMHandler            : Branch commit result: PhaseTwo_Committed
+11:43:58:813  INFO 36764 --- [rpcDispatch_RMROLE_1_4_24] i.s.c.r.p.c.RmBranchCommitProcessor      : rm client handle branch commit process:xid=192.168.100.128:8099:27753261064335394,branchId=27753261064335400,branchType=AT,resourceId=jdbc:mysql://192.168.100.128:3308/hm-pay,applicationData={"skipCheckLock":true}
+11:43:58:813  INFO 36764 --- [rpcDispatch_RMROLE_1_4_24] io.seata.rm.AbstractRMHandler            : Branch committing: 192.168.100.128:8099:27753261064335394 27753261064335400 jdbc:mysql://192.168.100.128:3308/hm-pay {"skipCheckLock":true}
+11:43:58:813  INFO 36764 --- [rpcDispatch_RMROLE_1_4_24] io.seata.rm.AbstractRMHandler            : Branch commit result: PhaseTwo_Committed
+11:44:08:281 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:44:08:281 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:44:08:282 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:44:18:284 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==>  Preparing: SELECT id,message_id,exchange,routing_key,message_body,status,try_count,create_time,update_time FROM t_local_message WHERE (status = ? OR status = ?) LIMIT 100
+11:44:18:284 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : ==> Parameters: 0(Integer), 2(Integer)
+11:44:18:285 DEBUG 36764 --- [scheduling-1] c.h.p.m.LocalMessageMapper.selectList    : <==      Total: 0
+11:44:21:790  WARN 36764 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Start destroying common HttpClient
+11:44:21:790  WARN 36764 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Start destroying Publisher
+11:44:21:790  WARN 36764 --- [Thread-5] c.a.nacos.common.notify.NotifyCenter     : [NotifyCenter] Destruction of the end
+11:44:21:791  WARN 36764 --- [Thread-1] c.a.n.common.http.HttpClientBeanHolder   : [HttpClientBeanHolder] Destruction of the end
+11:44:22:272  INFO 36764 --- [SpringContextShutdownHook] c.a.c.n.registry.NacosServiceRegistry    : De-registering from Nacos Server now...
+11:44:22:275  INFO 36764 --- [SpringContextShutdownHook] c.a.c.n.registry.NacosServiceRegistry    : De-registration finished.
+11:44:22:580  INFO 36764 --- [SpringContextShutdownHook] com.alibaba.nacos.common.remote.client   : Shutdown rpc client, set status to shutdown
+11:44:22:580  INFO 36764 --- [SpringContextShutdownHook] com.alibaba.nacos.common.remote.client   : Shutdown client event executor java.util.concurrent.ScheduledThreadPoolExecutor@130507d3[Running, pool size = 2, active threads = 2, queued tasks = 0, completed tasks = 0]
+11:44:22:580  INFO 36764 --- [SpringContextShutdownHook] com.alibaba.nacos.common.remote.client   : Close current connection 1767065665588_192.168.100.1_7604
+11:44:22:582  INFO 36764 --- [nacos-grpc-client-executor-131] c.a.n.c.remote.client.grpc.GrpcClient    : [1767065665588_192.168.100.1_7604]Ignore complete event,isRunning:false,isAbandon=false
+11:44:22:585  INFO 36764 --- [SpringContextShutdownHook] c.a.n.c.remote.client.grpc.GrpcClient    : Shutdown grpc executor java.util.concurrent.ThreadPoolExecutor@4378a630[Running, pool size = 4, active threads = 0, queued tasks = 0, completed tasks = 132]
+11:44:22:593  INFO 36764 --- [SpringContextShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+11:44:22:606  INFO 36764 --- [SpringContextShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+11:44:22:642  INFO 36764 --- [NettyClientSelector_RMROLE_1_1] i.s.c.r.n.AbstractNettyRemotingClient    : channel inactive: [id: 0xbd803aed, L:/192.168.100.1:7579 ! R:/192.168.100.128:8099]
+11:44:22:642  INFO 36764 --- [NettyClientSelector_RMROLE_1_1] i.s.c.r.netty.NettyClientChannelManager  : return to pool, rm channel:[id: 0xbd803aed, L:/192.168.100.1:7579 ! R:/192.168.100.128:8099]
+11:44:22:642  INFO 36764 --- [NettyClientSelector_RMROLE_1_1] i.s.core.rpc.netty.NettyPoolableFactory  : channel valid false,channel:[id: 0xbd803aed, L:/192.168.100.1:7579 ! R:/192.168.100.128:8099]
+11:44:22:645  INFO 36764 --- [NettyClientSelector_RMROLE_1_1] i.s.core.rpc.netty.NettyPoolableFactory  : will destroy channel:[id: 0xbd803aed, L:/192.168.100.1:7579 ! R:/192.168.100.128:8099]
+11:44:22:645  INFO 36764 --- [NettyClientSelector_RMROLE_1_1] i.s.c.r.n.AbstractNettyRemotingClient    : ChannelHandlerContext(AbstractNettyRemotingClient$ClientHandler#0, [id: 0xbd803aed, L:/192.168.100.1:7579 ! R:/192.168.100.128:8099]) will closed
+11:44:22:645  INFO 36764 --- [NettyClientSelector_RMROLE_1_1] i.s.c.r.n.AbstractNettyRemotingClient    : ChannelHandlerContext(AbstractNettyRemotingClient$ClientHandler#0, [id: 0xbd803aed, L:/192.168.100.1:7579 ! R:/192.168.100.128:8099]) will closed

@@ -11,10 +11,13 @@ import com.hmall.common.utils.UserContext;
 
 import com.hmall.pay.domain.dto.PayApplyDTO;
 import com.hmall.pay.domain.dto.PayOrderFormDTO;
+import com.hmall.pay.domain.po.LocalMessage;
 import com.hmall.pay.domain.po.PayOrder;
 import com.hmall.pay.enums.PayStatus;
+import com.hmall.pay.mapper.LocalMessageMapper;
 import com.hmall.pay.mapper.PayOrderMapper;
 import com.hmall.pay.service.IPayOrderService;
+import io.seata.spring.annotation.GlobalTransactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -42,6 +45,8 @@ public class PayOrderServiceImpl extends ServiceImpl<PayOrderMapper, PayOrder> i
 
     private final RabbitTemplate rabbitTemplate;
 
+    private final LocalMessageMapper localMessageMapper;
+
     @Override
     public String applyPayOrder(PayApplyDTO applyDTO) {
         // 1.幂等性校验
@@ -51,7 +56,7 @@ public class PayOrderServiceImpl extends ServiceImpl<PayOrderMapper, PayOrder> i
     }
 
     @Override
-    @Transactional
+    @GlobalTransactional
     public void tryPayOrderByBalance(PayOrderFormDTO payOrderFormDTO) {
         // 1.查询支付单
         PayOrder po = getById(payOrderFormDTO.getId());
@@ -69,13 +74,22 @@ public class PayOrderServiceImpl extends ServiceImpl<PayOrderMapper, PayOrder> i
             throw new BizIllegalException("交易已支付或关闭！");
         }
         // 5.修改订单状态, 修改为基于rabbitmq的异步消息
-        tradeClient.markOrderPaySuccess(po.getBizOrderNo());
-        try{
-            rabbitTemplate.convertAndSend("pay.direct", "pay.success", po.getBizOrderNo());
-        }catch(Exception e){
-            log.error("发送支付状态消息通知失败，订单id： {}", po.getBizOrderNo(), e);
-        }
+        // tradeClient.markOrderPaySuccess(po.getBizOrderNo());
+//        try{
+//            rabbitTemplate.convertAndSend("pay.direct", "pay.success", po.getBizOrderNo());
+//        }catch(Exception e){
+//            log.error("发送支付状态消息通知失败，订单id： {}", po.getBizOrderNo(), e);
+//        }
+        String messageId = po.getBizOrderNo() + "_pay_success"; // 保证唯一
+        LocalMessage message = new LocalMessage();
+        message.setMessageId(messageId);
+        message.setExchange("pay.direct");
+        message.setRoutingKey("pay.success");
+        message.setMessageBody(po.getBizOrderNo()); // 简单字符串，也可用 JSON
+        message.setStatus(0); // 待发送
+        message.setTryCount(0);
 
+        localMessageMapper.insert(message);
     }
 
     public boolean markPayOrderSuccess(Long id, LocalDateTime successTime) {
