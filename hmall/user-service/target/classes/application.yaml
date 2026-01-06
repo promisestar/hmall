@@ -7,7 +7,7 @@ hm:
     password: hmall123
     tokenTTL: 30m
   swagger:
-    title: 支付服务接口文档
+    title: 用户服务接口文档
     package: com.hmall.user.controller
   db:
     database: hm-user

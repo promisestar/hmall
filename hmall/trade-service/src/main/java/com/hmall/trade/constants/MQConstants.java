@@ -16,4 +16,10 @@ public interface MQConstants {
     String DELAY_ORDER_QUEUE_NAME = "trade.delay.order.queue";
 
     String DELAY_ORDER_KEY = "delay.order";
+
+    String CLEAR_CART_EXCHANGE_NAME = "trade.topic";
+
+    String CLEAR_CART_QUEUE_NAME = "clear.cart.queue";
+
+    String CLEAR_CART_KEY = "order.create";
 }

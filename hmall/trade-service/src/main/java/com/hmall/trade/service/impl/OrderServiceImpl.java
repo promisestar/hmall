@@ -12,22 +12,22 @@ import com.hmall.common.utils.UserContext;
 
 import com.hmall.trade.constants.MQConstants;
 import com.hmall.trade.domain.dto.OrderFormDTO;
+import com.hmall.trade.domain.po.LocalMessage;
 import com.hmall.trade.domain.po.Order;
 import com.hmall.trade.domain.po.OrderDetail;
+import com.hmall.trade.mapper.LocalMessageMapper;
 import com.hmall.trade.mapper.OrderMapper;
 import com.hmall.trade.service.IOrderDetailService;
 import com.hmall.trade.service.IOrderService;
 import io.seata.spring.annotation.GlobalTransactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -38,6 +38,7 @@ import java.util.stream.Collectors;
  * @author 虎哥
  * @since 2023-05-05
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements IOrderService {
@@ -46,6 +47,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private final IOrderDetailService detailService;
     private final CartClient cartClient;
     private final RabbitTemplate rabbitTemplate;
+    private final LocalMessageMapper localMessageMapper;
 
     @Override
     @GlobalTransactional
@@ -81,7 +83,26 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         detailService.saveBatch(details);
 
         // 3.清理购物车商品
-        cartClient.deleteCartItemByIds(itemIds);
+        // cartClient.deleteCartItemByIds(itemIds);
+        // 使用rabbitmq异步实现
+//        try{
+//            rabbitTemplate.convertAndSend(MQConstants.CLEAR_CART_EXCHANGE_NAME, MQConstants.CLEAR_CART_KEY, itemIds);
+//        }catch(Exception e){
+//            log.error("发送清理购物车失败，用户id：{}, 商品id：{}", UserContext.getUser(), itemIds, e);
+//        }
+        // 使用本地消息表，保证分布式事务的一致性
+        // 4. 插入本地消息表（与上述操作在同一事务中）
+        String messageId = order.getId() + "_pay_success"; // 保证唯一
+        LocalMessage localMessage = new LocalMessage();
+        localMessage.setMessageId(messageId);
+        localMessage.setExchange(MQConstants.CLEAR_CART_EXCHANGE_NAME);
+        localMessage.setRoutingKey(MQConstants.CLEAR_CART_KEY);
+        localMessage.setUserId(UserContext.getUser());
+        localMessage.setMessageBody(new ArrayList<>(itemIds)); // 简单字符串，也可用 JSON
+        localMessage.setStatus(0); // 待发送
+        localMessage.setTryCount(0);
+
+        localMessageMapper.insert(localMessage);
 
         // 4.扣减库存
         try {
