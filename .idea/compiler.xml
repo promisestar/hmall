@@ -15,6 +15,7 @@
         <module name="user-service" />
         <module name="hm-gateway" />
         <module name="SpringCloud-01" />
+        <module name="search-service" />
         <module name="hm-common" />
         <module name="publisher" />
         <module name="hm-service" />
@@ -36,6 +37,7 @@
       <module name="mp-demo" options="-parameters" />
       <module name="pay-service" options="-parameters" />
       <module name="publisher" options="-parameters" />
+      <module name="search-service" options="-parameters" />
       <module name="trade-service" options="-parameters" />
       <module name="user-service" options="-parameters" />
     </option>

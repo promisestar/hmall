@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmall.common.domain.PageDTO;
 import com.hmall.common.domain.PageQuery;
 import com.hmall.common.utils.BeanUtils;
+import com.hmall.item.constants.MQConstants;
 import com.hmall.item.domain.dto.ItemDTO;
 import com.hmall.item.domain.dto.OrderDetailDTO;
 import com.hmall.item.domain.po.Item;
@@ -13,6 +14,7 @@ import com.hmall.item.service.IItemService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,6 +26,7 @@ import java.util.List;
 public class ItemController {
 
     private final IItemService itemService;
+    private final RabbitTemplate rabbitTemplate;
 
     @ApiOperation("分页查询商品")
     @GetMapping("/page")
@@ -53,6 +56,7 @@ public class ItemController {
     public void saveItem(@RequestBody ItemDTO item) {
         // 新增
         itemService.save(BeanUtils.copyBean(item, Item.class));
+        rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.CREATE_DOCUMENT_KEY, item);
     }
 
     @ApiOperation("更新商品状态")
@@ -62,6 +66,9 @@ public class ItemController {
         item.setId(id);
         item.setStatus(status);
         itemService.updateById(item);
+        Item updated_item = itemService.getById(id);
+        rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.UPDATE_DOCUMENT_KEY,
+                BeanUtils.copyBean(updated_item, ItemDTO.class));
     }
 
     @ApiOperation("更新商品")
@@ -71,12 +78,14 @@ public class ItemController {
         item.setStatus(null);
         // 更新
         itemService.updateById(BeanUtils.copyBean(item, Item.class));
+        rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.UPDATE_DOCUMENT_KEY, item);
     }
 
     @ApiOperation("根据id删除商品")
     @DeleteMapping("{id}")
     public void deleteItemById(@PathVariable("id") Long id) {
         itemService.removeById(id);
+        rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.REMOVE_DOCUMENT_KEY, id);
     }
 
     @ApiOperation("批量扣减库存")

@@ -8,6 +8,7 @@
         <option value="$PROJECT_DIR$/mp-demo/pom.xml" />
         <option value="$PROJECT_DIR$/hmall/pom.xml" />
         <option value="$PROJECT_DIR$/mq-demo/pom.xml" />
+        <option value="$PROJECT_DIR$/hmall/search-service/pom.xml" />
       </list>
     </option>
   </component>

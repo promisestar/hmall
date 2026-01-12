@@ -25,6 +25,8 @@ import java.util.List;
 public interface ItemClient {
     @GetMapping("/items")
     List<ItemDTO> queryItemsByIds(@RequestParam("ids") Collection<Long> ids);
+    @GetMapping("/items")
+    ItemDTO queryItemById(@RequestParam("id") Long id);
     @PutMapping("/items/stock/deduct")
     public void deductStock(@RequestBody List<OrderDetailDTO> items);
     @PutMapping("/items/stock/recover")

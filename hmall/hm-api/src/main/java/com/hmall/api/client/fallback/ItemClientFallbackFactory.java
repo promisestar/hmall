@@ -31,7 +31,11 @@ public class ItemClientFallbackFactory implements FallbackFactory<ItemClient> {
                 log.error("查询商品信息失败", cause);
                 return CollUtils.emptyList();
             }
-
+            @Override
+            public ItemDTO queryItemById(Long id) {
+                log.error("查询商品信息失败", cause);
+                return null;
+            }
             @Override
             public void deductStock(List<OrderDetailDTO> items) {
                 log.error("扣减库存失败", cause);
