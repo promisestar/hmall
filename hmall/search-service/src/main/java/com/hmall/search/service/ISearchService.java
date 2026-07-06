@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.hmall.search.domain.dto.ItemDTO;
 import com.hmall.search.domain.po.Item;
 import com.hmall.search.domain.query.ItemPageQuery;
+import com.hmall.search.domain.vo.CategoryBrandVO;
 
 import java.io.IOException;
 
@@ -25,4 +26,6 @@ public interface ISearchService extends IService<Item> {
     void removeDocumentById(Long id) throws IOException;
 
     void createDocument(ItemDTO item) throws IOException;
+
+    CategoryBrandVO filters(ItemPageQuery query) throws IOException;
 }

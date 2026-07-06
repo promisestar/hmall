@@ -9,6 +9,7 @@ import com.hmall.search.domain.dto.ItemDTO;
 import com.hmall.search.domain.dto.ItemDoc;
 import com.hmall.search.domain.po.Item;
 import com.hmall.search.domain.query.ItemPageQuery;
+import com.hmall.search.domain.vo.CategoryBrandVO;
 import com.hmall.search.mapper.SearchMapper;
 import com.hmall.search.service.ISearchService;
 import lombok.RequiredArgsConstructor;
@@ -23,13 +24,23 @@ import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.common.lucene.search.function.CombineFunction;
+import org.elasticsearch.common.lucene.search.function.FunctionScoreQuery;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.RangeQueryBuilder;
+import org.elasticsearch.index.query.functionscore.FunctionScoreQueryBuilder;
+import org.elasticsearch.index.query.functionscore.ScoreFunctionBuilders;
+import org.elasticsearch.index.query.functionscore.WeightBuilder;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
+import org.elasticsearch.search.aggregations.AggregationBuilder;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.Aggregations;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
+import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightField;
 import org.elasticsearch.search.sort.FieldSortBuilder;
@@ -70,10 +81,10 @@ public class SearchServiceImpl extends ServiceImpl<SearchMapper, Item> implement
             boolQueryBuilder.must(QueryBuilders.matchQuery("name", query.getKey()));
         }
         if (StringUtils.hasText(query.getBrand())) {
-            boolQueryBuilder.must(QueryBuilders.termQuery("brand", query.getBrand()));
+            boolQueryBuilder.filter(QueryBuilders.termQuery("brand", query.getBrand()));
         }
         if (StringUtils.hasText(query.getCategory())) {
-            boolQueryBuilder.must(QueryBuilders.termQuery("category", query.getCategory()));
+            boolQueryBuilder.filter(QueryBuilders.termQuery("category", query.getCategory()));
         }
         if (query.getMaxPrice() != null) {
             RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery("price");
@@ -81,10 +92,22 @@ public class SearchServiceImpl extends ServiceImpl<SearchMapper, Item> implement
                 rangeQueryBuilder.gte(query.getMinPrice());
             }
             rangeQueryBuilder.lte(query.getMaxPrice());
-            boolQueryBuilder.must(rangeQueryBuilder);
+            boolQueryBuilder.filter(rangeQueryBuilder);
         }
-        searchSourceBuilder.query(boolQueryBuilder);
+        // 为isAD为true的商品分数加上固定的常量值
+        FunctionScoreQueryBuilder.FilterFunctionBuilder[] functions = {
+                new FunctionScoreQueryBuilder.FilterFunctionBuilder(
+                        QueryBuilders.termQuery("isAD", true),
+                        ScoreFunctionBuilders.weightFactorFunction(100f)
+                )};
+        // 使用算分函数
+        FunctionScoreQueryBuilder functionScoreQuery = QueryBuilders.functionScoreQuery(boolQueryBuilder, functions)
+                .boostMode(CombineFunction.MULTIPLY)// 加上固定权重
+                .scoreMode(FunctionScoreQuery.ScoreMode.SUM);// 多个算分函数的合并方法
+
+        searchSourceBuilder.query(functionScoreQuery);
         searchSourceBuilder.from((pageNo - 1) * pageSize).size(pageSize);
+        searchSourceBuilder.sort("_score", SortOrder.DESC);
         searchSourceBuilder.sort(new FieldSortBuilder("update_time").order(SortOrder.DESC));
         searchSourceBuilder.timeout(new TimeValue(60, TimeUnit.SECONDS));
         searchRequest.source(searchSourceBuilder);
@@ -198,5 +221,62 @@ public class SearchServiceImpl extends ServiceImpl<SearchMapper, Item> implement
         }
     }
 
+    @Override
+    public CategoryBrandVO filters(ItemPageQuery query) throws IOException {
+        SearchRequest searchRequest = new SearchRequest("items");
+        // 构建查询条件
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+        BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
+        if (StringUtils.hasText(query.getKey())) {
+            boolQueryBuilder.must(QueryBuilders.matchQuery("name", query.getKey()));
+        }
+        if (StringUtils.hasText(query.getBrand())) {
+            boolQueryBuilder.filter(QueryBuilders.termQuery("brand", query.getBrand()));
+        }
+        if (StringUtils.hasText(query.getCategory())) {
+            boolQueryBuilder.filter(QueryBuilders.termQuery("category", query.getCategory()));
+        }
+        if (query.getMaxPrice() != null) {
+            RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery("price");
+            if (query.getMinPrice() != null) {
+                rangeQueryBuilder.gte(query.getMinPrice());
+            }
+            rangeQueryBuilder.lte(query.getMaxPrice());
+            boolQueryBuilder.filter(rangeQueryBuilder);
+        }
+        searchSourceBuilder.query(boolQueryBuilder);
+        searchSourceBuilder.size(0);
+        searchRequest.source(searchSourceBuilder);
+        // 2. 聚合条件
+        TermsAggregationBuilder brandAgg = AggregationBuilders.terms("brandAgg").field("brand");
+        TermsAggregationBuilder categoryAgg = AggregationBuilders.terms("categoryAgg").field("category");
+        searchRequest.source().aggregation(brandAgg);
+        searchRequest.source().aggregation(categoryAgg);
 
+        SearchResponse response = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+        Aggregations aggregations = response.getAggregations();
+
+        CategoryBrandVO categoryBrandVO = new CategoryBrandVO();
+        System.out.println("===== 品牌聚合结果 =====");
+        Terms brandTerms = aggregations.get("brandAgg");
+        List<? extends Terms.Bucket> brandBuckets = brandTerms.getBuckets();
+        for (Terms.Bucket bucket : brandBuckets) {
+            String brand = bucket.getKeyAsString();
+            categoryBrandVO.getResultMap().get("brand").add(brand);
+            long count = bucket.getDocCount();
+            System.out.printf("品牌：%s，数量：%d%n", brand, count);
+        }
+
+        // 5.2 解析分类聚合结果（新增）
+        System.out.println("\n===== 分类聚合结果 =====");
+        Terms categoryTerms = aggregations.get("categoryAgg");
+        List<? extends Terms.Bucket> categoryBuckets = categoryTerms.getBuckets();
+        for (Terms.Bucket bucket : categoryBuckets) {
+            String category = bucket.getKeyAsString();
+            categoryBrandVO.getResultMap().get("category").add(category);
+            long count = bucket.getDocCount();
+            System.out.printf("分类：%s，数量：%d%n", category, count);
+        }
+        return categoryBrandVO;
+    }
 }

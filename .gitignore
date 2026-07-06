@@ -1,0 +1,6 @@
+# 仅跟踪 hmall、hmall-nginx、logs，忽略根目录下其余所有内容
+/*
+!/hmall/
+!/hmall-nginx/
+!/logs/
+!.gitignore
