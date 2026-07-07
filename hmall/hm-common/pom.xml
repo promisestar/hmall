@@ -73,18 +73,6 @@
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
         </dependency>
-        <!--AMQP依赖-->
-        <dependency>
-            <groupId>org.springframework.amqp</groupId>
-            <artifactId>spring-amqp</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <!--Spring整合Rabbit依赖-->
-        <dependency>
-            <groupId>org.springframework.amqp</groupId>
-            <artifactId>spring-rabbit</artifactId>
-            <scope>provided</scope>
-        </dependency>
         <!--json处理-->
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
