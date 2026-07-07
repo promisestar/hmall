@@ -115,44 +115,42 @@
         <p class="text-sm mt-2">请尝试其他关键词</p>
       </div>
 
-      <div v-else>
-        <div class="grid grid-cols-4 gap-3">
-          <div
-            v-for="item in items"
-            :key="item.id"
-            class="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group"
-          >
-            <div class="relative overflow-hidden">
-              <img :src="item.image || '/img/like_01.png'" class="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300" />
-            </div>
-            <div class="p-3">
-              <p class="text-sm text-gray-800 line-clamp-2 mb-2 min-h-[40px]">{{ item.name }}</p>
-              <p class="text-[#E4393C] font-bold text-lg mb-2">¥{{ formatPrice(item.price) }}</p>
-              <div class="flex items-center justify-between text-xs text-gray-400">
-                <span>{{ item.sold || 0 }}人付款</span>
-                <button
-                  @click.stop="addToCart(item)"
-                  class="bg-[#E4393C] text-white px-3 py-1 rounded text-xs hover:bg-[#C81623] transition-colors"
-                  :disabled="addingId === item.id"
-                >
-                  {{ addingId === item.id ? '...' : '加入购物车' }}
-                </button>
-              </div>
+      <div v-else class="grid grid-cols-4 gap-3">
+        <div
+          v-for="item in items"
+          :key="item.id"
+          class="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group"
+        >
+          <div class="relative overflow-hidden">
+            <img :src="item.image || '/img/like_01.png'" class="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300" />
+          </div>
+          <div class="p-3">
+            <p class="text-sm text-gray-800 line-clamp-2 mb-2 min-h-[40px]">{{ item.name }}</p>
+            <p class="text-[#E4393C] font-bold text-lg mb-2">¥{{ formatPrice(item.price) }}</p>
+            <div class="flex items-center justify-between text-xs text-gray-400">
+              <span>{{ item.sold || 0 }}人付款</span>
+              <button
+                @click.stop="addToCart(item)"
+                class="bg-[#E4393C] text-white px-3 py-1 rounded text-xs hover:bg-[#C81623] transition-colors"
+                :disabled="addingId === item.id"
+              >
+                {{ addingId === item.id ? '...' : '加入购物车' }}
+              </button>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Pagination：放到 grid 的 v-else 内，total > pageSize 才显示 -->
-        <div v-if="total > pageSize" class="flex justify-center mt-6">
-          <el-pagination
-            v-model:current-page="pageNo"
-            :page-size="pageSize"
-            :total="total"
-            layout="total, prev, pager, next, jumper"
-            background
-            @current-change="fetchData"
-          />
-        </div>
+      <!-- Pagination：独立于商品列表渲染，只要后端返回 total > 0 就显示（含跨页跳转） -->
+      <div v-if="total > 0" class="flex justify-center mt-6">
+        <el-pagination
+          v-model:current-page="pageNo"
+          :page-size="pageSize"
+          :total="total"
+          layout="total, prev, pager, next, jumper"
+          background
+          @current-change="fetchData"
+        />
       </div>
     </div>
   </PortalLayout>
