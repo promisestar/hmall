@@ -34,16 +34,9 @@ public class clearCartListener {
             key = "order.create"
     ))
     public void listenClearCart(Collection<Long> itemIds, @Header(value = "USER-ID", required = false)Number userIdObj) throws InterruptedException{
-        try{
-            Long userId = userIdObj != null ? userIdObj.longValue() : null;
-            if(userId != null){
-                UserContext.setUser(userId);
-            }
-            if(!itemIds.isEmpty()){
-                cartService.removeByItemIds(itemIds);
-            }
-        } finally {
-            UserContext.removeUser();
+        Long userId = userIdObj != null ? userIdObj.longValue() : null;
+        if (userId != null && !itemIds.isEmpty()) {
+            cartService.removeByItemIds(itemIds, userId);  // 直接传 userId
         }
     }
 }

@@ -466,40 +466,54 @@ requestTemplate.header("user-info", String.valueOf(UserContext.getUser()));
 
 ---
 
-### 4.2 商品查询的 N+1 问题
+### 4.2 商品查询已使用批量查询（无明显 N+1 问题）
 
-**文件：**
-- `cart-service` 中查询购物车时：
-  - 第1步：查询购物车列表（1次 DB 查询）
-  - 第2步：对每个购物车项调用 `itemClient.queryItemById()`（N 次 RPC 调用）
+**核实结果：** 原分析有误。`CartServiceImpl.handleCartItems()` 已正确使用批量查询：
 
-**修复：** 提供批量查询接口：
 ```java
-// 新增批量查询接口
-@GetMapping("/items/batch")
-List<ItemDTO> queryItemsByIds(@RequestParam("ids") List<Long> ids);
+// CartServiceImpl.java 第88-111行 — 当前实现
+private void handleCartItems(List<CartVO> vos) {
+    // 1. 收集所有 itemId
+    Set<Long> itemIds = vos.stream().map(CartVO::getItemId).collect(Collectors.toSet());
+    // 2. 一次性批量查询（非逐条查询）
+    List<ItemDTO> items = itemClient.queryItemsByIds(itemIds);
+    // ...
+}
 ```
+
+`ItemClient.queryItemById` 单条接口虽已定义，但在全项目中没有任何调用方。购物车查询为 1 次 DB + 1 次 RPC 批量调用，不存在 N+1 问题。
 
 ---
 
-### 4.3 订单创建中的长事务
+### 4.3 订单创建中仍存在的同步 RPC 调用
 
 **文件：** `trade-service/src/main/java/com/hmall/trade/service/impl/OrderServiceImpl.java`
 
-订单创建在一个 `@GlobalTransactional` 中串联了多个远程调用：
-1. 查询购物车（RPC）
-2. 查询商品详情（RPC）
-3. 计算金额
-4. 创建订单（本地 DB）
-5. 清除购物车（RPC）
-6. 扣减库存（RPC）
+订单创建在 `@GlobalTransactional` 中的实际调用链路：
 
-**问题：** 整个链路在 Seata 全局事务中，远程调用越多，锁持有时间越长，并发性能越差。
+```java
+@GlobalTransactional
+public Long createOrder(OrderFormDTO orderFormDTO) {
+    // 1. 查询商品详情 → itemClient.queryItemsByIds() (RPC 批量)
+    // 2. 计算金额 → 纯内存计算
+    // 3. 创建订单 → save(order) (本地 DB)
+    // 4. 保存订单详情 → detailService.saveBatch() (本地 DB)
+    // 5. 插入本地消息表 → 异步清除购物车 (本地 DB，已优化)
+    // 6. 扣减库存 → itemClient.deductStock() (同步 RPC，仍在事务内)
+    // 7. 发送延迟消息 → RabbitMQ (异步)
+}
+```
 
-**修复：**
-- 将非关键操作（清除购物车、发送通知）改为异步消息
-- 考虑使用 TCC 模式替代 AT 模式减少锁持有时间
-- 扣减库存使用 Redis 预扣 + 异步同步 DB 的方式
+**已优化部分：** 清除购物车已从同步 RPC（`cartClient.deleteCartItemByIds`，第86行已注释）改为**本地消息表 + RabbitMQ**异步方式（第93-105行），避免了跨服务的 RPC 阻塞。
+
+**仍存在问题：**
+
+1. `itemClient.deductStock()`（第109行）仍是同步 RPC，扣减库存在 Seata 全局事务内，锁持有时间随 RPC 耗时增长
+2. `@GlobalTransactional` 虽然只保留 2 个 RPC + N 个本地 DB 操作，但扣减库存的全局锁仍影响并发性能
+
+**修复建议：**
+- 考虑库存预扣方案：下单时 Redis 预扣库存 → 异步同步 DB，减少 RPC 同步等待
+- 扣减库存失败通过补偿机制（如订单状态回滚）处理，而非依靠全局事务锁
 
 ---
 
@@ -748,11 +762,10 @@ gzip_types text/plain application/javascript text/css application/json;
 | 序号 | 问题 | 影响 |
 |------|------|------|
 | 9 | DTO 重复定义清理（§2.1） | 维护成本 |
-| 10 | N+1 查询优化（§4.2） | 性能 |
-| 11 | 全局异常处理（§2.4） | 用户体验 |
-| 12 | 参数校验添加（§4.5） | 健壮性 |
-| 13 | ES Client 升级（§5.1） | 技术债务 |
-| 14 | 订单长事务优化（§4.3） | 性能 |
+| 10 | 全局异常处理（§2.4） | 用户体验 |
+| 11 | 参数校验添加（§4.5） | 健壮性 |
+| 12 | ES Client 升级（§5.1） | 技术债务 |
+| 13 | 订单长事务优化（§4.3） | 性能 |
 
 ### P3 — 长期规划（工程化与质量保障）
 

@@ -4,16 +4,25 @@ import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
 
+import javax.validation.constraints.Min;
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.NotNull;
+
 @Data
 @ApiModel(description = "商品实体")
 public class ItemDTO {
     @ApiModelProperty("商品id")
     private Long id;
     @ApiModelProperty("SKU名称")
+    @NotBlank(message = "商品名称不能为空")
     private String name;
     @ApiModelProperty("价格（分）")
+    @NotNull(message = "价格不能为空")
+    @Min(value = 1, message = "价格必须为正数")
     private Integer price;
     @ApiModelProperty("库存数量")
+    @NotNull(message = "库存不能为空")
+    @Min(value = 0, message = "库存不能为负数")
     private Integer stock;
     @ApiModelProperty("商品图片")
     private String image;

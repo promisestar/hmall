@@ -14,6 +14,7 @@ import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import javax.validation.Valid;
 import java.util.List;
 
 @Api(tags = "商品管理相关接口")
@@ -47,7 +48,7 @@ public class ItemController {
 
     @ApiOperation("新增商品")
     @PostMapping
-    public void saveItem(@RequestBody ItemDTO item) {
+    public void saveItem(@RequestBody @Valid ItemDTO item) {
         // 新增
         itemService.save(BeanUtils.copyBean(item, Item.class));
     }
@@ -63,7 +64,7 @@ public class ItemController {
 
     @ApiOperation("更新商品")
     @PutMapping
-    public void updateItem(@RequestBody ItemDTO item) {
+    public void updateItem(@RequestBody @Valid ItemDTO item) {
         // 不允许修改商品状态，所以强制设置为null，更新时，就会忽略该字段
         item.setStatus(null);
         // 更新

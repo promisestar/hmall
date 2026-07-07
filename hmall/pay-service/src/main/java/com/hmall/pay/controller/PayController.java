@@ -16,6 +16,7 @@ import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import javax.validation.Valid;
 import java.util.List;
 
 @Api(tags = "支付相关接口")
@@ -45,7 +46,7 @@ public class PayController {
     @ApiOperation("尝试基于用户余额支付")
     @ApiImplicitParam(value = "支付单id", name = "id")
     @PostMapping("{id}")
-    public void tryPayOrderByBalance(@PathVariable("id") Long id, @RequestBody PayOrderFormDTO payOrderFormDTO){
+    public void tryPayOrderByBalance(@PathVariable("id") Long id, @RequestBody @Valid PayOrderFormDTO payOrderFormDTO){
         payOrderFormDTO.setId(id);
         payOrderService.tryPayOrderByBalance(payOrderFormDTO);
     }
