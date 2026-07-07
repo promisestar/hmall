@@ -80,7 +80,6 @@ import { ref, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { User, Lock, Eye, EyeOff } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
-import { login as loginApi } from '@/api/user'
 
 const router = useRouter()
 const route = useRoute()
@@ -98,10 +97,7 @@ async function handleLogin() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const res = await loginApi(form)
-    sessionStorage.setItem('token', res.token)
-    sessionStorage.setItem('user-info', JSON.stringify({ id: res.userId, username: res.username, balance: res.balance }))
-    userStore.setUserInfo({ id: res.userId, username: res.username, balance: res.balance })
+    await userStore.login(form)
     const returnUrl = sessionStorage.getItem('return-url') || '/portal/home'
     sessionStorage.removeItem('return-url')
     router.push(returnUrl)
