@@ -6,51 +6,50 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     // 用户端商城路由
+    // 注意：PortalLayout 由各页面组件自行在模板中引入包裹（<PortalLayout>...</PortalLayout>），
+    // 而不是作为路由的父组件渲染，因此这里不能用 children 嵌套（PortalLayout 内部没有 <router-view>）。
     {
       path: '/portal',
-      component: () => import('@/views/portal/PortalLayout.vue'),
       redirect: '/portal/home',
-      children: [
-        {
-          path: 'home',
-          name: 'Home',
-          component: () => import('@/views/portal/HomePage.vue'),
-        },
-        {
-          path: 'login',
-          name: 'Login',
-          component: () => import('@/views/portal/LoginPage.vue'),
-        },
-        {
-          path: 'search',
-          name: 'Search',
-          component: () => import('@/views/portal/SearchPage.vue'),
-        },
-        {
-          path: 'cart',
-          name: 'Cart',
-          component: () => import('@/views/portal/CartPage.vue'),
-          meta: { requiresAuth: true },
-        },
-        {
-          path: 'order',
-          name: 'OrderConfirm',
-          component: () => import('@/views/portal/OrderConfirm.vue'),
-          meta: { requiresAuth: true },
-        },
-        {
-          path: 'pay/:orderId',
-          name: 'Pay',
-          component: () => import('@/views/portal/PayPage.vue'),
-          meta: { requiresAuth: true },
-        },
-        {
-          path: 'pay-success/:orderId',
-          name: 'PaySuccess',
-          component: () => import('@/views/portal/PaySuccess.vue'),
-          meta: { requiresAuth: true },
-        },
-      ],
+    },
+    {
+      path: '/portal/home',
+      name: 'Home',
+      component: () => import('@/views/portal/HomePage.vue'),
+    },
+    {
+      path: '/portal/login',
+      name: 'Login',
+      component: () => import('@/views/portal/LoginPage.vue'),
+    },
+    {
+      path: '/portal/search',
+      name: 'Search',
+      component: () => import('@/views/portal/SearchPage.vue'),
+    },
+    {
+      path: '/portal/cart',
+      name: 'Cart',
+      component: () => import('@/views/portal/CartPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/portal/order',
+      name: 'OrderConfirm',
+      component: () => import('@/views/portal/OrderConfirm.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/portal/pay/:orderId',
+      name: 'Pay',
+      component: () => import('@/views/portal/PayPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/portal/pay-success/:orderId',
+      name: 'PaySuccess',
+      component: () => import('@/views/portal/PaySuccess.vue'),
+      meta: { requiresAuth: true },
     },
     // 管理后台路由
     {
