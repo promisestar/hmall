@@ -21,6 +21,5 @@ spring:
     sentinel:
       transport:
         dashboard: localhost:8090
-        port: 8082
       http-method-specify: true
 debug: true
