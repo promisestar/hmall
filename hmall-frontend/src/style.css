@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --primary: 358 85% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --muted: 210 40% 96%;
+    --accent: 358 85% 52%;
+    --border: 214 32% 91%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    color: #333;
+    background: #f5f5f5;
+    min-height: 100vh;
+  }
+
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+
+  ul, ol {
+    list-style: none;
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-[#E4393C] text-white px-6 py-2 rounded hover:bg-[#C81623] transition-colors cursor-pointer font-medium;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-[#E4393C] border border-[#E4393C] px-6 py-2 rounded hover:bg-red-50 transition-colors cursor-pointer font-medium;
+  }
+
+  .container-main {
+    @apply max-w-[1200px] mx-auto px-4;
+  }
+
+  .card-shadow {
+    @apply bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow;
+  }
+}
