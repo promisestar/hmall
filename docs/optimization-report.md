@@ -21,7 +21,7 @@
 
 ## 1. 关键问题（安全/稳定性）
 
-### 1.1 【严重】SQL 注入隐患 — `${}` 代替 `#{}`
+### 1.1 【严重】SQL 注入隐患 — `${}` 代替 `#{}`（修复）
 
 **文件：**
 - `hm-service/src/main/java/com/hmall/mapper/UserMapper.java` 第18行
@@ -43,7 +43,7 @@ void updateMoney(@Param("userId") Long userId, @Param("totalFee") Integer totalF
 
 ---
 
-### 1.2 【严重】硬编码密码在配置文件中
+### 1.2 【严重】硬编码密码在配置文件中（修复）
 
 **文件：**
 - `hm-service/src/main/resources/application.yaml` 第46行
@@ -94,27 +94,26 @@ if (!authProperties.getIncludePaths().isEmpty()
 
 ---
 
-### 1.4 【高危】支付密码通过 URL 查询参数传输
+### 1.4 【高危】支付密码通过 URL 查询参数传输（已修复）
 
 **文件：**
-- `hm-service/src/main/java/com/hmall/controller/UserController.java` 第34行
-- `user-service/src/main/java/com/hmall/user/controller/UserController.java` 第35行
-- `hm-api/src/main/java/com/hmall/api/client/UserClient.java` 第22行
+- `hm-service/src/main/java/com/hmall/controller/UserController.java`
+- `user-service/src/main/java/com/hmall/user/controller/UserController.java`
+- `hm-api/src/main/java/com/hmall/api/client/UserClient.java`
+
+**修复内容：**
+
+1. 新增 `DeductMoneyDTO`（`hm-api/src/main/java/com/hmall/api/dto/DeductMoneyDTO.java`），`pw` 字段带 `@NotBlank` 校验
+2. Controller 和 Feign 接口从 `@PutMapping + @RequestParam` 改为 `@PostMapping + @RequestBody @Valid`
+3. `pay-service/PayOrderServiceImpl` 调用方同步适配
 
 ```java
-// 当前代码：pw 通过 URL QueryString 传输
-@PutMapping("/money/deduct")
-public void deductMoney(@RequestParam("pw") String pw, @RequestParam("amount") Integer amount)
-```
-
-**问题：** 支付密码通过 GET 参数传递，会被记录在 Nginx 日志、浏览器历史、代理服务器日志中。
-
-**修复：** 改为 `@RequestBody` POST 传输：
-```java
+// 修复后：密码通过 Request Body 传输，不出现在 URL 中
 @PostMapping("/money/deduct")
-public void deductMoney(@RequestBody DeductRequest request) {
-    // request.getPw(), request.getAmount()
+public void deductMoney(@RequestBody @Valid DeductMoneyDTO deductMoneyDTO) {
+    userService.deductMoney(deductMoneyDTO.getPw(), deductMoneyDTO.getAmount());
 }
+```
 ```
 
 ---
