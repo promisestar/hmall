@@ -15,17 +15,32 @@
           <div class="bg-white rounded-lg shadow-sm p-4 sticky top-24">
             <h4 class="font-bold text-sm mb-3">筛选条件</h4>
 
-            <div class="mb-4">
+            <div v-if="filterOptions.category.length > 0" class="mb-4">
               <h5 class="text-xs text-gray-500 mb-2">分类</h5>
               <div class="space-y-1">
                 <div
-                  v-for="c in ['手机', '电脑', '家电', '服饰', '食品']"
+                  v-for="c in filterOptions.category"
                   :key="c"
                   class="text-sm py-1 px-2 rounded cursor-pointer hover:bg-gray-100 transition-colors"
                   :class="filters.category === c ? 'bg-red-50 text-[#E4393C]' : ''"
                   @click="selectFilter('category', c)"
                 >
                   {{ c }}
+                </div>
+              </div>
+            </div>
+
+            <div v-if="filterOptions.brand.length > 0" class="mb-4">
+              <h5 class="text-xs text-gray-500 mb-2">品牌</h5>
+              <div class="space-y-1">
+                <div
+                  v-for="b in filterOptions.brand"
+                  :key="b"
+                  class="text-sm py-1 px-2 rounded cursor-pointer hover:bg-gray-100 transition-colors"
+                  :class="filters.brand === b ? 'bg-red-50 text-[#E4393C]' : ''"
+                  @click="selectFilter('brand', b)"
+                >
+                  {{ b }}
                 </div>
               </div>
             </div>
@@ -150,12 +165,13 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SearchX } from 'lucide-vue-next'
+import { ElMessage } from 'element-plus'
 import PortalLayout from './PortalLayout.vue'
 import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
-import { searchList } from '@/api/item'
+import { searchList, searchFilters } from '@/api/item'
 import { formatPrice } from '@/utils/format'
-import type { Item } from '@/types'
+import type { Item, SearchFilters } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -174,16 +190,42 @@ const isAsc = ref(false)
 const filters = ref<Record<string, string>>({})
 const priceMin = ref('')
 const priceMax = ref('')
+// 分类/品牌可选项：来自后端聚合结果（随搜索关键字/已选条件动态变化），而非写死
+const filterOptions = ref<SearchFilters>({ category: [], brand: [] })
+
+function buildFilterParams() {
+  const params: Record<string, any> = {
+    key: searchKey.value || undefined,
+    ...filters.value,
+  }
+  if (priceMin.value) params.minPrice = Number(priceMin.value) * 100
+  if (priceMax.value) params.maxPrice = Number(priceMax.value) * 100
+  return params
+}
+
+async function fetchFilters() {
+  try {
+    const res = await searchFilters(buildFilterParams())
+    filterOptions.value = {
+      category: res?.category || [],
+      brand: res?.brand || [],
+    }
+  } catch {
+    filterOptions.value = { category: [], brand: [] }
+  }
+}
 
 function selectFilter(key: string, val: string) {
   filters.value[key] = filters.value[key] === val ? '' : val
   pageNo.value = 1
   fetchData()
+  fetchFilters()
 }
 
 function applyPrice() {
   pageNo.value = 1
   fetchData()
+  fetchFilters()
 }
 
 function resetFilters() {
@@ -194,6 +236,7 @@ function resetFilters() {
   isAsc.value = false
   pageNo.value = 1
   fetchData()
+  fetchFilters()
 }
 
 function changeSort(field: string) {
@@ -253,7 +296,11 @@ watch(() => route.query.key, (val) => {
   searchKey.value = (val as string) || ''
   pageNo.value = 1
   fetchData()
+  fetchFilters()
 })
 
-onMounted(() => fetchData())
+onMounted(() => {
+  fetchData()
+  fetchFilters()
+})
 </script>

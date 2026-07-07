@@ -60,8 +60,15 @@
           今日推荐
         </h3>
         <div class="grid grid-cols-4 gap-4">
-          <div v-for="n in 4" :key="n" class="card-shadow p-2 hover:-translate-y-1 transition-transform cursor-pointer">
-            <img :src="`/img/today0${n}.png`" class="w-full h-40 object-cover rounded" />
+          <div
+            v-for="item in recommendItems"
+            :key="item.id"
+            class="card-shadow p-2 hover:-translate-y-1 transition-transform cursor-pointer"
+            @click="goDetail(item.id)"
+          >
+            <img :src="item.image || '/img/like_01.png'" class="w-full h-40 object-cover rounded" />
+            <p class="text-sm text-gray-800 mt-2 truncate">{{ item.name }}</p>
+            <p class="text-[#E4393C] font-bold text-sm mt-1">¥{{ formatPrice(item.price) }}</p>
           </div>
         </div>
       </div>
@@ -72,17 +79,18 @@
       <div class="bg-white rounded-lg shadow-sm p-4">
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-lg font-bold">猜你喜欢</h3>
-          <span class="text-sm text-gray-500 cursor-pointer hover:text-[#E4393C]">换一换</span>
+          <span class="text-sm text-gray-500 cursor-pointer hover:text-[#E4393C]" @click="refreshGuessLike">换一换</span>
         </div>
         <div class="grid grid-cols-6 gap-3">
           <div
-            v-for="n in 6"
-            :key="n"
+            v-for="item in guessLikeItems"
+            :key="item.id"
             class="card-shadow p-2 hover:-translate-y-1 transition-transform cursor-pointer"
+            @click="goDetail(item.id)"
           >
-            <img :src="`/img/like_0${n > 3 ? n - 3 : n}.png`" class="w-full h-36 object-cover rounded mb-2" />
-            <p class="text-xs text-gray-600 line-clamp-2">精品商品推荐 {{ n }}</p>
-            <p class="text-[#E4393C] font-bold text-sm mt-1">¥116.00</p>
+            <img :src="item.image || '/img/like_01.png'" class="w-full h-36 object-cover rounded mb-2" />
+            <p class="text-xs text-gray-600 line-clamp-2">{{ item.name }}</p>
+            <p class="text-[#E4393C] font-bold text-sm mt-1">¥{{ formatPrice(item.price) }}</p>
           </div>
         </div>
       </div>
@@ -94,17 +102,22 @@
         <div class="flex items-center justify-between mb-4 border-b pb-3">
           <h3 class="text-lg font-bold">家用电器</h3>
           <div class="flex gap-4 text-sm">
-            <span class="text-[#E4393C] font-medium cursor-pointer">热门</span>
-            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer">大家电</span>
-            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer">生活电器</span>
-            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer">厨房电器</span>
+            <span class="text-[#E4393C] font-medium cursor-pointer" @click="fetchFloor('appliances', '家用电器')">热门</span>
+            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer" @click="fetchFloor('appliances', '大家电')">大家电</span>
+            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer" @click="fetchFloor('appliances', '生活电器')">生活电器</span>
+            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer" @click="fetchFloor('appliances', '厨房电器')">厨房电器</span>
           </div>
         </div>
         <div class="grid grid-cols-5 gap-3">
-          <div v-for="n in 10" :key="n" class="text-center hover:shadow-md transition-shadow p-2 rounded cursor-pointer">
-            <img src="/img/like_01.png" class="w-full h-32 object-cover rounded mb-2" />
-            <p class="text-xs text-gray-600 truncate">精品家电商品</p>
-            <p class="text-[#E4393C] font-medium text-sm">¥299.00</p>
+          <div
+            v-for="item in floorItems.appliances"
+            :key="item.id"
+            class="text-center hover:shadow-md transition-shadow p-2 rounded cursor-pointer"
+            @click="goDetail(item.id)"
+          >
+            <img :src="item.image || '/img/like_01.png'" class="w-full h-32 object-cover rounded mb-2" />
+            <p class="text-xs text-gray-600 truncate">{{ item.name }}</p>
+            <p class="text-[#E4393C] font-medium text-sm">¥{{ formatPrice(item.price) }}</p>
           </div>
         </div>
       </div>
@@ -116,22 +129,27 @@
         <div class="flex items-center justify-between mb-4 border-b pb-3">
           <h3 class="text-lg font-bold">手机通讯</h3>
           <div class="flex gap-4 text-sm">
-            <span class="text-[#E4393C] font-medium cursor-pointer">热门</span>
-            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer">新机尝鲜</span>
-            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer">高性价比</span>
+            <span class="text-[#E4393C] font-medium cursor-pointer" @click="fetchFloor('phones', '手机')">热门</span>
+            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer" @click="fetchFloor('phones', '手机')">新机尝鲜</span>
+            <span class="text-gray-500 hover:text-[#E4393C] cursor-pointer" @click="fetchFloor('phones', '手机')">高性价比</span>
           </div>
         </div>
         <div class="grid grid-cols-5 gap-3">
-          <div v-for="n in 10" :key="n" class="text-center hover:shadow-md transition-shadow p-2 rounded cursor-pointer">
-            <img src="/img/like_02.png" class="w-full h-32 object-cover rounded mb-2" />
-            <p class="text-xs text-gray-600 truncate">精品手机商品</p>
-            <p class="text-[#E4393C] font-medium text-sm">¥3999.00</p>
+          <div
+            v-for="item in floorItems.phones"
+            :key="item.id"
+            class="text-center hover:shadow-md transition-shadow p-2 rounded cursor-pointer"
+            @click="goDetail(item.id)"
+          >
+            <img :src="item.image || '/img/like_02.png'" class="w-full h-32 object-cover rounded mb-2" />
+            <p class="text-xs text-gray-600 truncate">{{ item.name }}</p>
+            <p class="text-[#E4393C] font-medium text-sm">¥{{ formatPrice(item.price) }}</p>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Brand -->
+    <!-- Brand (静态占位：品牌墙无后端 API，保持硬编码) -->
     <div class="container-main mt-6">
       <div class="bg-white rounded-lg shadow-sm p-4">
         <div class="grid grid-cols-10 gap-4">
@@ -143,8 +161,16 @@
 </template>
 
 <script setup lang="ts">
+import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import PortalLayout from './PortalLayout.vue'
+import { searchList } from '@/api/item'
+import { formatPrice } from '@/utils/format'
+import type { Item } from '@/types'
 
+const router = useRouter()
+
+// ---- 静态站点数据（无对应后端 API，保持硬编码） ----
 const categories = [
   { name: '图书、音像、数字商品' },
   { name: '家用电器' },
@@ -167,4 +193,50 @@ const banners = [
 ]
 
 const services = ['话费', '机票', '电影票', '游戏', '彩票', '加油站', '酒店', '火车票', '众筹', '理财', '礼品卡', '白条']
+
+// ---- 动态商品数据（对接后端 /search/list） ----
+const recommendItems = ref<Item[]>([])
+const guessLikeItems = ref<Item[]>([])
+const floorItems = reactive<Record<string, Item[]>>({
+  appliances: [],
+  phones: [],
+})
+
+function goDetail(id: number) {
+  router.push(`/portal/search`) // 暂无商品详情页，跳转搜索页
+}
+
+async function fetchRecommend() {
+  try {
+    const res = await searchList({ pageNo: 1, pageSize: 4 })
+    recommendItems.value = res.list || []
+  } catch { /* 静默降级 */ }
+}
+
+async function fetchGuessLike() {
+  try {
+    // 猜你喜欢：随机取一页最新商品
+    const randomPage = Math.ceil(Math.random() * 10)
+    const res = await searchList({ pageNo: randomPage, pageSize: 6 })
+    guessLikeItems.value = res.list || []
+  } catch { /* 静默降级 */ }
+}
+
+async function fetchFloor(floorKey: string, category: string) {
+  try {
+    const res = await searchList({ pageNo: 1, pageSize: 10, category })
+    ;(floorItems as any)[floorKey] = res.list || []
+  } catch { /* 静默降级 */ }
+}
+
+function refreshGuessLike() {
+  fetchGuessLike()
+}
+
+onMounted(() => {
+  fetchRecommend()
+  fetchGuessLike()
+  fetchFloor('appliances', '家用电器')
+  fetchFloor('phones', '手机')
+})
 </script>

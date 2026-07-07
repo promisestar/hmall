@@ -227,7 +227,11 @@ async function handleDelete(id: number) {
 async function fetchData() {
   loading.value = true
   try {
-    const res: PageResult<Item> = await getItemPage({ pageNo: pageNo.value, pageSize: pageSize.value })
+    const res: PageResult<Item> = await getItemPage({
+      pageNo: pageNo.value,
+      pageSize: pageSize.value,
+      key: searchText.value || undefined,
+    })
     items.value = res.list || []
     total.value = res.total || 0
   } finally {

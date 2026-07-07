@@ -1,5 +1,5 @@
 import request from './index'
-import type { Item, PageResult, PageQuery, SearchParams, FilterItem } from '@/types'
+import type { Item, PageResult, PageQuery, SearchParams, SearchFilters } from '@/types'
 
 export function getItemPage(params: PageQuery): Promise<PageResult<Item>> {
   return request.get('/items/page', { params })
@@ -33,7 +33,7 @@ export function searchList(params: SearchParams): Promise<PageResult<Item>> {
   return request.get('/search/list', { params })
 }
 
-export function searchFilters(params: Partial<SearchParams>): Promise<FilterItem[]> {
+export function searchFilters(params: Partial<SearchParams>): Promise<SearchFilters> {
   return request.post('/search/filters', params)
 }
 

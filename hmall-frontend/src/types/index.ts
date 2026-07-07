@@ -128,10 +128,10 @@ export interface PayOrderVO {
   closeTime?: string
 }
 
-// 搜索过滤项
-export interface FilterItem {
-  name: string
-  values: string[]
+// 搜索过滤项（ES 聚合结果：分类/品牌 -> 可选值列表）
+export interface SearchFilters {
+  category: string[]
+  brand: string[]
 }
 
 // 搜索参数
