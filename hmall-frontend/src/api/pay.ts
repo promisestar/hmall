@@ -2,7 +2,7 @@ import request from './index'
 import type { PayApplyDTO, PayOrderFormDTO, PayOrderVO } from '@/types'
 
 export function applyPayOrder(data: PayApplyDTO): Promise<string> {
-  return request.post('/pay-orders', data)
+  return request.post('/pay-orders', data, { responseType: 'text' })
 }
 
 export function tryPayOrderByBalance(id: string, data: PayOrderFormDTO): Promise<void> {
