@@ -64,6 +64,10 @@ export interface CartItem {
 // 购物车表单
 export interface CartFormDTO {
   itemId: number
+  name?: string
+  spec?: string
+  price?: number
+  image?: string
 }
 
 // 订单详情条目

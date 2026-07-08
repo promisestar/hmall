@@ -12,10 +12,10 @@
             <span class="text-white">{{ userStore.username }}</span>
             <span @click="userStore.logout()" class="cursor-pointer hover:text-white transition-colors">退出</span>
           </template>
-          <router-link to="/portal/home" class="hover:text-white transition-colors">我的订单</router-link>
+          <router-link to="/portal/home" class="hover:text-white transition-colors">首页</router-link>
         </div>
         <div class="flex items-center gap-4">
-          <a href="#" class="hover:text-white transition-colors">我的订单</a>
+          <router-link to="/portal/orders" class="hover:text-white transition-colors">我的订单</a>
           <a href="#" class="hover:text-white transition-colors">客户服务</a>
           <router-link to="/admin/dashboard" class="text-[#E4393C] hover:text-red-400 transition-colors font-medium">
             管理后台
@@ -146,7 +146,8 @@ function doSearch() {
 }
 
 onMounted(async () => {
-  if (userStore.isLogin) {
+  // 只在购物车数据为空时才拉取，避免覆盖已选中的 checked 状态
+  if (userStore.isLogin && cartStore.cartList.length === 0) {
     await cartStore.fetchCartList()
   }
 })

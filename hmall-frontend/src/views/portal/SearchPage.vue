@@ -322,7 +322,13 @@ async function addToCart(item: Item) {
   }
   addingId.value = item.id
   try {
-    await cartStore.addToCart({ itemId: item.id })
+    await cartStore.addToCart({
+      itemId: item.id,
+      name: item.name,
+      price: item.price,
+      image: item.image,
+      spec: item.spec,
+    })
     ElMessage.success('已加入购物车')
   } catch {
     ElMessage.error('加入购物车失败')
