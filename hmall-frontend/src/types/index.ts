@@ -118,7 +118,10 @@ export interface PayOrderFormDTO {
 // 支付申请DTO
 export interface PayApplyDTO {
   bizOrderNo: number
+  amount: number
   payChannelCode: string
+  payType: number
+  orderInfo: string
 }
 
 // 支付订单

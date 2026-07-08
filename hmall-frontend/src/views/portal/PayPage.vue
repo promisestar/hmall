@@ -86,7 +86,7 @@ import QRCode from 'qrcode'
 import PortalLayout from './PortalLayout.vue'
 import { useUserStore } from '@/stores/user'
 import { getOrderById } from '@/api/order'
-import { getPayOrderByBizOrderNo, tryPayOrderByBalance } from '@/api/pay'
+import { applyPayOrder, tryPayOrderByBalance } from '@/api/pay'
 import { formatPrice } from '@/utils/format'
 import { ElMessage } from 'element-plus'
 
@@ -96,6 +96,7 @@ const userStore = useUserStore()
 
 const orderId = ref(Number(route.params.orderId))
 const amount = ref(0)
+const payOrderId = ref('')
 const password = ref('')
 const paying = ref(false)
 const activePayMethod = ref<'balance' | 'wechat' | 'alipay'>('balance')
@@ -123,8 +124,7 @@ async function payByBalance() {
   }
   paying.value = true
   try {
-    const payOrderRes = await getPayOrderByBizOrderNo(orderId.value)
-    await tryPayOrderByBalance(payOrderRes.id, { id: payOrderRes.id, pw: password.value })
+    await tryPayOrderByBalance(Number(payOrderId.value), { id: Number(payOrderId.value), pw: password.value })
     router.push(`/portal/pay-success/${orderId.value}`)
   } catch {
     ElMessage.error('支付失败，请检查密码或余额')
@@ -160,6 +160,14 @@ onMounted(async () => {
   try {
     const order = await getOrderById(orderId.value)
     amount.value = order.totalFee
+    // 生成支付单（之前创建订单时漏了这一步）
+    payOrderId.value = await applyPayOrder({
+      bizOrderNo: orderId.value,
+      amount: order.totalFee,
+      payChannelCode: 'balance',
+      payType: 5,          // 5 = 余额支付
+      orderInfo: `订单${orderId.value}`,
+    })
   } catch {
     ElMessage.error('获取订单信息失败')
   }
