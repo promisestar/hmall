@@ -1,8 +1,11 @@
 package com.hmall.trade.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.hmall.common.domain.PageDTO;
+import com.hmall.common.domain.PageQuery;
 import com.hmall.trade.domain.dto.OrderFormDTO;
 import com.hmall.trade.domain.po.Order;
+import com.hmall.trade.domain.vo.OrderVO;
 
 /**
  * <p>
@@ -19,4 +22,11 @@ public interface IOrderService extends IService<Order> {
     void markOrderPaySuccess(Long orderId);
 
     void cancelOrder(Long orderId);
+
+    /**
+     * 分页查询当前用户的订单
+     * @param pageQuery 分页参数
+     * @return 订单分页结果
+     */
+    PageDTO<OrderVO> queryOrderPage(PageQuery pageQuery);
 }

@@ -6,6 +6,8 @@ import com.hmall.api.client.CartClient;
 import com.hmall.api.client.ItemClient;
 import com.hmall.api.dto.ItemDTO;
 import com.hmall.api.dto.OrderDetailDTO;
+import com.hmall.common.domain.PageDTO;
+import com.hmall.common.domain.PageQuery;
 import com.hmall.common.exception.BadRequestException;
 import com.hmall.common.utils.BeanUtils;
 import com.hmall.common.utils.UserContext;
@@ -15,6 +17,7 @@ import com.hmall.trade.domain.dto.OrderFormDTO;
 import com.hmall.trade.domain.po.LocalMessage;
 import com.hmall.trade.domain.po.Order;
 import com.hmall.trade.domain.po.OrderDetail;
+import com.hmall.trade.domain.vo.OrderVO;
 import com.hmall.trade.mapper.LocalMessageMapper;
 import com.hmall.trade.mapper.OrderMapper;
 import com.hmall.trade.service.IOrderDetailService;
@@ -146,6 +149,17 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 2. 删除订单
         this.removeById(orderId);
 
+    }
+
+    @Override
+    public PageDTO<OrderVO> queryOrderPage(PageQuery pageQuery) {
+        return PageDTO.of(
+            lambdaQuery()
+                .eq(Order::getUserId, UserContext.getUser())
+                .orderByDesc(Order::getCreateTime)
+                .page(pageQuery.toMpPageDefaultSortByCreateTimeDesc()),
+            OrderVO.class
+        );
     }
 
     private List<OrderDetail> buildDetails(Long orderId, List<ItemDTO> items, Map<Long, Integer> numMap) {

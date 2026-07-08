@@ -1,5 +1,7 @@
 package com.hmall.trade.controller;
 
+import com.hmall.common.domain.PageDTO;
+import com.hmall.common.domain.PageQuery;
 import com.hmall.common.utils.BeanUtils;
 
 import com.hmall.trade.domain.dto.OrderFormDTO;
@@ -39,5 +41,11 @@ public class OrderController {
     @PutMapping("/{orderId}")
     public void markOrderPaySuccess(@PathVariable("orderId") Long orderId) {
         orderService.markOrderPaySuccess(orderId);
+    }
+
+    @ApiOperation("分页查询当前用户订单")
+    @GetMapping("/page")
+    public PageDTO<OrderVO> queryOrderPage(PageQuery pageQuery) {
+        return orderService.queryOrderPage(pageQuery);
     }
 }

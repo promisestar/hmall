@@ -40,6 +40,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/portal/orders',
+      name: 'OrderList',
+      component: () => import('@/views/portal/OrderList.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/portal/pay/:orderId',
       name: 'Pay',
       component: () => import('@/views/portal/PayPage.vue'),
