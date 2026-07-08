@@ -111,7 +111,7 @@ async function submitOrder() {
   submitting.value = true
   try {
     const details = cartStore.checkedItems.map((item) => ({
-      itemId: item.id,
+      itemId: item.itemId,
       num: item.num,
     }))
     const orderId = await createOrder({ addressId: selectedAddressId.value, paymentType: 1, details })

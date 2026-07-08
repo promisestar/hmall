@@ -53,6 +53,7 @@ export interface Item {
 // 购物车项
 export interface CartItem {
   id: number
+  itemId: number
   name: string
   image: string
   price: number
