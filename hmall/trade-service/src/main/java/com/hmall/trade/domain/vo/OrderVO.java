@@ -5,6 +5,7 @@ import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @ApiModel(description = "订单页面VO")
@@ -31,4 +32,6 @@ public class OrderVO {
     private LocalDateTime closeTime;
     @ApiModelProperty("评价时间")
     private LocalDateTime commentTime;
+    @ApiModelProperty("订单详情列表")
+    private List<OrderDetailVO> detailVOs;
 }

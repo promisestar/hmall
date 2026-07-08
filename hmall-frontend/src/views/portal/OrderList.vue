@@ -24,29 +24,56 @@
       <!-- 订单表格 -->
       <div v-else class="bg-white rounded-lg shadow-sm overflow-hidden">
         <el-table :data="orderList" style="width: 100%" stripe>
+          <!-- 所购商品 -->
+          <el-table-column label="商品信息" min-width="280">
+            <template #default="{ row }">
+              <div v-if="row.detailVOs && row.detailVOs.length > 0" class="flex items-center gap-2 flex-wrap">
+                <div
+                  v-for="item in row.detailVOs.slice(0, 4)"
+                  :key="item.id"
+                  class="flex items-center gap-1.5 bg-gray-50 rounded px-2 py-1"
+                >
+                  <img
+                    :src="item.image"
+                    :alt="item.name"
+                    class="w-8 h-8 object-cover rounded border border-gray-200"
+                  />
+                  <span class="text-sm text-gray-700 whitespace-nowrap">
+                    {{ item.name }}
+                    <span class="text-gray-400">x{{ item.num }}</span>
+                  </span>
+                </div>
+                <span v-if="row.detailVOs.length > 4" class="text-xs text-gray-400">
+                  等{{ row.detailVOs.length }}件
+                </span>
+              </div>
+              <span v-else class="text-gray-400 text-xs">-</span>
+            </template>
+          </el-table-column>
+
           <!-- 订单编号 -->
-          <el-table-column prop="id" label="订单编号" width="200">
+          <el-table-column prop="id" label="订单编号" min-width="140">
             <template #default="{ row }">
               <span class="text-xs text-gray-500 font-mono">{{ truncateId(row.id) }}</span>
             </template>
           </el-table-column>
 
           <!-- 订单金额 -->
-          <el-table-column prop="totalFee" label="金额" width="120" align="right">
+          <el-table-column prop="totalFee" label="金额" min-width="100" align="right">
             <template #default="{ row }">
               <span class="text-[#E4393C] font-bold">¥{{ formatPrice(row.totalFee) }}</span>
             </template>
           </el-table-column>
 
           <!-- 支付方式 -->
-          <el-table-column prop="paymentType" label="支付方式" width="100" align="center">
+          <el-table-column prop="paymentType" label="支付方式" min-width="90" align="center">
             <template #default="{ row }">
               {{ paymentTypeText[row.paymentType] || '未知' }}
             </template>
           </el-table-column>
 
           <!-- 订单状态 -->
-          <el-table-column prop="status" label="状态" width="140" align="center">
+          <el-table-column prop="status" label="状态" min-width="100" align="center">
             <template #default="{ row }">
               <el-tag :type="statusTagType(row.status)" size="small">
                 {{ statusText[row.status] || '未知' }}
@@ -55,14 +82,14 @@
           </el-table-column>
 
           <!-- 下单时间 -->
-          <el-table-column prop="createTime" label="下单时间" width="180" align="center">
+          <el-table-column prop="createTime" label="下单时间" min-width="150" align="center">
             <template #default="{ row }">
               {{ formatDate(row.createTime, 'yyyy-MM-dd HH:mm') }}
             </template>
           </el-table-column>
 
           <!-- 支付时间 -->
-          <el-table-column prop="payTime" label="支付时间" width="180" align="center">
+          <el-table-column prop="payTime" label="支付时间" min-width="150" align="center">
             <template #default="{ row }">
               <span v-if="row.payTime">{{ formatDate(row.payTime, 'yyyy-MM-dd HH:mm') }}</span>
               <span v-else class="text-gray-400">-</span>
