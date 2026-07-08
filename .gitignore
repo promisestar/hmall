@@ -6,3 +6,6 @@
 !/docs/
 !.gitignore
 /logs/
+
+# Maven 构建产物
+**/target/

@@ -1,4 +1,0 @@
-hm:
-  db:
-    host: mysql:3306
-    pw: 123
