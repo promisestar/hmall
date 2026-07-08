@@ -94,7 +94,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const orderId = ref(Number(route.params.orderId))
+const orderId = ref(route.params.orderId as string)
 const amount = ref(0)
 const payOrderId = ref('')
 const password = ref('')
@@ -124,7 +124,7 @@ async function payByBalance() {
   }
   paying.value = true
   try {
-    await tryPayOrderByBalance(Number(payOrderId.value), { id: Number(payOrderId.value), pw: password.value })
+    await tryPayOrderByBalance(payOrderId.value, { id: payOrderId.value, pw: password.value })
     router.push(`/portal/pay-success/${orderId.value}`)
   } catch {
     ElMessage.error('支付失败，请检查密码或余额')

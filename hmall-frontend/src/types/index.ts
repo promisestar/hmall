@@ -86,7 +86,7 @@ export interface OrderFormDTO {
 
 // 订单
 export interface OrderVO {
-  id: number
+  id: string
   totalFee: number
   paymentType: number
   userId: number
@@ -111,13 +111,13 @@ export interface OrderDetailVO {
 
 // 支付表单
 export interface PayOrderFormDTO {
-  id: number
+  id: string
   pw: string
 }
 
 // 支付申请DTO
 export interface PayApplyDTO {
-  bizOrderNo: number
+  bizOrderNo: string
   amount: number
   payChannelCode: string
   payType: number
@@ -126,8 +126,8 @@ export interface PayApplyDTO {
 
 // 支付订单
 export interface PayOrderVO {
-  id: number
-  bizOrderNo: number
+  id: string
+  bizOrderNo: string
   payChannelCode: string
   amount: number
   status: number
