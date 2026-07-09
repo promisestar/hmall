@@ -17,6 +17,7 @@ import com.hmall.common.utils.BeanUtils;
 import com.hmall.common.utils.CollUtils;
 import com.hmall.common.utils.UserContext;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +36,7 @@ import java.util.stream.Collectors;
  * @author 虎哥
  * @since 2023-05-05
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements ICartService {
@@ -88,32 +90,19 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
     private void handleCartItems(List<CartVO> vos) {
         // 1.获取商品id
         Set<Long> itemIds = vos.stream().map(CartVO::getItemId).collect(Collectors.toSet());
-//        // nacos拉取订阅
-//        List<ServiceInstance> instances = discoveryClient.getInstances("item-service");
-//        if(CollUtil.isEmpty(instances)){
-//            return;
-//        }
-//        // 负载均衡
-//        ServiceInstance instance = instances.get(RandomUtil.randomInt(instances.size()));
-//        // 2.查询商品
-//        ResponseEntity<List<ItemDTO>> response = restTemplate.exchange(
-//                instance.getUri() + "/items?ids={ids}",
-//                HttpMethod.GET,
-//                null,
-//                new ParameterizedTypeReference<List<ItemDTO>>() {
-//                },
-//                Map.of("ids", CollUtils.join(itemIds, ","))
-//        );
-//        if(!response.getStatusCode().is2xxSuccessful()){
-//            return;
-//        }
-//        List<ItemDTO> items = response.getBody();
-        List<ItemDTO> items = itemClient.queryItemsByIds(itemIds);
+        // 2.查询商品（Feign远程调用，需try-catch保护）
+        List<ItemDTO> items;
+        try {
+            items = itemClient.queryItemsByIds(itemIds);
+        } catch (Exception e) {
+            log.error("查询商品信息失败，itemIds={}", itemIds, e);
+            return;
+        }
         if (CollUtils.isEmpty(items)) {
             return;
         }
         // 3.转为 id 到 item的map
-        Map<Long, ItemDTO> itemMap = items.stream().collect(Collectors.toMap(ItemDTO::getId, Function.identity()));
+        Map<Long, ItemDTO> itemMap = items.stream().collect(Collectors.toMap(ItemDTO::getId, Function.identity(), (k1, k2) -> k1));
         // 4.写入vo
         for (CartVO v : vos) {
             ItemDTO item = itemMap.get(v.getItemId());

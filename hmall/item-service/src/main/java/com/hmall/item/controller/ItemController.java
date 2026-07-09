@@ -14,6 +14,7 @@ import com.hmall.item.service.IItemService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +22,7 @@ import javax.validation.Valid;
 import java.util.List;
 
 @Api(tags = "商品管理相关接口")
+@Slf4j
 @RestController
 @RequestMapping("/items")
 @RequiredArgsConstructor
@@ -57,7 +59,11 @@ public class ItemController {
     public void saveItem(@RequestBody @Valid ItemDTO item) {
         // 新增
         itemService.save(BeanUtils.copyBean(item, Item.class));
-        rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.CREATE_DOCUMENT_KEY, item);
+        try {
+            rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.CREATE_DOCUMENT_KEY, item);
+        } catch (Exception e) {
+            log.error("同步ES新增商品失败，itemId={}", item.getId(), e);
+        }
     }
 
     @ApiOperation("更新商品状态")
@@ -68,8 +74,12 @@ public class ItemController {
         item.setStatus(status);
         itemService.updateById(item);
         Item updated_item = itemService.getById(id);
-        rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.UPDATE_DOCUMENT_KEY,
-                BeanUtils.copyBean(updated_item, ItemDTO.class));
+        try {
+            rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.UPDATE_DOCUMENT_KEY,
+                    BeanUtils.copyBean(updated_item, ItemDTO.class));
+        } catch (Exception e) {
+            log.error("同步ES更新商品状态失败，itemId={}", id, e);
+        }
     }
 
     @ApiOperation("更新商品")
@@ -79,14 +89,22 @@ public class ItemController {
         item.setStatus(null);
         // 更新
         itemService.updateById(BeanUtils.copyBean(item, Item.class));
-        rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.UPDATE_DOCUMENT_KEY, item);
+        try {
+            rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.UPDATE_DOCUMENT_KEY, item);
+        } catch (Exception e) {
+            log.error("同步ES更新商品失败，itemId={}", item.getId(), e);
+        }
     }
 
     @ApiOperation("根据id删除商品")
     @DeleteMapping("{id}")
     public void deleteItemById(@PathVariable("id") Long id) {
         itemService.removeById(id);
-        rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.REMOVE_DOCUMENT_KEY, id);
+        try {
+            rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.REMOVE_DOCUMENT_KEY, id);
+        } catch (Exception e) {
+            log.error("同步ES删除商品失败，itemId={}", id, e);
+        }
     }
 
     @ApiOperation("批量扣减库存")

@@ -10,6 +10,7 @@ import com.hmall.api.dto.OrderDetailDTO;
 import com.hmall.common.domain.PageDTO;
 import com.hmall.common.domain.PageQuery;
 import com.hmall.common.exception.BadRequestException;
+import com.hmall.common.exception.BizIllegalException;
 import com.hmall.common.utils.BeanUtils;
 import com.hmall.common.utils.UserContext;
 
@@ -67,7 +68,13 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 .collect(Collectors.toMap(OrderDetailDTO::getItemId, OrderDetailDTO::getNum));
         Set<Long> itemIds = itemNumMap.keySet();
         // 1.3.查询商品
-        List<ItemDTO> items = itemClient.queryItemsByIds(itemIds);
+        List<ItemDTO> items;
+        try {
+            items = itemClient.queryItemsByIds(itemIds);
+        } catch (Exception e) {
+            log.error("查询商品信息失败，itemIds={}", itemIds, e);
+            throw new BizIllegalException("商品服务暂不可用，请稍后重试");
+        }
         if (items == null || items.size() < itemIds.size()) {
             throw new BadRequestException("商品不存在");
         }
@@ -114,18 +121,22 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         try {
             itemClient.deductStock(detailDTOS);
         } catch (Exception e) {
-            throw new RuntimeException("库存不足！");
+            throw new BizIllegalException("库存不足！", e);
         }
         // 5. 发送延迟消息
-        rabbitTemplate.convertAndSend(
-                MQConstants.DELAY_EXCHANGE_NAME,
-                MQConstants.DELAY_ORDER_KEY,
-                order.getId(),
-                message -> {
-                    message.getMessageProperties().setDelay(1800000);
-                    return message;
-                }
-        );
+        try {
+            rabbitTemplate.convertAndSend(
+                    MQConstants.DELAY_EXCHANGE_NAME,
+                    MQConstants.DELAY_ORDER_KEY,
+                    order.getId(),
+                    message -> {
+                        message.getMessageProperties().setDelay(1800000);
+                        return message;
+                    }
+            );
+        } catch (Exception e) {
+            log.error("发送订单延迟消息失败，orderId={}", order.getId(), e);
+        }
         return order.getId();
     }
 
@@ -145,11 +156,15 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order == null || order.getStatus() != 1) {
            return;
         }
-        // 1. 恢复库存
+        // 2. 恢复库存
         List<OrderDetail> orderDetails = detailService.lambdaQuery().eq(OrderDetail::getOrderId, orderId).list();
         List<OrderDetailDTO> orderDetailDTOS = BeanUtils.copyList(orderDetails, OrderDetailDTO.class);
-        itemClient.recoverStock(orderDetailDTOS);
-        // 2. 删除订单
+        try {
+            itemClient.recoverStock(orderDetailDTOS);
+        } catch (Exception e) {
+            log.error("恢复库存失败，orderId={}", orderId, e);
+        }
+        // 3. 删除订单
         this.removeById(orderId);
 
     }

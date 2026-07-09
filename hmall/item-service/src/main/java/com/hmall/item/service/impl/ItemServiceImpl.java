@@ -9,6 +9,7 @@ import com.hmall.item.domain.dto.OrderDetailDTO;
 import com.hmall.item.domain.po.Item;
 import com.hmall.item.mapper.ItemMapper;
 import com.hmall.item.service.IItemService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +23,7 @@ import java.util.List;
  *
  * @author 虎哥
  */
+@Slf4j
 @Service
 public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements IItemService {
 
@@ -57,6 +59,11 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
 
     @Override
     public List<ItemDTO> queryItemByIds(Collection<Long> ids) {
-        return BeanUtils.copyList(listByIds(ids), ItemDTO.class);
+        try {
+            return BeanUtils.copyList(listByIds(ids), ItemDTO.class);
+        } catch (Exception e) {
+            log.error("查询商品信息失败，ids={}", ids, e);
+            throw new BizIllegalException("查询商品信息异常", e);
+        }
     }
 }

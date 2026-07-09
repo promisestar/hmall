@@ -70,7 +70,12 @@ public class PayOrderServiceImpl extends ServiceImpl<PayOrderMapper, PayOrder> i
         DeductMoneyDTO deductDTO = new DeductMoneyDTO();
         deductDTO.setPw(payOrderFormDTO.getPw());
         deductDTO.setAmount(po.getAmount());
-        userClient.deductMoney(deductDTO);
+        try {
+            userClient.deductMoney(deductDTO);
+        } catch (Exception e) {
+            log.error("扣款失败，payOrderId={}, amount={}", po.getId(), po.getAmount(), e);
+            throw new BizIllegalException("扣款失败，请稍后重试", e);
+        }
         // 4.修改支付单状态
         boolean success = markPayOrderSuccess(payOrderFormDTO.getId(), LocalDateTime.now());
         if (!success) {

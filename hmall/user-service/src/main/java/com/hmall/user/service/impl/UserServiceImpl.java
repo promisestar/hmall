@@ -44,7 +44,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         String username = loginDTO.getUsername();
         String password = loginDTO.getPassword();
         // 2.根据用户名或手机号查询
-        User user = lambdaQuery().eq(User::getUsername, username).one();
+        User user;
+        try {
+            user = lambdaQuery().eq(User::getUsername, username).one();
+        } catch (Exception e) {
+            throw new BizIllegalException("登录异常，请稍后重试", e);
+        }
         Assert.notNull(user, "用户名错误");
         // 3.校验是否禁用
         if (user.getStatus() == UserStatus.FROZEN) {
@@ -79,7 +84,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         try {
             baseMapper.updateMoney(UserContext.getUser(), totalFee);
         } catch (Exception e) {
-            throw new RuntimeException("扣款失败，可能是余额不足！", e);
+            throw new BizIllegalException("扣款失败，可能是余额不足！", e);
         }
         log.info("扣款成功");
     }
