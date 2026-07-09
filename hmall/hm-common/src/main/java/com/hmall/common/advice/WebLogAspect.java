@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -15,9 +16,11 @@ import javax.servlet.http.HttpServletRequest;
 
 /**
  * 请求日志切面 — 零侵入记录所有 Controller 方法的请求/响应/耗时
+ * 仅在 Servlet Web 环境下生效（Gateway 是响应式架构，跳过）
  *
  * @author hmall
  */
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Slf4j
 @Aspect
 @Order(1)
