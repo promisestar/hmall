@@ -6,7 +6,6 @@ import com.hmall.common.exception.CommonException;
 import com.hmall.common.exception.DbException;
 import com.hmall.common.utils.WebUtils;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -17,7 +16,6 @@ import org.springframework.web.util.NestedServletException;
 import java.net.BindException;
 import java.util.stream.Collectors;
 
-@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RestControllerAdvice
 @Slf4j
 public class CommonExceptionAdvice {
