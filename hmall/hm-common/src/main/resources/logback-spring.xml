@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- 日志存放目录：可通过 LOG_PATH 环境变量或启动参数覆盖 -->
+    <property name="LOG_HOME" value="${LOG_PATH:-./logs}"/>
+    <!-- 日志格式 -->
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+
+    <!-- ==================== 控制台输出（本地开发用） ==================== -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ==================== 全量业务日志：按天滚动，保留 30 天 ==================== -->
+    <appender name="FILE_ALL" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/hmall.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/hmall.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ==================== API 请求日志单独文件（WebLogAspect 专用） ==================== -->
+    <appender name="FILE_API" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/api.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/api.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ==================== 日志分配 ==================== -->
+
+    <!-- WebLogAspect 的 API 日志单独输出到 api.log（不与业务日志混在一起） -->
+    <logger name="com.hmall.common.advice.WebLogAspect" level="INFO" additivity="false">
+        <appender-ref ref="FILE_API"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!-- 根日志：INFO 级别 → 控制台 + hmall.log -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE_ALL"/>
+    </root>
+
+</configuration>

@@ -32,6 +32,12 @@
             <artifactId>spring-webmvc</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!--AOP切面支持（运行时由消费模块的starter-web提供）-->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <!--日志-->
         <dependency>
             <groupId>org.springframework.boot</groupId>
