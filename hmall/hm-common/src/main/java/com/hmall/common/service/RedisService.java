@@ -172,11 +172,10 @@ public class RedisService {
         try {
             // 预序列化 value 为 JSON 字符串，因为 StringRedisTemplate 不会自动做 Jackson 转换
             String valueJson = objectMapper.writeValueAsString(value);
-            Long ttlSeconds = unit.toSeconds(timeout);
             // executeScript 使用 StringRedisTemplate，args 以原始字符串形式传入 Lua
             // Lua 中 tonumber(ARGV[2]) 可正常解析（无 Jackson 引号包裹问题）
             String result = executeScript(SET_IF_ABSENT_LUA, String.class,
-                    Collections.singletonList(key), valueJson, ttlSeconds);
+                    Collections.singletonList(key), valueJson, String.valueOf(unit.toSeconds(timeout)));
             return "OK".equals(result);
         } catch (Exception e) {
             log.warn("SET NX EX 失败, key={}", key, e);
