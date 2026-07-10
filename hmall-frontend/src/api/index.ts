@@ -18,9 +18,16 @@ instance.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
-// 响应拦截器：自动解包 data + 401 处理
+// 响应拦截器：自动解包 data + Token 续期 + 401 处理
 instance.interceptors.response.use(
-  (response) => response.data,
+  (response) => {
+    // Token 续期：Gateway 续期后通过 Authorization 响应头下发新 token
+    const newToken = response.headers['authorization']
+    if (newToken) {
+      sessionStorage.setItem('token', newToken)
+    }
+    return response.data
+  },
   (error) => {
     if (error.response?.status === 401) {
       sessionStorage.removeItem('token')
