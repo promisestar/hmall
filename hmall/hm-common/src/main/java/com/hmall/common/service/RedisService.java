@@ -43,26 +43,61 @@ public class RedisService {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     // ==================== String 操作 ====================
+    //
+    // 使用 stringRedisTemplate + 手动 Jackson 序列化/反序列化，原因：
+    // 1. 写入时 ObjectMapper 可精确控制序列化格式（不会额外包裹 JSON 引号）
+    // 2. 读取时 ObjectMapper.readValue(json, clazz) 可精确还原目标类型，
+    //    避免 redisTemplate（Jackson 序列化器）无类型信息时退化为 LinkedHashMap
 
     public void set(String key, Object value) {
-        redisTemplate.opsForValue().set(key, value);
+        try {
+            String json = objectMapper.writeValueAsString(value);
+            stringRedisTemplate.opsForValue().set(key, json);
+        } catch (Exception e) {
+            log.warn("Redis 缓存序列化失败, key={}", key, e);
+        }
     }
 
     public void set(String key, Object value, long timeout, TimeUnit unit) {
-        redisTemplate.opsForValue().set(key, value, timeout, unit);
+        try {
+            String json = objectMapper.writeValueAsString(value);
+            stringRedisTemplate.opsForValue().set(key, json, timeout, unit);
+        } catch (Exception e) {
+            log.warn("Redis 缓存序列化失败, key={}", key, e);
+        }
     }
 
     public Object get(String key) {
-        return redisTemplate.opsForValue().get(key);
-    }
-
-    @SuppressWarnings("unchecked")
-    public <T> T get(String key, Class<T> clazz) {
-        Object value = redisTemplate.opsForValue().get(key);
-        if (value == null) {
+        String json = stringRedisTemplate.opsForValue().get(key);
+        if (json == null) {
             return null;
         }
-        return (T) value;
+        try {
+            // 反序列化为 Object：JSON 字符串如 "\"hello\"" → String "hello"（去掉 JSON 引号）
+            // JSON 对象如 {"id":1} → LinkedHashMap（与旧 Jackson 行为一致，无破坏性变更）
+            // 调用方如需精确类型应使用 get(key, Class<T>)
+            return objectMapper.readValue(json, Object.class);
+        } catch (Exception e) {
+            log.warn("Redis 缓存反序列化失败, key={}", key, e);
+            return json; // fallback: 无法反序列化时返回原始字符串
+        }
+    }
+
+    /**
+     * 读取缓存并反序列化为指定类型。
+     * 写入时通过 {@link #set} 或 {@link #setIfAbsent} 存储的 JSON 均可正确还原。
+     */
+    public <T> T get(String key, Class<T> clazz) {
+        String json = stringRedisTemplate.opsForValue().get(key);
+        if (json == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, clazz);
+        } catch (Exception e) {
+            log.warn("Redis 缓存反序列化失败, key={}, type={}", key, clazz.getName(), e);
+            return null;
+        }
     }
 
     public boolean hasKey(String key) {
