@@ -96,6 +96,11 @@ Exchange: "cart.sync.topic" (topic)
 - **Lua 脚本保证并发安全** + 5min 补偿任务兜底 MQ 失败
 - **删除双删同步**防止补偿任务回填残留数据
 
+**Lua 脚本鲁棒性增强（已修复）**：
+- `add_cart.lua`：`local size = redis.call('HLEN', KEYS[1]) or 0` 防御 nil → 数字比较异常
+- `add_cart.lua`：所有数值参数使用 `tonumber(ARGV[n])` 显式转换（配合 Java 端传 Long 避免 Jackson 引号问题）
+- `set_if_absent.lua`：`tonumber(ARGV[2])` 显式转换，防御不同序列化器下参数类型不一致
+
 ---
 
 #### 3.2 分布式锁 — 保护扣款/扣库存
@@ -159,20 +164,23 @@ try {
 **改造方案**：
 
 ```java
-// item-service 新增缓存层
+// item-service 新增缓存层（双 Template：String 读写走 stringRedisTemplate + 手动 Jackson）
 public ItemDTO getItemById(Long id) {
-    // 1. 查 Redis
+    // 1. 查 Redis（StringRedisTemplate 读取 → objectMapper.readValue 精确还原 ItemDTO）
     String key = "item:info:" + id;
-    ItemDTO cached = (ItemDTO) redisService.get(key);
+    ItemDTO cached = redisService.get(key, ItemDTO.class);  // 类型安全，非 LinkedHashMap
     if (cached != null) return cached;
     // 2. 查 DB
     Item item = getById(id);
     ItemDTO dto = BeanUtils.copyBean(item, ItemDTO.class);
-    // 3. 写 Redis（SET NX EX，避免覆盖已被刷新的缓存）
+    // 3. 写 Redis（objectMapper.writeValueAsString → Lua SET NX EX → stringRedisTemplate）
+    //    SET NX EX 避免覆盖已被刷新的缓存
     redisService.setIfAbsent(key, dto, 30, TimeUnit.MINUTES);
     return dto;
 }
 ```
+
+> **注意**：不再使用 `(ItemDTO) redisService.get(key)` 强转，因为 Jackson 反序列化会退化为 `LinkedHashMap`。改用 `redisService.get(key, ItemDTO.class)` 内部走 `objectMapper.readValue()` 精确还原类型。
 
 **缓存失效策略（三层保障）：**
 
@@ -215,11 +223,18 @@ public class RedisCacheAspect {
             return joinPoint.proceed();
         } catch (Exception e) {
             log.error("Redis 操作异常，降级处理", e);
-            return null; // 返回 null，上层逻辑走 DB
+            // 根据返回类型返回安全的默认值
+            Class<?> returnType = ((MethodSignature) joinPoint.getSignature()).getReturnType();
+            if (returnType == boolean.class) return false;  // 避免 null 拆箱 NPE
+            if (returnType == long.class)   return 0L;
+            if (returnType == int.class)    return 0;
+            return null; // void / Object / Long / Boolean 引用类型安全
         }
     }
 }
 ```
+
+**关键细节**：不能统一 `return null`，因为 `setIfAbsent`/`hasKey`/`hHasKey` 返回 `boolean` 基本类型，`null` 自动拆箱会触发 `NullPointerException`。
 
 **区分关键业务**：通过 `@CacheException` 注解标记不可降级的方法（如分布式锁、秒杀库存），异常时仍然抛出。
 
@@ -323,26 +338,38 @@ return 1
 
 > hm-common 已有 `commons-pool2` 依赖。
 
-### 5.2 RedisConfig（hm-common）
+### 5.2 RedisConfig（hm-common）— 双 Template 设计
 
 ```java
 @Configuration
 public class RedisConfig {
+    // 方案一：RedisTemplate（Jackson 序列化）— Hash/Set 操作用
+    //         自动 Object ↔ JSON，hGetAll 返回 Map 无类型还原需求
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory factory) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(factory);
-        // Key: String
         template.setKeySerializer(new StringRedisSerializer());
         template.setHashKeySerializer(new StringRedisSerializer());
-        // Value: JSON（不携带类型信息，减少存储空间）
         Jackson2JsonRedisSerializer<Object> serializer = new Jackson2JsonRedisSerializer<>(Object.class);
         template.setValueSerializer(serializer);
         template.setHashValueSerializer(serializer);
         return template;
     }
+
+    // 方案二：StringRedisTemplate（String 序列化）— Lua 脚本 + String 读写用
+    //         Spring Boot 自动配置，无需手动创建 Bean。
+    //         优势：args 无 Jackson 引号包裹 → Lua tonumber() 可正常解析；
+    //               result "OK"/数字/nil 直接作为 String，不会触发非 JSON 解析异常。
 }
 ```
+
+**为什么需要两个 Template**：`Jackson2JsonMessageConverter` 在 Lua 脚本场景下有三个致命缺陷：
+1. Java `String` 值会被 JSON 序列化包裹引号（`"\"1800\""`）→ Lua `tonumber()` 解析失败
+2. Lua 返回值 `"OK"` 不是合法 JSON → 反序列化抛异常
+3. `get(key, clazz)` 反序列化无类型信息 → JSON 对象默认退化为 `LinkedHashMap` → 强转 ClassCastException
+
+`StringRedisTemplate` + 手动 `ObjectMapper` 完全绕过这三个问题。
 
 ### 5.3 application.yml（各微服务）
 
@@ -398,3 +425,12 @@ org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
 12. **冷启动同步幂等性**：`ensureCartRedisSynced` 使用 HSET 回填，重复调用无副作用。并发冷启动时多个请求可能同时触发全量 MySQL 加载，但 Redis HSET 覆盖写入是幂等的。
 
 13. **Cart 表 version 索引**：`ALTER TABLE cart ADD INDEX idx_cart_user_version(user_id, version)` 加速补偿任务的 `SELECT MAX(version) GROUP BY user_id` 查询。
+
+14. **Jackson 序列化陷阱（三个已修复）**：
+    - **Lua args 不传 String 数值**：`String.valueOf(1800)` 经 Jackson 序列化为 `"\"1800\""`（带引号），Lua `tonumber()` 解析失败 → **必须传 Long/Integer**
+    - **Lua result 不可经 Jackson 反序列化**："OK"/数字/nil 不是 JSON → 用 `StringRedisTemplate` 专门执行 Lua 脚本
+    - **`get(key, clazz)` 不可用 Jackson 自动反序列化**：无类型信息退化为 `LinkedHashMap` → 用 `objectMapper.readValue(json, clazz)` 精确还原
+
+15. **双 Template 职责边界**：
+    - `StringRedisTemplate`：Lua 脚本执行 + String 读写（手动 Jackson 序列化），保证类型精确还原
+    - `RedisTemplate<String, Object>`：Hash/Set 操作（Jackson 自动转换），返回值类型固定无还原问题

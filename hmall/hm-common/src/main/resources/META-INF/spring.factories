@@ -5,4 +5,5 @@ org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
   com.hmall.common.config.JsonConfig,\
   com.hmall.common.config.WebMvcAutoConfiguration,\
   com.hmall.common.config.RedisConfig,\
+  com.hmall.common.config.LogDirectoryInitializer,\
   com.hmall.common.aspect.RedisCacheAspect

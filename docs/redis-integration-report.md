@@ -25,11 +25,11 @@
 | `pom.xml` | 修改 | 新增 `spring-boot-starter-data-redis` 依赖 |
 | `META-INF/spring.factories` | 修改 | 注册 `RedisConfig` 和 `RedisCacheAspect` |
 | `config/RedisConfig.java` | 新增 | RedisTemplate Bean 配置（Jackson2Json 序列化 + `@ConditionalOnProperty` 按需加载 + `@Import` RedisService/RedisLockUtil） |
-| `service/RedisService.java` | 新增 | Redis 操作封装 + Lua 脚本执行（String/Hash/Set/Lua/验证码/Token 黑名单/秒杀预留） |
+| `service/RedisService.java` | 新增 | **双 Template 设计**：`RedisTemplate`（Jackson，Hash/Set 操作）+ `StringRedisTemplate`（Lua 脚本 + String 读写）+ 手动 `ObjectMapper` 序列化 |
 | `utils/RedisLockUtil.java` | 新增 | 分布式锁工具（SET NX EX + Lua 原子释放） |
 | `utils/LuaScriptLoader.java` | 新增 | Lua 脚本加载工具（从 classpath 读取 .lua 文件） |
-| `aspect/RedisCacheAspect.java` | 新增 | Redis 异常隔离切面（拦截异常 → 返回 null 降级） |
-| `resources/lua/set_if_absent.lua` | 新增 | SET NX EX 原子缓存写入 |
+| `aspect/RedisCacheAspect.java` | 新增 | Redis 异常隔离切面（拦截异常 → 根据返回类型返回默认值：`boolean`→false、`long`→0L、引用类型→null） |
+| `resources/lua/set_if_absent.lua` | 新增 | SET NX EX 原子缓存写入（`tonumber(ARGV[2])` 防御 String → 整数转换异常） |
 | `resources/lua/hdel_atomic.lua` | 新增 | 批量 HDEL 原子删除 |
 | `resources/lua/release_lock.lua` | 新增 | 分布式锁 Lua 原子释放 |
 
@@ -46,7 +46,7 @@
 | `mq/CartSyncSender.java` | 新增 | MQ 生产者（异步通知 MySQL 落库） |
 | `mq/CartSyncReceiver.java` | 新增 | MQ 消费者（内联 @QueueBinding，消费后 MySQL UPSERT） |
 | `task/CartSyncCompensationTask.java` | 新增 | @Scheduled 5min 版本比对补偿同步 |
-| `resources/lua/add_cart.lua` | 修改 | KEYS[3] 全局版本 key + `or 0` 防御 + ARGV[5] 版本参数 |
+| `resources/lua/add_cart.lua` | 修改 | KEYS[3] 全局版本 key + `or 0` 防御 HLEN nil + `tonumber()` 显式转换 + ARGV[5] 版本参数 |
 | `resources/lua/remove_cart.lua` | 新增 | 原子删除双 Hash |
 | `resources/db/migration/V1__add_cart_version.sql` | 新增 | ALTER TABLE cart ADD COLUMN version |
 
@@ -89,13 +89,16 @@
 
 ```
 hm-common/
-├── config/RedisConfig          → RedisTemplate Bean（JSON 序列化 + @ConditionalOnProperty）
-├── service/RedisService        → 通用 Redis 操作封装（含 Lua/Set 执行）
+├── config/RedisConfig          → RedisTemplate + StringRedisTemplate Bean
+│                                 （Jackson2Json + StringRedisSerializer 双序列化器）
+├── service/RedisService        → 双 Template 设计：
+│   ├── stringRedisTemplate     → Lua 脚本执行 + String 读写（手动 Jackson 序列化）
+│   └── redisTemplate           → Hash/Set 操作（Jackson 自动序列化，hGetAll 返回 Map）
 ├── utils/RedisLockUtil         → 分布式锁（SET NX EX + Lua 释放）
 ├── utils/LuaScriptLoader       → .lua 文件加载工具
-├── aspect/RedisCacheAspect     → 异常隔离切面（降级回 null）
+├── aspect/RedisCacheAspect     → 异常隔离切面（基本类型安全降级）
 └── resources/lua/
-    ├── set_if_absent.lua       → SET NX EX 原子写入
+    ├── set_if_absent.lua       → SET NX EX 原子写入（tonumber 防御）
     ├── hdel_atomic.lua         → 批量 HDEL
     └── release_lock.lua        → 锁释放
 
@@ -295,19 +298,65 @@ public class RedisCacheAspect {
             return joinPoint.proceed();
         } catch (Exception e) {
             log.error("Redis 操作异常，降级处理 - method: {}", joinPoint.getSignature().toShortString(), e);
-            return null; // 返回 null → 上层业务回退 MySQL
+            // 根据返回类型返回安全的默认值，避免 null 拆箱为基本类型时 NPE
+            Class<?> returnType = ((MethodSignature) joinPoint.getSignature()).getReturnType();
+            if (returnType == boolean.class) return false;
+            if (returnType == long.class)   return 0L;
+            if (returnType == int.class)    return 0;
+            return null; // void / Object / Long / Boolean 等引用类型安全
         }
     }
 }
 ```
 
+**为什么不能统一 return null**：`setIfAbsent` / `hasKey` / `hHasKey` 返回 `boolean`（基本类型），`return null` 会触发 Java 自动拆箱 `null → boolean` 时的 `NullPointerException`。
+
 **降级行为（各服务）**：
 
-| 服务 | Redis 返回 null 时的行为 |
+| 服务 | Redis 返回默认值时的行为 |
 |------|--------------------------|
 | cart-service | `queryMyCarts` → 走 `queryMyCartsMysql` 查 MySQL |
 | cart-service | `addItem2Cart` → 走 `addItem2CartMysql` 查 MySQL |
-| item-service | `queryItemByIds` → 缓存未命中 → 全量查 MySQL |
+| item-service | `queryItemByIds` → 缓存未命中（`get` 返回 null）→ 全量查 MySQL |
+| item-service | `setIfAbsent` 返回 false → 视为缓存写入失败，MySQL 数据已返回给上游 |
+
+---
+
+### 3.5 双 Template 序列化设计（技术决策记录）
+
+#### 问题背景
+
+三个连续发现的 Jackson 序列化问题导致架构重新设计：
+
+| # | 问题 | 根因 |
+|---|------|------|
+| 1 | Lua `tonumber(ARGV[n])` 返回 nil | `String.valueOf(num)` 经 Jackson 序列化为带引号的 `"\"1800\""`，tonumber 解析失败 |
+| 2 | `set_if_absent` 返回 "OK" 但切面捕获异常 | "OK" 不是合法 JSON，Jackson 反序列化结果时抛异常 |
+| 3 | `get(key, ItemDTO.class)` 返回 LinkedHashMap | Jackson 反序列化无类型信息，默认退化为 LinkedHashMap |
+
+#### 解决方案：双 Template 分离
+
+```
+stringRedisTemplate（StringRedisSerializer）     redisTemplate（Jackson2Json）
+├── Lua 脚本执行（executeScript）                ├── Hash 操作（hSet/hGetAll/hDel/...）
+├── String 读写（set/get/setIfAbsent）           ├── Set 操作（sAdd/sMembers）
+│   + 手动 ObjectMapper 序列化/反序列化          │   这些操作返回值类型固定（Map/Set），
+│   args: Long→"1800" 无引号包裹 ✓               │   不存在类型精确还原需求，Jackson 够用
+│   result: "OK" 直接作为 String ✓               └── expire/delete/hasKey 等通用操作
+│   get(key,clazz): readValue(json, clazz) ✓
+```
+
+#### 序列化数据流
+
+```
+写入 String:  set(key, dto) → objectMapper.writeValueAsString(dto) → stringRedisTemplate.set()
+写入 Lua:    setIfAbsent("item:info:{id}", dto, ttl) → objectMapper.writeValueAsString(dto) → Lua SET NX EX
+
+读取 String:  get(key, ItemDTO.class) → stringRedisTemplate.get(key) → objectMapper.readValue(json, ItemDTO.class)
+读取 String:  get(key) → stringRedisTemplate.get(key) → objectMapper.readValue(json, Object.class)
+```
+
+**兼容性**：`objectMapper.writeValueAsString()` 与 `Jackson2JsonMessageConverter` 对同一对象的序列化结果字节级一致，新旧存储数据可互读。
 
 ---
 
@@ -429,3 +478,11 @@ spring:
 5. **监控面板**：接入 Redis 监控大盘（如 Grafana + Redis Exporter）
 
 > **已完成**：购物车 Redis+MySQL 双写架构（Lua 原子操作 + MQ 异步 + 5min 版本补偿）、购物车删除双删同步、商品缓存三层失效保障（同步删除 + MQ 二次确认 + 补偿任务）、扣款分布式锁的 Lua 释放、SET NX EX 原子缓存回写。
+>
+> **已修复的序列化问题**：
+> - `add_cart.lua`：`HLEN or 0` 防御 nil + Lua 端所有数值参数使用 `tonumber()` 显式转换
+> - `set_if_absent.lua`：`tonumber(ARGV[2])` 显式转换
+> - 双 Template 设计：Lua 脚本 + String 读写使用 `StringRedisTemplate`，消除 Jackson 对 Lua 返回值 "OK" 的非 JSON 解析异常
+> - `get(key, clazz)`：使用 `objectMapper.readValue()` 精确还原类型，解决 LinkedHashMap 强转 ClassCastException
+> - `RedisCacheAspect`：根据返回类型返回安全默认值，避免 `boolean` 基本类型 null 拆箱 NPE
+> - Java 端 Lua args：数值参数直接传 Long/Integer，禁止 `String.valueOf()`（`StringRedisTemplate` 中 `Long.toString()` 无引号包裹）
