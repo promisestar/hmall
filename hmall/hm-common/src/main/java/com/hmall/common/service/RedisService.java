@@ -1,9 +1,13 @@
 package com.hmall.common.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmall.common.utils.LuaScriptLoader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
@@ -15,6 +19,15 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Redis 操作封装工具类
+ * <p>
+ * 双 Tempalte 设计：
+ * <ul>
+ *   <li>{@code redisTemplate}（Jackson 序列化）：常规 String/Hash/Set 操作，
+ *       自动完成 Object ↔ JSON 转换</li>
+ *   <li>{@code stringRedisTemplate}（String 序列化）：Lua 脚本执行专用，
+ *       脚本返回值是 Redis 原生类型（"OK"、数字、nil），不是 JSON，
+ *       用 String 序列化避免 Jackson 反序列化非 JSON 结果异常</li>
+ * </ul>
  */
 @Component
 @ConditionalOnProperty(prefix = "spring.redis", name = "host")
@@ -22,6 +35,12 @@ public class RedisService {
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
+    private static final Logger log = LoggerFactory.getLogger(RedisService.class);
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     // ==================== String 操作 ====================
 
@@ -101,16 +120,28 @@ public class RedisService {
     // ==================== Lua 脚本执行 ====================
 
     /**
-     * 执行 Lua 脚本，保证多条 Redis 命令的原子性
+     * 执行 Lua 脚本，保证多条 Redis 命令的原子性。
+     * <p>
+     * 使用 {@link StringRedisTemplate} 执行，原因：
+     * <ul>
+     *   <li>args 通过 StringRedisSerializer 序列化为纯字符串（Long→"1800"，String→原始字节），
+     *       不会出现 Jackson 给 String 加引号导致 Lua tonumber() 失败的问题</li>
+     *   <li>脚本返回值是 Redis 原生类型（"OK"、数字、nil），不是 JSON，
+     *       用 StringRedisTemplate 反序列化结果不会抛 Jackson 解析异常</li>
+     * </ul>
+     * <p>
+     * <b>调用方注意</b>：复杂对象必须预先序列化为 JSON String 再传入（如 ObjectMapper.writeValueAsString），
+     * 否则 StringRedisSerializer.toString() 只会输出类名@哈希码。
      *
-     * @param script Lua 脚本内容
-     * @param keys   KEYS 数组
-     * @param args   ARGV 数组
+     * @param script     Lua 脚本内容
+     * @param resultType 返回值类型（常用 String.class / Long.class / Object.class）
+     * @param keys       KEYS 数组
+     * @param args       ARGV 数组（复杂对象需预序列化为 String）
      * @return 脚本返回值
      */
     public <T> T executeScript(String script, Class<T> resultType, List<String> keys, Object... args) {
         DefaultRedisScript<T> redisScript = new DefaultRedisScript<>(script, resultType);
-        return redisTemplate.execute(redisScript, keys, args);
+        return stringRedisTemplate.execute(redisScript, keys, args);
     }
 
     /**
@@ -131,17 +162,26 @@ public class RedisService {
      * SET NX EX：仅当 key 不存在时设置，带过期时间（原子操作）
      * 用于缓存回写时避免覆盖已被刷新的数据
      *
-     * @return true 设置成功，false key 已存在
+     * @param key     cache key
+     * @param value   缓存值（任意对象，内部通过 Jackson 序列化为 JSON String 后传入 Lua）
+     * @param timeout 过期时间数值
+     * @param unit    时间单位
+     * @return true 设置成功，false key 已存在或序列化失败
      */
     public boolean setIfAbsent(String key, Object value, long timeout, TimeUnit unit) {
-        // 注意：ARGV[2] 必须传 Long 而非 String
-        // 因为 Jackson2JsonMessageConverter 会把 String 序列化为带引号的 "\"1800\""
-        // 到 Lua 中 tonumber("\"1800\"") = nil，导致 redis.call SET EX 参数非法
-        // Long 序列化为纯数字 1800，tonumber 可正常解析
-        Long ttlSeconds = unit.toSeconds(timeout);
-        String result = executeScript(SET_IF_ABSENT_LUA, String.class,
-                Collections.singletonList(key), value, ttlSeconds);
-        return "OK".equals(result);
+        try {
+            // 预序列化 value 为 JSON 字符串，因为 StringRedisTemplate 不会自动做 Jackson 转换
+            String valueJson = objectMapper.writeValueAsString(value);
+            Long ttlSeconds = unit.toSeconds(timeout);
+            // executeScript 使用 StringRedisTemplate，args 以原始字符串形式传入 Lua
+            // Lua 中 tonumber(ARGV[2]) 可正常解析（无 Jackson 引号包裹问题）
+            String result = executeScript(SET_IF_ABSENT_LUA, String.class,
+                    Collections.singletonList(key), valueJson, ttlSeconds);
+            return "OK".equals(result);
+        } catch (Exception e) {
+            log.warn("SET NX EX 失败, key={}", key, e);
+            return false;
+        }
     }
 
     // ==================== Lua 脚本常量 ====================
