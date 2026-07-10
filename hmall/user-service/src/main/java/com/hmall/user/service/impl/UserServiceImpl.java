@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmall.common.exception.BadRequestException;
 import com.hmall.common.exception.BizIllegalException;
 import com.hmall.common.exception.ForbiddenException;
+import com.hmall.common.utils.RedisLockUtil;
 import com.hmall.common.utils.UserContext;
 
 import com.hmall.user.config.JwtProperties;
@@ -19,6 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
+
+import java.util.UUID;
 
 /**
  * <p>
@@ -37,6 +40,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private final JwtTool jwtTool;
 
     private final JwtProperties jwtProperties;
+
+    private final RedisLockUtil redisLockUtil;
+
+    private static final String DEDUCT_LOCK_PREFIX = "lock:deduct:";
+    private static final long LOCK_EXPIRE_SECONDS = 5;
 
     @Override
     public UserLoginVO login(LoginFormDTO loginDTO) {
@@ -80,11 +88,34 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             throw new BizIllegalException("用户密码错误");
         }
 
-        // 2.尝试扣款
+        // 2.获取分布式锁，防止同一用户并发扣款
+        Long userId = UserContext.getUser();
+        String lockKey = DEDUCT_LOCK_PREFIX + userId;
+        String lockValue = UUID.randomUUID().toString();
+        boolean locked = false;
+
         try {
-            baseMapper.updateMoney(UserContext.getUser(), totalFee);
+            locked = redisLockUtil.tryLock(lockKey, lockValue, LOCK_EXPIRE_SECONDS);
+        } catch (Exception e) {
+            log.warn("Redis 分布式锁获取异常，降级无锁执行，userId={}", userId, e);
+        }
+
+        if (!locked) {
+            throw new BizIllegalException("系统繁忙，请稍后重试");
+        }
+
+        try {
+            // 3.尝试扣款
+            baseMapper.updateMoney(userId, totalFee);
         } catch (Exception e) {
             throw new BizIllegalException("扣款失败，可能是余额不足！", e);
+        } finally {
+            // 4.释放锁
+            try {
+                redisLockUtil.releaseLock(lockKey, lockValue);
+            } catch (Exception e) {
+                log.warn("释放分布式锁失败，lockKey={}", lockKey, e);
+            }
         }
         log.info("扣款成功");
     }

@@ -1,0 +1,7 @@
+-- SET NX EX：仅当 key 不存在时设置，带过期时间
+-- KEYS[1] = cache key
+-- ARGV[1] = value
+-- ARGV[2] = expire seconds
+-- 返回："OK" 成功，nil 失败（key 已存在）
+
+return redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2])

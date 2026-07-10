@@ -5,6 +5,7 @@ import cn.hutool.core.thread.ThreadUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmall.common.domain.PageDTO;
 import com.hmall.common.domain.PageQuery;
+import com.hmall.common.service.RedisService;
 import com.hmall.common.utils.BeanUtils;
 import com.hmall.item.constants.MQConstants;
 import com.hmall.item.domain.dto.ItemDTO;
@@ -30,6 +31,9 @@ public class ItemController {
 
     private final IItemService itemService;
     private final RabbitTemplate rabbitTemplate;
+    private final RedisService redisService;
+
+    private static final String ITEM_CACHE_PREFIX = "item:info:";
 
     @ApiOperation("分页查询商品")
     @GetMapping("/page")
@@ -80,6 +84,8 @@ public class ItemController {
         } catch (Exception e) {
             log.error("同步ES更新商品状态失败，itemId={}", id, e);
         }
+        // 主动删除缓存，下次查询时重新加载
+        deleteItemCache(id);
     }
 
     @ApiOperation("更新商品")
@@ -94,6 +100,8 @@ public class ItemController {
         } catch (Exception e) {
             log.error("同步ES更新商品失败，itemId={}", item.getId(), e);
         }
+        // 主动删除缓存
+        deleteItemCache(item.getId());
     }
 
     @ApiOperation("根据id删除商品")
@@ -105,6 +113,8 @@ public class ItemController {
         } catch (Exception e) {
             log.error("同步ES删除商品失败，itemId={}", id, e);
         }
+        // 主动删除缓存
+        deleteItemCache(id);
     }
 
     @ApiOperation("批量扣减库存")
@@ -117,5 +127,16 @@ public class ItemController {
     @PutMapping("/stock/recover")
     public void recoverStock(@RequestBody List<OrderDetailDTO> items){
         itemService.recoverStock(items);
+    }
+
+    /**
+     * 删除商品缓存（Redis 不可用时忽略异常，下次查询自动重建）
+     */
+    private void deleteItemCache(Long itemId) {
+        try {
+            redisService.delete(ITEM_CACHE_PREFIX + itemId);
+        } catch (Exception e) {
+            log.warn("删除商品缓存失败，itemId={}", itemId, e);
+        }
     }
 }
