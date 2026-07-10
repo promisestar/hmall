@@ -105,12 +105,14 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
             long ttlSeconds = TimeUnit.DAYS.toSeconds(CART_TTL_DAYS);
 
             // Lua 原子执行：HEXISTS/HLEN 检查 → HSET/HINCRBY → SET version → EXPIRE
+            // 注意：ttlSeconds/maxItems/version 直接传 Long/Integer 而非 String.valueOf()
+            // 否则 Jackson2Json 序列化后会带引号 ("\"2592000\"")，Lua 中 tonumber() 解析失败
             Long result = redisService.executeScript(
                     ADD_CART_LUA, Long.class,
                     Arrays.asList(cartKey, numKey, versionKey),
-                    fieldKey, itemDataJson, String.valueOf(ttlSeconds),
-                    String.valueOf(cartProperties.getMaxItems()),
-                    String.valueOf(version)
+                    fieldKey, itemDataJson, ttlSeconds,
+                    cartProperties.getMaxItems(),
+                    version
             );
 
             if (result != null && result == -1) {

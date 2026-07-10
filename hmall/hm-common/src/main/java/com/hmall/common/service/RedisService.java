@@ -134,8 +134,13 @@ public class RedisService {
      * @return true 设置成功，false key 已存在
      */
     public boolean setIfAbsent(String key, Object value, long timeout, TimeUnit unit) {
+        // 注意：ARGV[2] 必须传 Long 而非 String
+        // 因为 Jackson2JsonMessageConverter 会把 String 序列化为带引号的 "\"1800\""
+        // 到 Lua 中 tonumber("\"1800\"") = nil，导致 redis.call SET EX 参数非法
+        // Long 序列化为纯数字 1800，tonumber 可正常解析
+        Long ttlSeconds = unit.toSeconds(timeout);
         String result = executeScript(SET_IF_ABSENT_LUA, String.class,
-                Collections.singletonList(key), value, String.valueOf(unit.toSeconds(timeout)));
+                Collections.singletonList(key), value, ttlSeconds);
         return "OK".equals(result);
     }
 
