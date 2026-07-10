@@ -9,21 +9,22 @@ import com.hmall.api.dto.ItemDTO;
 
 import com.hmall.cart.config.CartProperties;
 import com.hmall.cart.domain.dto.CartFormDTO;
+import com.hmall.cart.domain.dto.CartSyncMessage;
 import com.hmall.cart.domain.po.Cart;
 import com.hmall.cart.domain.vo.CartVO;
 import com.hmall.cart.mapper.CartMapper;
+import com.hmall.cart.mq.CartSyncSender;
 import com.hmall.cart.service.ICartService;
 import com.hmall.common.exception.BizIllegalException;
 import com.hmall.common.service.RedisService;
 import com.hmall.common.utils.BeanUtils;
 import com.hmall.common.utils.CollUtils;
+import com.hmall.common.utils.LuaScriptLoader;
 import com.hmall.common.utils.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import com.hmall.common.utils.LuaScriptLoader;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -47,9 +48,11 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
     private final ItemClient itemClient;
     private final CartProperties cartProperties;
     private final RedisService redisService;
+    private final CartSyncSender cartSyncSender;
 
     private static final String CART_KEY_PREFIX = "cart:user:";
     private static final String CART_NUM_KEY_SUFFIX = ":num";
+    private static final String CART_VERSION_KEY_SUFFIX = ":v";
     private static final long CART_TTL_DAYS = 30;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -78,35 +81,51 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
         return CART_KEY_PREFIX + userId + CART_NUM_KEY_SUFFIX;
     }
 
+    private String buildCartVersionKey(Long userId) {
+        return CART_KEY_PREFIX + userId + CART_VERSION_KEY_SUFFIX;
+    }
+
     @Override
     public void addItem2Cart(CartFormDTO cartFormDTO) {
         Long userId = UserContext.getUser();
         String cartKey = buildCartKey(userId);
         String numKey = buildCartNumKey(userId);
+        String versionKey = buildCartVersionKey(userId);
         String fieldKey = String.valueOf(cartFormDTO.getItemId());
 
         try {
-            // 构建商品数据（不含 num，num 由独立 Hash 通过 HINCRBY 原子管理）
+            // 冷启动兜底：Redis 为空时先同步 MySQL 历史数据
+            ensureCartRedisSynced(userId);
+
+            // 构建商品数据（含 ver 版本字段）
+            long version = System.currentTimeMillis();
             Map<String, Object> itemData = buildCartItemData(cartFormDTO, userId);
+            itemData.put("ver", version);
             String itemDataJson = objectMapper.writeValueAsString(itemData);
             long ttlSeconds = TimeUnit.DAYS.toSeconds(CART_TTL_DAYS);
 
-            // Lua 原子执行：检查 → 新增/HINCRBY → 设过期
+            // Lua 原子执行：HEXISTS/HLEN 检查 → HSET/HINCRBY → SET version → EXPIRE
             Long result = redisService.executeScript(
                     ADD_CART_LUA, Long.class,
-                    Arrays.asList(cartKey, numKey),
+                    Arrays.asList(cartKey, numKey, versionKey),
                     fieldKey, itemDataJson, String.valueOf(ttlSeconds),
-                    String.valueOf(cartProperties.getMaxItems())
+                    String.valueOf(cartProperties.getMaxItems()),
+                    String.valueOf(version)
             );
 
             if (result != null && result == -1) {
                 throw new BizIllegalException(
                         StrUtil.format("用户购物车课程不能超过{}", cartProperties.getMaxItems()));
             }
+
+            // Redis 写入成功后，MQ 异步通知落 MySQL（result 为 Lua 返回的实际数量）
+            int actualNum = (result != null) ? result.intValue() : 1;
+            CartSyncMessage syncMsg = toSyncMessage(cartFormDTO, userId, version, actualNum);
+            cartSyncSender.sendSync(syncMsg);
         } catch (BizIllegalException e) {
             throw e;
         } catch (Exception e) {
-            // Redis 不可用，降级到 MySQL
+            // Redis 不可用，降级到纯 MySQL
             log.warn("Redis 操作失败，降级到 MySQL 处理加购", e);
             addItem2CartMysql(cartFormDTO, userId);
         }
@@ -125,10 +144,14 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
             if (cartMap != null && !cartMap.isEmpty()) {
                 vos = convertRedisMapToCartVOList(cartMap, numMap);
             } else {
-                vos = Collections.emptyList();
+                // Redis 为空 → 回退 MySQL + 回填 Redis（冷启动/lazy sync）
+                log.info("Redis 购物车为空，从 MySQL 加载并回填，userId={}", userId);
+                vos = queryMyCartsMysql(userId);
+                if (CollUtils.isNotEmpty(vos)) {
+                    syncCartsToRedis(userId, vos);
+                }
             }
         } catch (Exception e) {
-            // Redis 不可用，降级到 MySQL
             log.warn("Redis 查询购物车失败，降级到 MySQL", e);
             vos = queryMyCartsMysql(userId);
         }
@@ -144,45 +167,31 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
     @Transactional
     public void removeByItemIds(Collection<Long> itemIds) {
         Long userId = UserContext.getUser();
-        String cartKey = buildCartKey(userId);
-        String numKey = buildCartNumKey(userId);
-
-        // Lua 原子删除：同时清理 item 数据和 num
-        try {
-            Object[] fields = itemIds.stream().map(String::valueOf).toArray();
-            redisService.executeScript(REMOVE_CART_LUA,
-                    Arrays.asList(cartKey, numKey), fields);
-        } catch (Exception e) {
-            log.warn("Redis 删除购物车条目失败，降级到 MySQL", e);
-        }
-
-        // 同时清理 MySQL（保持数据一致）
-        try {
-            removeByItemIdsMysql(itemIds, userId);
-        } catch (Exception e) {
-            log.error("MySQL 删除购物车条目失败", e);
-        }
+        removeByItemIds(itemIds, userId);
     }
 
     @Transactional
     public void removeByItemIds(Collection<Long> itemIds, Long userId) {
         String cartKey = buildCartKey(userId);
         String numKey = buildCartNumKey(userId);
+        String versionKey = buildCartVersionKey(userId);
 
-        // Lua 原子删除
+        // 1. Redis Lua 原子删除（双 Hash）+ 更新版本号
         try {
             Object[] fields = itemIds.stream().map(String::valueOf).toArray();
             redisService.executeScript(REMOVE_CART_LUA,
                     Arrays.asList(cartKey, numKey), fields);
+            // 更新版本号，让补偿任务感知变更
+            redisService.set(versionKey, String.valueOf(System.currentTimeMillis()), CART_TTL_DAYS, TimeUnit.DAYS);
         } catch (Exception e) {
-            log.warn("Redis 删除购物车条目失败，降级到 MySQL", e);
+            log.warn("Redis 删除购物车条目失败", e);
         }
 
-        // 同时清理 MySQL
+        // 2. MySQL 同步 DELETE（必须同步，不走 MQ，防止补偿任务回填）
         try {
             removeByItemIdsMysql(itemIds, userId);
         } catch (Exception e) {
-            log.error("MySQL 删除购物车条目失败", e);
+            log.error("MySQL 删除购物车条目失败, userId={}, itemIds={}", userId, itemIds, e);
         }
     }
 
@@ -213,6 +222,74 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
                 .eq(Cart::getUserId, userId)
                 .in(Cart::getItemId, itemIds);
         remove(queryWrapper);
+    }
+
+    // ==================== Redis-MySQL 同步方法 ====================
+
+    /**
+     * 确保 Redis 中有用户购物车数据（冷启动 lazy sync）
+     * 若 Redis 为空，从 MySQL 全量加载并回填
+     */
+    private void ensureCartRedisSynced(Long userId) {
+        try {
+            String cartKey = buildCartKey(userId);
+            Long size = redisService.hLen(cartKey);
+            if (size != null && size > 0) {
+                return; // 已有数据，无需同步
+            }
+            // Redis 为空 → 从 MySQL 加载
+            List<CartVO> mysqlCarts = queryMyCartsMysql(userId);
+            if (CollUtils.isNotEmpty(mysqlCarts)) {
+                syncCartsToRedis(userId, mysqlCarts);
+                log.info("购物车冷启动同步完成，userId={}, count={}", userId, mysqlCarts.size());
+            }
+        } catch (Exception e) {
+            log.warn("购物车冷启动同步失败，userId={}", userId, e);
+        }
+    }
+
+    /**
+     * 将 MySQL 购物车数据全量回填 Redis（含版本号）
+     */
+    private void syncCartsToRedis(Long userId, List<CartVO> carts) {
+        String cartKey = buildCartKey(userId);
+        String numKey = buildCartNumKey(userId);
+        String versionKey = buildCartVersionKey(userId);
+        long version = System.currentTimeMillis();
+
+        for (CartVO cart : carts) {
+            Map<String, Object> itemData = cartVoToItemData(cart, userId, version);
+            redisService.hSet(cartKey, String.valueOf(cart.getItemId()), itemData);
+            redisService.hSet(numKey, String.valueOf(cart.getItemId()), String.valueOf(cart.getNum()));
+        }
+        redisService.set(versionKey, String.valueOf(version), CART_TTL_DAYS, TimeUnit.DAYS);
+        redisService.expire(cartKey, CART_TTL_DAYS, TimeUnit.DAYS);
+        redisService.expire(numKey, CART_TTL_DAYS, TimeUnit.DAYS);
+    }
+
+    private CartSyncMessage toSyncMessage(CartFormDTO dto, Long userId, long version, int actualNum) {
+        CartSyncMessage msg = new CartSyncMessage();
+        msg.setUserId(userId);
+        msg.setItemId(dto.getItemId());
+        msg.setName(dto.getName());
+        msg.setSpec(dto.getSpec());
+        msg.setPrice(dto.getPrice());
+        msg.setImage(dto.getImage());
+        msg.setNum(actualNum);
+        msg.setVersion(version);
+        return msg;
+    }
+
+    private Map<String, Object> cartVoToItemData(CartVO cart, Long userId, long version) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("itemId", cart.getItemId());
+        data.put("name", cart.getName());
+        data.put("spec", cart.getSpec());
+        data.put("price", cart.getPrice());
+        data.put("image", cart.getImage());
+        data.put("userId", userId);
+        data.put("ver", version);
+        return data;
     }
 
     // ==================== Redis 辅助方法 ====================

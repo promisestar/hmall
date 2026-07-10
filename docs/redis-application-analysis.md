@@ -48,48 +48,53 @@ cart-service 每次查询: SELECT * FROM cart WHERE user_id = ?
 
 **nova-mall 参考**：用 `RedisService.hSet/hGetAll` 存储。
 
-**改造方案**：
+**改造方案（Redis+MySQL 双写架构）：**
 
 ```
-# 数据结构：商品元数据与数量拆分存储
-cart:user:{userId}     → Hash  { itemId → '{name, price, image, ...}' }   # 商品元数据
-cart:user:{userId}:num → Hash  { itemId → "3" }                            # 数量（HINCRBY 原子管理）
+# 数据结构：商品元数据与数量拆分存储 + 全局版本号
+cart:user:{userId}       → Hash  { itemId → '{"itemId":1,"name":"iPhone","ver":1700123456}' }
+cart:user:{userId}:num   → Hash  { itemId → "3" }
+cart:user:{userId}:v     → String "1700123456"  ← 全局版本号，补偿任务比对用
 
-Key:   cart:user:{userId}  +  cart:user:{userId}:num
-Type:  Hash + Hash
+Key:   cart:user:{userId}  +  cart:user:{userId}:num  +  cart:user:{userId}:v
+Type:  Hash + Hash + String
 Field: itemId
-Value: JSON 商品数据 / 数量数字
-TTL:   30 天（用户长时间不登录自动清理）
+Value: JSON 商品数据（含 ver） / 数量数字 / 版本时间戳
+TTL:   30 天
 ```
 
-```java
-// 加购（Lua 脚本原子执行，避免并发时数量丢失）
-String lua =
-    "local exists = redis.call('HEXISTS', KEYS[1], ARGV[1]) " +
-    "if exists == 1 then " +
-    "    return redis.call('HINCRBY', KEYS[2], ARGV[1], 1) " +  // 已有商品 → 原子递增
-    "else " +
-    "    local size = redis.call('HLEN', KEYS[1]) " +
-    "    if size >= tonumber(ARGV[4]) then return -1 end " +
-    "    redis.call('HSET', KEYS[1], ARGV[1], ARGV[2]) " +
-    "    redis.call('HSET', KEYS[2], ARGV[1], 1) " +             // 新商品 → 写入
-    "    return 1 " +
-    "end";
-Long result = redisService.executeScript(lua, Long.class,
-    Arrays.asList(cartKey, numKey), fieldKey, itemDataJson, ttl, maxItems);
+**三路策略：**
 
-// 查购物车（合并两个 Hash）
-Map<Object, Object> cartMap = redisService.hGetAll("cart:user:" + userId);
-Map<Object, Object> numMap = redisService.hGetAll("cart:user:" + userId + ":num");
-
-// 删商品（Lua 脚本原子删除两个 Hash）
-redisService.executeScript(REMOVE_CART_LUA, Arrays.asList(cartKey, numKey), fields);
 ```
+写入：Redis Lua 同步（含 version）→ MQ 异步 → CartSyncReceiver → MySQL UPSERT
+      └── MQ 失败 → CartSyncCompensationTask @5min 版本比对补偿
+
+删除：Redis Lua 双 Hash HDEL + SET version → MySQL 同步 DELETE（双删同步）
+      └── 不走 MQ，防止补偿任务将 MySQL 残留回填 Redis
+
+读取：Redis HGETALL → miss → MySQL 全量加载 → HSET 回填 Redis（lazy sync）
+```
+
+**MQ 拓扑：**
+```
+Exchange: "cart.sync.topic" (topic)
+  └── Queue: "cart.sync.queue"  routingKey: "cart.sync"
+       └── CartSyncReceiver → MySQL UPSERT
+```
+
+**补偿任务（@Scheduled 5min）：**
+1. `SELECT DISTINCT user_id FROM cart` 获取活跃用户
+2. 对每个 user：对比 Redis `cart:user:{userId}:v` vs MySQL `MAX(version)`
+3. Redis 版本 > MySQL → 全量 Redis → MySQL 覆盖（先 DELETE 旧行再 INSERT）
+4. MySQL 有数据 Redis 空 → 全量 MySQL → Redis HSET 回填
+5. 版本一致 → 跳过
 
 **收益**：
 - 购物车查询从 MySQL + Feign 两次网络调用 → Redis 单次操作
-- 天然支持 TTL 过期，无需定时清理
-- **Lua 脚本保证并发安全**：HINCRBY 原子递增数量 + HLEN 原子检查上限，避免并发加购时数量丢失或超出上限
+- Redis 权威保证用户本端立即可见
+- MQ 异步落 MySQL，几秒内完成持久化
+- **Lua 脚本保证并发安全** + 5min 补偿任务兜底 MQ 失败
+- **删除双删同步**防止补偿任务回填残留数据
 
 ---
 
@@ -169,12 +174,26 @@ public ItemDTO getItemById(Long id) {
 }
 ```
 
-**缓存失效策略**：
-- 商品更新时 → 主动删除 `item:info:{id}`
-- 库存变更时 → 不删缓存（库存不在 DTO 缓存中，或单独缓存库存）
-- 自然过期 30 分钟 → 自动更新
+**缓存失效策略（三层保障）：**
 
-**收益**：热门商品查询从 MySQL → Redis，QPS 提升 10-100 倍。
+| 层级 | 机制 | 说明 |
+|------|------|------|
+| 第一层 | `redisService.delete("item:info:{id}")` | 同步删除，写操作立即执行 |
+| 第二层 | `itemCacheSender.sendInvalidate(id)` → ItemCacheReceiver | MQ 异步二次确认删除 |
+| 第三层 | ItemCacheCompensationTask @5min | dirty Set 遍历 + hasKey 检查 + 补充删除 |
+
+**MQ 拓扑：**
+```
+Exchange: "item.cache.topic" (topic)
+  └── Queue: "item.cache.invalidate.queue"  routingKey: "item.cache.invalidate"
+       └── ItemCacheReceiver → 二次 deleteItemCache
+```
+
+**补偿任务：**
+- 写操作时 `sAdd("item:cache:dirty", itemId)` + 15min TTL
+- @Scheduled 5min → `sMembers` 遍历 → 确认 cache 已失效 → 清理 Set
+
+**收益**：热门商品查询从 MySQL → Redis，QPS 提升 10-100 倍；三层失效保障缓存一致性。
 
 ---
 
@@ -370,4 +389,12 @@ org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
 
 8. **Lua 脚本可用性**：当前实现使用原生 Redis 命令（HINCRBY、HLEN、HEXISTS），不依赖 `cjson` 等扩展库，兼容所有 Redis 版本。
 
-9. **降级行为验证**：Redis 宕机时购物车回退 MySQL、商品存移除回退直查 DB，分布式锁不可用时扣款直接拒绝（fail-fast），三者均需定期演练。
+9. **降级行为验证**：Redis 宕机时购物车回退 MySQL、商品查询回退直查 DB、分布式锁不可用时扣款直接拒绝（fail-fast），三者均需定期演练。
+
+10. **MQ 消息可靠性**：购物车 MQ 发送失败时 catch 异常不阻断主流程，依赖补偿任务（5min 版本比对）做最终一致性。需监控 `cart.sync.queue` 消息积压，防止大量积压导致 MySQL 批量插入延迟。
+
+11. **version 字段一致性**：version 在 Lua 脚本内通过 `SET KEYS[3] ARGV[5]` 原子更新，与 HSET/HINCRBY/EXPIRE 在同一事务内。补偿任务只做最终兜底，不是主路径。
+
+12. **冷启动同步幂等性**：`ensureCartRedisSynced` 使用 HSET 回填，重复调用无副作用。并发冷启动时多个请求可能同时触发全量 MySQL 加载，但 Redis HSET 覆盖写入是幂等的。
+
+13. **Cart 表 version 索引**：`ALTER TABLE cart ADD INDEX idx_cart_user_version(user_id, version)` 加速补偿任务的 `SELECT MAX(version) GROUP BY user_id` 查询。

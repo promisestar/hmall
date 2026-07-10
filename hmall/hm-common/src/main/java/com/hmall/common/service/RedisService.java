@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -203,5 +204,22 @@ public class RedisService {
      */
     public Long decrBy(String key, long delta) {
         return redisTemplate.opsForValue().decrement(key, delta);
+    }
+
+    // ==================== Set 操作（补偿任务使用） ====================
+
+    /**
+     * Set 添加成员
+     */
+    public void sAdd(String key, String... values) {
+        redisTemplate.opsForSet().add(key, (Object[]) values);
+    }
+
+    /**
+     * Set 获取所有成员
+     */
+    @SuppressWarnings("unchecked")
+    public <T> Set<T> sMembers(String key) {
+        return (Set<T>) redisTemplate.opsForSet().members(key);
     }
 }

@@ -11,7 +11,9 @@ import com.hmall.item.constants.MQConstants;
 import com.hmall.item.domain.dto.ItemDTO;
 import com.hmall.item.domain.dto.OrderDetailDTO;
 import com.hmall.item.domain.po.Item;
+import com.hmall.item.mq.ItemCacheSender;
 import com.hmall.item.service.IItemService;
+import com.hmall.item.task.ItemCacheCompensationTask;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,8 @@ public class ItemController {
     private final IItemService itemService;
     private final RabbitTemplate rabbitTemplate;
     private final RedisService redisService;
+    private final ItemCacheSender itemCacheSender;
+    private final ItemCacheCompensationTask cacheCompensationTask;
 
     private static final String ITEM_CACHE_PREFIX = "item:info:";
 
@@ -86,6 +90,8 @@ public class ItemController {
         }
         // 主动删除缓存，下次查询时重新加载
         deleteItemCache(id);
+        itemCacheSender.sendInvalidate(id);
+        cacheCompensationTask.markDirty(id);
     }
 
     @ApiOperation("更新商品")
@@ -102,6 +108,8 @@ public class ItemController {
         }
         // 主动删除缓存
         deleteItemCache(item.getId());
+        itemCacheSender.sendInvalidate(item.getId());
+        cacheCompensationTask.markDirty(item.getId());
     }
 
     @ApiOperation("根据id删除商品")
@@ -115,6 +123,8 @@ public class ItemController {
         }
         // 主动删除缓存
         deleteItemCache(id);
+        itemCacheSender.sendInvalidate(id);
+        cacheCompensationTask.markDirty(id);
     }
 
     @ApiOperation("批量扣减库存")

@@ -77,5 +77,9 @@ public class Cart implements Serializable {
      */
     private LocalDateTime updateTime;
 
+    /**
+     * 版本号（时间戳），用于 Redis-MySQL 补偿同步比对
+     */
+    private Long version;
 
 }
