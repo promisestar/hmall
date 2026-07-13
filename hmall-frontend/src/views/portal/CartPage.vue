@@ -47,7 +47,7 @@
               <input
                 type="checkbox"
                 :checked="item.checked"
-                @change="cartStore.toggleCheck(item.id)"
+                @change="cartStore.toggleCheck(item.itemId)"
                 class="w-4 h-4 accent-[#E4393C]"
               />
             </div>
@@ -84,7 +84,7 @@
             </div>
             <div class="col-span-1 text-center">
               <button
-                @click="cartStore.removeItem(item.id)"
+                @click="cartStore.removeItem(item.itemId)"
                 class="text-gray-400 hover:text-[#E4393C] transition-colors text-sm"
               >
                 删除
@@ -153,13 +153,13 @@ const allChecked = computed(() =>
 
 async function increaseNum(item: CartItem) {
   if (item.num < item.stock) {
-    await cartStore.updateNum(item.id, item.num + 1)
+    await cartStore.updateNum(item.itemId, item.num + 1)
   }
 }
 
 async function decreaseNum(item: CartItem) {
   if (item.num > 1) {
-    await cartStore.updateNum(item.id, item.num - 1)
+    await cartStore.updateNum(item.itemId, item.num - 1)
   }
 }
 </script>

@@ -776,4 +776,48 @@ String redisVersionStr = (String) redisService.get(versionKey);
 
 ---
 
+### 8.6 已知缺陷：item-service 缓存失效依赖 Redis 导致循环依赖（未修复）
+
+**现状**：item-service 的缓存失效机制与 cart-service 存在相同的"Redis 故障后读到脏数据"模式，但**未施加 cart-service 的三层防护**。
+
+**缺陷详情**：
+
+**写入路径 — Redis 宕机时双重失败**：
+```
+商品更新 → deleteItemCache() 删除缓存    → Redis 宕机 → catch 吞掉异常，旧缓存未被清除
+         → markDirty() 标记脏数据 Set     → Redis 宕机 → catch 吞掉异常，补偿任务看不到此 ID
+                                               ↑
+                                         核心缺陷：脏标记存在 Redis 中，
+                                         用 Redis 存储信息来修复 Redis 的故障 — 循环依赖
+```
+
+**读取路径 — Redis 恢复后直接返回旧缓存**：
+```java
+// ItemServiceImpl.queryItemByIds
+ItemDTO cached = redisService.get(cacheKey, ItemDTO.class);
+if (cached != null) return cached;  // ← 未检查任何过期标记，直接返回旧数据
+```
+与 cart-service 不同，item-service 没有 `pendingInvalidationUsers` 等内存标记机制。
+
+**影响**：
+- Redis 宕机期间更新的商品，恢复后缓存可能不反映最新数据
+- 最长 **30 分钟**（缓存 TTL），TTL 过期后自动从 MySQL 重新加载
+- 补偿任务（ItemCacheCompensationTask @5min）无法检测到这些脏数据，因为 dirty Set 本身就存在 Redis 中
+
+**与 cart-service 的对比**：
+
+| 机制 | cart-service | item-service |
+|------|-------------|-------------|
+| 写入失败后清缓存 | ✅ `invalidateRedisCart()` | ❌ `deleteItemCache()` 失败仅 log |
+| Redis 宕机后内存标记 | ✅ `pendingInvalidationUsers` Set | ❌ 无 |
+| 读取时过期检测 | ✅ `contains(userId)` O(1) 检查 | ❌ 无检查 |
+| 补偿任务脏标记存储 | ✅ MySQL version 字段 | ❌ Redis Set（循环依赖） |
+| TTL 兜底 | 30 天 | **30 分钟**（唯一防线） |
+
+**为何未修复**：影响范围有限（最长 30 分钟 TTL 自动消除），且商品数据变更频率远低于购物车。当前评估为可接受的已知缺陷。
+
+**影响范围**：`item-service/controller/ItemController.java`、`item-service/task/ItemCacheCompensationTask.java`、`item-service/service/impl/ItemServiceImpl.java`
+
+---
+
 > **已完成**：购物车 Redis+MySQL 双写架构（Lua 原子操作 + MQ 异步 + 5min 版本补偿）、购物车删除双删同步、商品缓存三层失效保障（同步删除 + MQ 二次确认 + 补偿任务）、扣款分布式锁的 Lua 释放、SET NX EX 原子缓存回写、**验证码存储（sms:code: 5min TTL + 一次性校验）**、**Token 黑名单登出失效（jti + Gateway 黑名单检查 + 前端联动登出）**。

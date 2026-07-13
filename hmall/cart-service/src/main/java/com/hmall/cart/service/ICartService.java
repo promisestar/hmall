@@ -25,4 +25,9 @@ public interface ICartService extends IService<Cart> {
     void removeByItemIds(Collection<Long> itemIds);
 
     void removeByItemIds(Collection<Long> itemIds, Long userId);
+
+    /**
+     * 更新购物车中某商品的数量（Redis HSET num → MQ 异步 MySQL）
+     */
+    void updateCartNum(Long itemId, Integer num);
 }

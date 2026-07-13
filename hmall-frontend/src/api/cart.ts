@@ -9,12 +9,12 @@ export function addToCart(data: CartFormDTO): Promise<void> {
   return request.post('/carts', data)
 }
 
-export function updateCartNum(id: number, data: { num: number }): Promise<void> {
-  return request.put(`/carts/${id}`, data)
+export function updateCartNum(itemId: number, data: { num: number }): Promise<void> {
+  return request.put(`/carts/${itemId}`, data)
 }
 
-export function deleteCartItem(id: number): Promise<void> {
-  return request.delete(`/carts/${id}`)
+export function deleteCartItem(itemId: number): Promise<void> {
+  return request.delete(`/carts/${itemId}`)
 }
 
 export function deleteCartItems(ids: number[]): Promise<void> {

@@ -231,6 +231,59 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
         }
     }
 
+    @Override
+    public void updateCartNum(Long itemId, Integer num) {
+        Long userId = UserContext.getUser();
+        String cartKey = buildCartKey(userId);
+        String numKey = buildCartNumKey(userId);
+        String versionKey = buildCartVersionKey(userId);
+        String fieldKey = String.valueOf(itemId);
+        long version = System.currentTimeMillis();
+
+        // 1. 更新 Redis
+        try {
+            ensureCartRedisSynced(userId);
+            redisService.hSet(numKey, fieldKey, String.valueOf(num));
+            redisService.set(versionKey, String.valueOf(version), CART_TTL_DAYS, TimeUnit.DAYS);
+            redisService.expire(cartKey, CART_TTL_DAYS, TimeUnit.DAYS);
+            redisService.expire(numKey, CART_TTL_DAYS, TimeUnit.DAYS);
+        } catch (Exception e) {
+            log.warn("Redis 更新购物车数量失败，降级到 MySQL", e);
+            // 降级：直接更新 MySQL
+            updateCartNumMysql(itemId, userId, num, version);
+            invalidateRedisCart(userId);
+            return;
+        }
+
+        // 2. MQ 异步同步 MySQL
+        try {
+            CartSyncMessage msg = new CartSyncMessage();
+            msg.setUserId(userId);
+            msg.setItemId(itemId);
+            msg.setNum(num);
+            msg.setVersion(version);
+            cartSyncSender.sendSync(msg);
+        } catch (Exception e) {
+            log.warn("更新数量 MQ 同步失败，将由补偿任务兜底，userId={}, itemId={}", userId, itemId, e);
+        }
+    }
+
+    private void updateCartNumMysql(Long itemId, Long userId, Integer num, long version) {
+        if (checkItemExists(itemId, userId)) {
+            baseMapper.updateNum(itemId, userId, version);
+            // updateNum 只 +1，需要额外设置到目标值
+            Cart cart = lambdaQuery()
+                    .eq(Cart::getUserId, userId)
+                    .eq(Cart::getItemId, itemId)
+                    .one();
+            if (cart != null) {
+                cart.setNum(num);
+                cart.setVersion(version);
+                updateById(cart);
+            }
+        }
+    }
+
     // ==================== MySQL 降级方法 ====================
 
     private void addItem2CartMysql(CartFormDTO cartFormDTO, Long userId) {
@@ -373,6 +426,9 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
                 Map<String, Object> itemMap = (Map<String, Object>) entry.getValue();
                 CartVO vo = new CartVO();
                 vo.setItemId(toLong(itemMap.get("itemId")));
+                // Redis 不存储 MySQL 自增主键，用 itemId 作为唯一标识供前端
+                // toggleCheck/v-for key 等操作需要非 null 的 id 来区分不同商品
+                vo.setId(vo.getItemId());
                 vo.setName((String) itemMap.get("name"));
                 vo.setSpec((String) itemMap.get("spec"));
                 vo.setPrice(toInt(itemMap.get("price")));

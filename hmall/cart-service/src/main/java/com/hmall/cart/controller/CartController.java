@@ -3,18 +3,18 @@ package com.hmall.cart.controller;
 
 
 import com.hmall.cart.domain.dto.CartFormDTO;
-import com.hmall.cart.domain.po.Cart;
 import com.hmall.cart.domain.vo.CartVO;
 import com.hmall.cart.service.ICartService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiImplicitParam;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
-import org.apache.ibatis.annotations.Param;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 @Api(tags = "购物车相关接口")
 @RestController
@@ -29,16 +29,18 @@ public class CartController {
         cartService.addItem2Cart(cartFormDTO);
     }
 
-    @ApiOperation("更新购物车数据")
-    @PutMapping
-    public void updateCart(@RequestBody Cart cart){
-        cartService.updateById(cart);
+    @ApiOperation("更新购物车商品数量")
+    @PutMapping("{itemId}")
+    public void updateCartNum(
+            @PathVariable("itemId") Long itemId,
+            @RequestBody Map<String, Integer> body) {
+        cartService.updateCartNum(itemId, body.get("num"));
     }
 
     @ApiOperation("删除购物车中商品")
-    @DeleteMapping("{id}")
-    public void deleteCartItem(@Param ("购物车条目id")@PathVariable("id") Long id){
-        cartService.removeById(id);
+    @DeleteMapping("{itemId}")
+    public void deleteCartItem(@PathVariable("itemId") Long itemId){
+        cartService.removeByItemIds(Collections.singletonList(itemId));
     }
 
     @ApiOperation("查询购物车列表")

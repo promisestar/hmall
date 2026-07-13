@@ -38,26 +38,26 @@ export const useCartStore = defineStore('cart', () => {
     await fetchCartList()
   }
 
-  async function updateNum(id: number, num: number) {
-    await updateCartNum(id, { num })
-    const item = cartList.value.find((i) => i.id === id)
+  async function updateNum(itemId: number, num: number) {
+    await updateCartNum(itemId, { num })
+    const item = cartList.value.find((i) => i.itemId === itemId)
     if (item) item.num = num
   }
 
-  async function removeItem(id: number) {
-    await deleteCartItem(id)
-    cartList.value = cartList.value.filter((i) => i.id !== id)
+  async function removeItem(itemId: number) {
+    await deleteCartItem(itemId)
+    cartList.value = cartList.value.filter((i) => i.itemId !== itemId)
   }
 
   async function removeChecked() {
-    const ids = checkedItems.value.map((i) => i.id)
+    const ids = checkedItems.value.map((i) => i.itemId)
     if (ids.length === 0) return
     await deleteCartItems(ids)
     cartList.value = cartList.value.filter((i) => !i.checked)
   }
 
-  function toggleCheck(id: number) {
-    const item = cartList.value.find((i) => i.id === id)
+  function toggleCheck(itemId: number) {
+    const item = cartList.value.find((i) => i.itemId === itemId)
     if (item) item.checked = !item.checked
   }
 
