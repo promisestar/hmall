@@ -210,7 +210,7 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
         boolean redisFailed = false;
         try {
             Object[] fields = itemIds.stream().map(String::valueOf).toArray();
-            redisService.executeScript(REMOVE_CART_LUA,
+            redisService.executeScript(REMOVE_CART_LUA, Long.class,
                     Arrays.asList(cartKey, numKey), fields);
             // 更新版本号，让补偿任务感知变更
             redisService.set(versionKey, String.valueOf(System.currentTimeMillis()), CART_TTL_DAYS, TimeUnit.DAYS);
