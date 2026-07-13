@@ -34,6 +34,17 @@ export interface LoginFormDTO {
   password: string
 }
 
+// 发送验证码请求
+export interface SendCodeDTO {
+  phone: string
+}
+
+// 验证码登录请求
+export interface LoginByCodeDTO {
+  phone: string
+  code: string
+}
+
 // 商品
 export interface Item {
   id: number

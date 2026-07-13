@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { logoutApi } from '@/api/user'
 
 export const useAdminStore = defineStore('admin', () => {
   const adminToken = ref(sessionStorage.getItem('admin-token') || '')
@@ -16,7 +17,13 @@ export const useAdminStore = defineStore('admin', () => {
     sessionStorage.setItem('admin-user', JSON.stringify({ username }))
   }
 
-  function logout() {
+  /** 登出：先调后端接口使 token 失效，再清除本地状态 */
+  async function logout() {
+    try {
+      await logoutApi()
+    } catch {
+      // 即使后端调用失败，也继续清除本地状态
+    }
     adminToken.value = ''
     adminUser.value = null
     sessionStorage.removeItem('admin-token')

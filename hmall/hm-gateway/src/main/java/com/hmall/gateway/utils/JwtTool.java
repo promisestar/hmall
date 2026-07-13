@@ -31,11 +31,12 @@ public class JwtTool {
     }
 
     /**
-     * 创建 access-token，payload 中包含 userId 和签发时间
+     * 创建 access-token，payload 中包含 userId、签发时间、jti
      */
     public String createToken(Long userId, Duration ttl) {
         Date now = new Date();
         return JWT.create()
+                .setJWTId(java.util.UUID.randomUUID().toString())
                 .setPayload("user", userId)
                 .setIssuedAt(now)
                 .setExpiresAt(new Date(now.getTime() + ttl.toMillis()))
@@ -95,6 +96,15 @@ public class JwtTool {
         Duration remainingTTL = jwtProperties.getTokenTTL();
         log.debug("续期 token，userId={}, 距签发={}min", userId, elapsed.toMinutes());
         return createToken(userId, remainingTTL);
+    }
+
+    /**
+     * 从 token 中提取 jti（JWT ID），用于黑名单检查
+     */
+    public String getJti(String token) {
+        JWT jwt = parseAndVerify(token);
+        Object jti = jwt.getPayload("jti");
+        return jti != null ? jti.toString() : null;
     }
 
     /**

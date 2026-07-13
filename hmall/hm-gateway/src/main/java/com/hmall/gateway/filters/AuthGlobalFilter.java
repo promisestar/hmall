@@ -1,10 +1,12 @@
 package com.hmall.gateway.filters;
 
 import com.hmall.common.exception.UnauthorizedException;
+import com.hmall.common.service.RedisService;
 import com.hmall.gateway.config.AuthProperties;
 import com.hmall.gateway.utils.JwtTool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -25,8 +27,9 @@ import java.util.List;
  * 功能：
  * 1. 白名单路径直接放行
  * 2. 从 Authorization 头提取 JWT，解析 userId
- * 3. 自动续期：超过冷却窗口则生成新 token 通过响应头下发
- * 4. 将 userId 写入 user-info 头传递给下游微服务
+ * 3. 校验 token 是否在黑名单中（登出失效）
+ * 4. 自动续期：超过冷却窗口则生成新 token 通过响应头下发
+ * 5. 将 userId 写入 user-info 头传递给下游微服务
  */
 @Slf4j
 @Component
@@ -36,6 +39,12 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     private final JwtTool jwtTool;
 
     private final AuthProperties authProperties;
+
+    /**
+     * RedisService 非必需依赖（网关没有 Redis 时也能正常工作，只是不检查黑名单）
+     */
+    @Autowired(required = false)
+    private RedisService redisService;
 
     private final AntPathMatcher matcher = new AntPathMatcher();
 
@@ -63,7 +72,23 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             return response.setComplete();
         }
 
-        // 5. Token 续期：超过冷却窗口则生成新 token
+        // 5. 检查 token 黑名单（登出失效）
+        if (redisService != null) {
+            try {
+                String jti = jwtTool.getJti(token);
+                if (jti != null && redisService.isTokenBlacklisted(jti)) {
+                    log.info("token 已登出失效，拒绝访问, jti={}, userId={}", jti, userId);
+                    ServerHttpResponse response = exchange.getResponse();
+                    response.setStatusCode(HttpStatus.UNAUTHORIZED);
+                    return response.setComplete();
+                }
+            } catch (Exception e) {
+                // Redis 检查失败不阻塞请求（降级处理）
+                log.warn("Redis 黑名单检查异常，降级放行, userId={}", userId, e);
+            }
+        }
+
+        // 6. Token 续期：超过冷却窗口则生成新 token
         String newToken = jwtTool.refreshToken(token);
         ServerHttpResponse response = exchange.getResponse();
         if (newToken != null) {
@@ -71,12 +96,12 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             log.debug("token 已续期，userId={}", userId);
         }
 
-        // 6. 传递用户信息给微服务
+        // 7. 传递用户信息给微服务
         String userInfo = userId.toString();
         ServerWebExchange swe = exchange.mutate()
                 .request(builder -> builder.header("user-info", userInfo))
                 .build();
-        // 7. 放行
+        // 8. 放行
         return chain.filter(swe);
     }
 

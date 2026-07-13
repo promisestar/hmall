@@ -1,6 +1,7 @@
 package com.hmall.user.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.hmall.user.domain.dto.LoginByCodeDTO;
 import com.hmall.user.domain.dto.LoginFormDTO;
 import com.hmall.user.domain.po.User;
 import com.hmall.user.domain.vo.UserLoginVO;
@@ -18,4 +19,19 @@ public interface IUserService extends IService<User> {
     UserLoginVO login(LoginFormDTO loginFormDTO);
 
     void deductMoney(String pw, Integer totalFee);
+
+    /**
+     * 发送短信验证码
+     */
+    void sendCode(String phone);
+
+    /**
+     * 验证码登录
+     */
+    UserLoginVO loginByCode(LoginByCodeDTO loginByCodeDTO);
+
+    /**
+     * 登出：将 token 加入黑名单使其失效
+     */
+    void logout(String token);
 }

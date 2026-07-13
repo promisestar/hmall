@@ -240,38 +240,74 @@ public class RedisCacheAspect {
 
 ---
 
-#### 3.5 验证码存储
+#### 3.5 验证码存储 ✅ 已实现
 
-**场景**：如果后续增加用户注册、手机验证码登录、支付密码验证。
+**场景**：用户注册、手机验证码登录、支付密码验证。
 
-**nova-mall 做法**：
+**Redis Key**：
 ```
 Key:  sms:code:{phone}
 Type: String
 TTL:  5 分钟
 ```
-- 发送验证码：`redisService.set("sms:code:" + phone, code, 5, TimeUnit.MINUTES)`
-- 校验验证码：`redisService.get("sms:code:" + phone)`
 
-**为什么用 Redis**：验证码需要自动过期（TTL），MySQL 需要额外定时任务清理。
+**API 端点**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/users/code` | POST | 发送短信验证码（手机号 → 6 位随机码 → Redis） |
+| `/users/login/code` | POST | 验证码登录（校验 Redis 中的 code → 查 MySQL 用户 → 生成 JWT） |
+
+**实现要点**：
+- `RedisService.saveSmsCode(phone, code)` 存入 Redis，5 分钟自动过期
+- `RedisService.getSmsCode(phone)` 校验后立即 `deleteSmsCode(phone)`（一次性使用）
+- 目前使用 `log.info` 模拟短信发送，生产环境对接短信 SDK 即可
+- 前端新增"密码登录/验证码登录"双 Tab 切换，60 秒发送倒计时
 
 ---
 
-#### 3.6 Token 黑名单（登出失效）
+#### 3.6 Token 黑名单（登出失效） ✅ 已实现
 
 **hmall 现状**：登出只删除前端 `sessionStorage`，JWT 在有效期内仍可使用（无状态 token 的固有问题）。
 
-**改造方案**：
-```java
-// 登出时
-String tokenId = extractJti(token);
-redisService.set("token:blacklist:" + tokenId, "1", tokenTTL, TimeUnit.SECONDS);
+**改造方案（已实现）**：
 
-// Gateway 校验时
-if (redisService.hasKey("token:blacklist:" + tokenId)) {
+```java
+// —— JWT 创建时加入 jti ——
+JWT.create()
+    .setJWTId(UUID.randomUUID().toString())  // 每个 token 唯一标识
+    .setPayload("user", userId)
+    ...
+
+// —— user-service 登出时 ——
+String jti = jwtTool.getJti(token);
+long remainingTTL = jwtTool.getRemainingTTL(token);
+redisService.addTokenToBlacklist(jti, remainingTTL);
+
+// —— Gateway 校验时 ——
+String jti = jwtTool.getJti(token);
+if (redisService.isTokenBlacklisted(jti)) {
     throw new UnauthorizedException("token 已失效");
 }
 ```
+
+**改动的关键文件**：
+
+| 模块 | 文件 | 变更 |
+|------|------|------|
+| user-service | `utils/JwtTool.java` | `createToken` 增加 `setJWTId`；新增 `getJti()`、`getRemainingTTL()` |
+| user-service | `service/impl/UserServiceImpl.java` | 新增 `logout(token)` 方法 |
+| user-service | `controller/UserController.java` | 新增 `POST /users/logout` |
+| hm-gateway | `utils/JwtTool.java` | `createToken` 增加 `setJWTId`；新增 `getJti()` |
+| hm-gateway | `filters/AuthGlobalFilter.java` | 步骤 5 新增黑名单检查（`isTokenBlacklisted` → 命中返回 401） |
+| hm-gateway | `application.yml` | 新增 `spring.redis` 配置（黑名单检查所需） |
+| 前端 | `stores/user.ts`、`stores/admin.ts` | `logout()` 改为 async：先调后端 API 再清除本地 |
+| 前端 | `PortalLayout.vue`、`AdminLayout.vue` | 登出后自动跳转首页 / 管理登录页 |
+
+**设计要点**：
+- Token TTL = 黑名单 TTL：token 过期后黑名单自动清理，不浪费内存
+- Gateway 黑名单检查失败 → 降级放行（`redisService = null` 时不检查）
+- 登出 API 失败 → 仍清除本地状态（不阻塞用户体验）
 
 ---
 
@@ -298,24 +334,33 @@ return 1
 ## 四、实施路线图
 
 ```
-第一步（本周）：Redis 基础设施搭建
-├── hm-common 引入 spring-boot-starter-data-redis
-├── 各微服务配置 spring.redis.host
-├── 新增 RedisConfig（序列化 Jackson2Json + RedisTemplate）
-└── 新增 RedisService 工具类（借鉴 nova-mall，先只封装常用操作）
+第一步（已完成）：Redis 基础设施搭建
+├── hm-common 引入 spring-boot-starter-data-redis ✅
+├── 各微服务配置 spring.redis.host ✅
+├── 新增 RedisConfig（序列化 Jackson2Json + RedisTemplate） ✅
+└── 新增 RedisService 工具类（借鉴 nova-mall，先只封装常用操作） ✅
 
-第二步（本周）：购物车迁 Redis
-├── CartServiceImpl 改为 Redis Hash 存取
-├── 清理原 MySQL cart 表相关代码（保留 Mapper 不动，平滑过渡）
-└── 验证：加购 → 查购物车 → 下单清空
+第二步（已完成）：购物车迁 Redis ✅
+├── CartServiceImpl 改为 Redis Hash 存取 ✅
+├── 清理原 MySQL cart 表相关代码（保留 Mapper 不动，平滑过渡） ✅
+└── 验证：加购 → 查购物车 → 下单清空 ✅
 
-第三步（下周）：分布式锁 + 商品缓存
-├── hm-common 新增 RedisLockUtil
-├── 扣款/扣库存加分布式锁保护
-├── item-service 新增商品缓存层
-└── 商品更新时主动失效缓存
+第三步（已完成）：分布式锁 + 商品缓存 ✅
+├── hm-common 新增 RedisLockUtil ✅
+├── 扣款/扣库存加分布式锁保护 ✅
+├── item-service 新增商品缓存层 ✅
+└── 商品更新时主动失效缓存 ✅
 
-第四步（按需）：验证码 / Token 黑名单 / 异常隔离切面
+第四步（已完成）：验证码 / Token 黑名单 / 异常隔离切面 ✅
+├── RedisService 新增 saveSmsCode/getSmsCode/deleteSmsCode ✅
+├── RedisService 新增 addTokenToBlacklist/isTokenBlacklisted ✅
+├── user-service 新增 POST /users/code + /users/login/code ✅
+├── user-service 新增 POST /users/logout（jti 黑名单） ✅
+├── JwtTool 新增 getJti/getRemainingTTL 方法 ✅
+├── Gateway AuthGlobalFilter 新增黑名单检查 ✅
+├── Gateway 新增 Redis 配置 ✅
+├── 前端 LoginPage 新增验证码登录 Tab ✅
+└── 前端 stores 改为 async logout（先调后端再清本地） ✅
 ```
 
 ---
@@ -410,7 +455,7 @@ org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
 
 5. **Redis 配置不要写死 IP**：用环境变量 `${REDIS_HOST}`，本地开发默认 `localhost`。
 
-6. **gateway 不需要 Redis**：Gateway 只做认证路由，不需要引入 Redis 依赖。
+6. **gateway 已引入 Redis**：Gateway 实现 Token 黑名单检查后，需要 Redis 依赖查询 `token:blacklist:*`。`RedisService` 通过 `@Autowired(required = false)` 注入，Redis 不可用时降级放行不阻塞请求。
 
 7. **序列化选型**：建议用 `Jackson2JsonRedisSerializer(Object.class)` 而非带 `DefaultTyping` 的版本（安全性更好，存储更小）。如果需要多态，单独创建带类型的 Serializer。
 

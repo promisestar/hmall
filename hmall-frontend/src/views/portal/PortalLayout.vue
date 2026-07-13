@@ -10,7 +10,7 @@
           </router-link>
           <template v-else>
             <span class="text-white">{{ userStore.username }}</span>
-            <span @click="userStore.logout()" class="cursor-pointer hover:text-white transition-colors">退出</span>
+            <span @click="handleLogout" class="cursor-pointer hover:text-white transition-colors">退出</span>
           </template>
           <router-link to="/portal/home" class="hover:text-white transition-colors">首页</router-link>
         </div>
@@ -143,6 +143,11 @@ function doSearch() {
   } else {
     router.push('/portal/search')
   }
+}
+
+async function handleLogout() {
+  await userStore.logout()
+  router.push('/portal/home')
 }
 
 onMounted(async () => {

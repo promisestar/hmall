@@ -85,8 +85,8 @@ const currentTitle = computed(() => {
   return map[route.path] || ''
 })
 
-function handleLogout() {
-  adminStore.logout()
+async function handleLogout() {
+  await adminStore.logout()
   router.push('/admin/login')
 }
 </script>

@@ -1,13 +1,13 @@
 # hmall Redis 集成修改说明文档
 
-> 更新日期：2026-07-10  
+> 更新日期：2026-07-13  
 > 参考文档：`docs/redis-application-analysis.md`
 
 ---
 
 ## —、Redis+MySQL 双写架构总览
 
-本次改造（第二阶段）实现了购物车和商品缓存的 Redis+MySQL 双写架构，核心策略如下：
+本次改造（第三阶段）在已有基础上实现了验证码存储和 Token 黑名单登出失效功能，核心策略如下：
 
 ```
 购物车写入：Redis Lua 同步 → MQ 异步落 MySQL → 5min 版本补偿
@@ -16,6 +16,9 @@
 
 商品缓存：MySQL 同步写 → Redis 同步删缓存 → MQ 二次确认删除 → 5min 补偿
 商品读取：Cache-Aside（Redis → miss → MySQL → SET NX EX 回填）
+
+验证码：Redis SET EX 5min → 校验通过后 DELETE（一次性）
+Token 黑名单：登出 → Redis SET EX（TTL = 剩余有效期）→ Gateway 每次请求检查
 ```
 
 ### 1.1 hm-common（公共模块）
@@ -23,13 +26,15 @@
 | 文件 | 操作 | 说明 |
 |------|------|------|
 | `pom.xml` | 修改 | 新增 `spring-boot-starter-data-redis` 依赖 |
-| `META-INF/spring.factories` | 修改 | 注册 `RedisConfig` 和 `RedisCacheAspect` |
-| `config/RedisConfig.java` | 新增 | RedisTemplate Bean 配置（Jackson2Json 序列化 + `@ConditionalOnProperty` 按需加载 + `@Import` RedisService/RedisLockUtil） |
-| `service/RedisService.java` | 新增 | **双 Template 设计**：`RedisTemplate`（Jackson，Hash/Set 操作）+ `StringRedisTemplate`（Lua 脚本 + String 读写）+ 手动 `ObjectMapper` 序列化 |
+| `META-INF/spring.factories` | 修改 | 注册 `RedisConfig`、`RedisCacheAspect`、`LogDirectoryInitializer` |
+| `config/RedisConfig.java` | 新增 | RedisTemplate Bean 配置（`@ConditionalOnProperty` 按需加载；StringRedisTemplate 由 Spring Boot 自动配置） |
+| `config/LogDirectoryInitializer.java` | 新增 | `@Configuration` + `ApplicationRunner`：启动时创建 `./logs/` 目录，解决 Logback 1.2.x `RollingFileAppender` 不会自动创建父目录导致日志文件静默丢失的问题 |
+| `resources/logback-spring.xml` | 新增 | 双文件日志：`hmall.log`（全量）+ `api.log`（WebLogAspect 专用，`additivity="false"` 隔离） |
+| `service/RedisService.java` | **重写** | **双 Template 设计**：`StringRedisTemplate`（Lua + String 读写，手动 ObjectMapper 序列化）+ `RedisTemplate`（Jackson，Hash/Set 操作） |
 | `utils/RedisLockUtil.java` | 新增 | 分布式锁工具（SET NX EX + Lua 原子释放） |
 | `utils/LuaScriptLoader.java` | 新增 | Lua 脚本加载工具（从 classpath 读取 .lua 文件） |
-| `aspect/RedisCacheAspect.java` | 新增 | Redis 异常隔离切面（拦截异常 → 根据返回类型返回默认值：`boolean`→false、`long`→0L、引用类型→null） |
-| `resources/lua/set_if_absent.lua` | 新增 | SET NX EX 原子缓存写入（`tonumber(ARGV[2])` 防御 String → 整数转换异常） |
+| `aspect/RedisCacheAspect.java` | 修改 | Redis 异常隔离切面（根据返回类型返回安全默认值：`boolean`→false、`long`→0L、`int`→0，引用类型→null，避免基本类型 null 拆箱 NPE） |
+| `resources/lua/set_if_absent.lua` | 修改 | SET NX EX 原子缓存写入（`tonumber(ARGV[2])` 防御 Jackson 序列化导致的数值类型转换异常） |
 | `resources/lua/hdel_atomic.lua` | 新增 | 批量 HDEL 原子删除 |
 | `resources/lua/release_lock.lua` | 新增 | 分布式锁 Lua 原子释放 |
 
@@ -70,9 +75,21 @@
 |------|------|------|
 | `application.yaml` | 修改 | 新增 `spring.redis` 连接配置 |
 | `application-local.yaml` | 修改 | 本地环境 Redis 指向 `192.168.100.128` |
-| `service/impl/UserServiceImpl.java` | 修改 | `deductMoney` 增加分布式锁（`lock:deduct:{userId}`），防止并发超扣 |
+| `service/impl/UserServiceImpl.java` | 修改 | `deductMoney` 增加分布式锁；**新增 `sendCode`、`loginByCode`、`logout` 方法** |
+| `controller/UserController.java` | 修改 | 新增 `POST /users/code`、`POST /users/login/code`、`POST /users/logout` |
+| `domain/dto/SendCodeDTO.java` | 新增 | 发送验证码请求 DTO（phone） |
+| `domain/dto/LoginByCodeDTO.java` | 新增 | 验证码登录请求 DTO（phone + code） |
+| `utils/JwtTool.java` | 修改 | `createToken` 增加 `setJWTId(UUID)`；新增 `getJti()`、`getRemainingTTL()`；提取 `parseAndVerify()` 私有方法 |
 
-### 1.5 其他服务（配置层）
+### 1.5 hm-gateway（网关层）— Token 黑名单检查
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `application.yml` | 修改 | 新增 `spring.redis` 连接配置；白名单新增 `/users/login/code` 和 `/users/code` |
+| `filters/AuthGlobalFilter.java` | 修改 | 步骤 5 新增黑名单检查：`getJti()` → `isTokenBlacklisted()` → 命中返回 401；Redis 不可用时降级放行 |
+| `utils/JwtTool.java` | 修改 | `createToken` 增加 `setJWTId(UUID)`；新增 `getJti()` 方法 |
+
+### 1.6 其他服务（配置层）
 
 | 服务 | 操作 | 说明 |
 |------|------|------|
@@ -80,6 +97,18 @@
 | `trade-service` | 修改 `application.yaml` + `application-local.yaml` | 预留 Redis 配置（后续缓存订单信息） |
 | `pay-service` | 修改 `application.yaml` + `application-local.yaml` | 预留 Redis 配置（后续幂等性缓存） |
 | `search-service` | 无变更 | 直接查 ES，暂不引入 Redis |
+
+### 1.7 hmall-frontend（前端）— 验证码登录 + 登出联动
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `src/types/index.ts` | 修改 | 新增 `SendCodeDTO`、`LoginByCodeDTO` 类型 |
+| `src/api/user.ts` | 修改 | 新增 `sendCode`、`loginByCode`、`logoutApi` 三个 API 函数 |
+| `src/views/portal/LoginPage.vue` | **重写** | 新增"密码登录/验证码登录"双 Tab；验证码表单含手机号输入 + 验证码输入 + 60s 倒计时发送按钮 |
+| `src/stores/user.ts` | 修改 | `logout()` 改为 async（先调 backend logout 再清除本地）；新增 `loginByCode()` 方法 |
+| `src/stores/admin.ts` | 修改 | `logout()` 改为 async（先调 backend logout 再清除本地） |
+| `src/views/portal/PortalLayout.vue` | 修改 | "退出"改为 `async handleLogout()`，登出后自动跳转首页 |
+| `src/views/admin/AdminLayout.vue` | 修改 | `handleLogout()` 改为 async，await 登出后再跳转 |
 
 ---
 
@@ -91,6 +120,10 @@
 hm-common/
 ├── config/RedisConfig          → RedisTemplate + StringRedisTemplate Bean
 │                                 （Jackson2Json + StringRedisSerializer 双序列化器）
+├── config/LogDirectoryInitializer → ApplicationRunner：启动时 mkdir logs/
+├── resources/
+│   ├── logback-spring.xml      → 双文件日志（hmall.log + api.log 隔离输出）
+│   └── META-INF/spring.factories → 注册 3 个配置类（含 LogDirectoryInitializer）
 ├── service/RedisService        → 双 Template 设计：
 │   ├── stringRedisTemplate     → Lua 脚本执行 + String 读写（手动 Jackson 序列化）
 │   └── redisTemplate           → Hash/Set 操作（Jackson 自动序列化，hGetAll 返回 Map）
@@ -117,6 +150,23 @@ item-service/
 ├── mq/ItemCacheSender          → MQ 生产者
 ├── mq/ItemCacheReceiver        → MQ 消费者
 └── task/ItemCacheCompensation  → 5min 补偿定时任务
+
+user-service/
+├── domain/dto/SendCodeDTO      → 发送验证码 DTO
+├── domain/dto/LoginByCodeDTO   → 验证码登录 DTO
+├── controller/UserController   → 新增 /code + /login/code + /logout
+└── utils/JwtTool               → 新增 jti 支持 + getJti/getRemainingTTL
+
+hm-gateway/
+├── filters/AuthGlobalFilter    → 新增 Token 黑名单检查（步骤 5）
+└── utils/JwtTool               → 新增 jti 支持 + getJti
+
+hmall-frontend/
+├── src/views/portal/LoginPage  → 新增验证码登录 Tab
+├── src/stores/user.ts          → async logout + loginByCode
+├── src/stores/admin.ts         → async logout
+├── src/api/user.ts             → 新增 sendCode/loginByCode/logoutApi
+└── src/types/index.ts          → 新增 SendCodeDTO/LoginByCodeDTO
 ```
 
 ### 2.3 MQ 拓扑（新增 Exchange/Queue）
@@ -141,8 +191,8 @@ Exchange: "item.cache.topic" (topic)
 | 商品信息 | `item:info:{id}` | Value (JSON) | 30 分钟 | SET NX EX / GET |
 | 商品脏数据 | `item:cache:dirty` | Set | 15 分钟 | SADD / SMEMBERS（补偿任务遍历） |
 | 分布式锁 | `lock:deduct:{userId}` | String | 5 秒 | SET NX EX + Lua 释放 |
-| 验证码 | `sms:code:{phone}` | String | 5 分钟 | SET EX（预留） |
-| Token 黑名单 | `token:blacklist:{jti}` | String | 动态 | SET EX（预留） |
+| 验证码 | `sms:code:{phone}` | String | 5 分钟 | SET EX → 校验后 DELETE（一次性） |
+| Token 黑名单 | `token:blacklist:{jti}` | String | 动态 | SET EX（TTL = token 剩余有效期） |
 
 ---
 
@@ -322,7 +372,125 @@ public class RedisCacheAspect {
 
 ---
 
-### 3.5 双 Template 序列化设计（技术决策记录）
+### 3.5 验证码存储
+
+#### 改造前
+
+项目无验证码功能，`RedisService` 中预置了 `saveSmsCode`/`getSmsCode`/`deleteSmsCode` 方法但无调用者。
+
+#### 改造后
+
+**Redis Key 设计：**
+```
+Key:  sms:code:{phone}
+Type: String
+TTL:  5 分钟
+```
+
+**API 端点（user-service）：**
+
+| 端点 | 方法 | 说明 | 白名单 |
+|------|------|------|--------|
+| `/users/code` | POST | 发送短信验证码（phone → 6 位随机码 → Redis SET EX 5min） | ✅ |
+| `/users/login/code` | POST | 验证码登录（比对 Redis code → 查 MySQL → 生成 JWT） | ✅ |
+
+**发送验证码流程（`UserServiceImpl.sendCode`）：**
+1. 生成 6 位随机数字验证码
+2. 调用 `redisService.saveSmsCode(phone, code)` 存入 Redis（TTL 5 分钟）
+3. 通过 `log.info` 模拟短信发送（生产环境对接短信 SDK）
+
+**验证码登录流程（`UserServiceImpl.loginByCode`）：**
+1. `redisService.getSmsCode(phone)` 获取缓存的验证码
+2. 校验输入 code → 若不匹配抛 `BadRequestException`
+3. `redisService.deleteSmsCode(phone)` 验证后立即删除（一次性使用）
+4. `lambdaQuery().eq(User::getPhone, phone)` 查 MySQL 用户
+5. 生成 JWT token（含 jti）→ 返回 `UserLoginVO`
+
+**前端改造（LoginPage.vue）：**
+- 顶部"密码登录 / 验证码登录"双 Tab 切换
+- 验证码 Tab：手机号输入 + 验证码输入 + "发送验证码"按钮（60s 倒计时禁用）
+- 手机号格式校验 `1[3-9]\d{9}`
+
+---
+
+### 3.6 Token 黑名单（登出失效）
+
+#### 改造前
+
+用户登出仅清除前端 `sessionStorage`，JWT 在有效期内仍可用于 API 请求（无状态 token 固有问题）。项目完全没有 logout 接口。
+
+#### 改造后 — 全链路设计
+
+```
+登出流程:   前端 POST /users/logout
+              → user-service: extract jti → redisService.addTokenToBlacklist(jti, ttl)
+              → 前端清除 sessionStorage
+
+后续请求:   Gateway AuthGlobalFilter
+              → parse JWT → getJti() → redisService.isTokenBlacklisted(jti)
+              → 命中 → 401 (token 已失效)
+              → 未命中 / Redis 不可用 → 放行
+```
+
+**JWT 结构变更：**
+
+每个 JWT 创建时自动注入唯一 `jti`（UUID）：
+```java
+// user-service & gateway JwtTool 均已修改
+JWT.create()
+    .setJWTId(UUID.randomUUID().toString())  // ← 新增
+    .setPayload("user", userId)
+    .setIssuedAt(new Date())
+    .setExpiresAt(...)
+```
+
+**新增方法：**
+- `JwtTool.getJti(token)` — 提取 JWT ID
+- `JwtTool.getRemainingTTL(token)` — 计算剩余有效期（秒）
+
+**登出接口（`POST /users/logout`）：**
+```java
+public void logout(String token) {
+    String jti = jwtTool.getJti(token);
+    long remainingTTL = jwtTool.getRemainingTTL(token);
+    if (remainingTTL > 0) {
+        redisService.addTokenToBlacklist(jti, remainingTTL);
+    }
+}
+```
+
+**Redis Key：**
+```
+Key:  token:blacklist:{jti}
+Type: String
+Value: "1"
+TTL:  token 剩余有效期（过期自动清理，不浪费内存）
+```
+
+**Gateway 黑名单检查（AuthGlobalFilter 新增步骤 5）：**
+```java
+if (redisService != null) {
+    String jti = jwtTool.getJti(token);
+    if (jti != null && redisService.isTokenBlacklisted(jti)) {
+        response.setStatusCode(HttpStatus.UNAUTHORIZED);
+        return response.setComplete();
+    }
+}
+```
+
+**降级策略：**
+- `RedisService` 通过 `@Autowired(required = false)` 注入 — Gateway 无 Redis 时不检查黑名单
+- Redis 查询异常 → catch 后 `log.warn` 降级放行（不阻塞正常业务）
+- 登出 API 失败 → 前端仍清除本地 `sessionStorage`（try-catch 包裹）
+
+**前端改造：**
+- `userStore.logout()` / `adminStore.logout()` 改为 async：先调 `POST /users/logout` 再清本地
+- `PortalLayout.vue`：登出后自动跳转 `/portal/home`
+- `AdminLayout.vue`：登出后自动跳转 `/admin/login`
+
+---
+
+### 3.7 双 Template 序列化设计（技术决策记录）
 
 #### 问题背景
 
@@ -425,6 +593,8 @@ spring:
 | 商品查询 | 查 MySQL | 延迟增加，功能正常 |
 | 扣款分布式锁 | `tryLock` 抛异常 → 降级无锁执行 | 失去并发保护，有超扣风险 |
 | 商品更新 | 缓存删除失败 → 用户看到旧数据 | 最长 30 分钟后自动过期 |
+| 验证码发送 | Redis 不可用 → 验证码发送失败 | 用户无法通过验证码登录，密码登录不受影响 |
+| Gateway 黑名单 | Redis 不可用 → 降级放行 | 登出的 token 仍可继续使用（退化到改造前行为） |
 
 ---
 
@@ -447,25 +617,27 @@ spring:
 | `item:info:*` | TTL 30 分钟自动过期 + 写操作主动删除 + MQ 二次确认 + 补偿任务 |
 | `item:cache:dirty` | TTL 15 分钟自动过期 + 补偿任务主动清理 |
 | `lock:deduct:*` | TTL 5 秒自动过期 + finally 主动释放 |
-| `sms:code:*` | TTL 5 分钟自动过期（预留） |
-| `token:blacklist:*` | TTL = token 剩余有效期（预留） |
+| `sms:code:*` | TTL 5 分钟自动过期 + 校验后主动 DELETE |
+| `token:blacklist:*` | TTL = token 剩余有效期自动过期 |
 
 ### 6.3 监控建议
 
 1. **Redis 可用性**：PING 心跳监控，延迟 > 10ms 告警
 2. **内存使用率**：> 80% 告警，考虑增加实例或调整 TTL
-3. **连接数**：实际连接数应 < `max-active` * 服务数（6 × 8 = 48）
+3. **连接数**：实际连接数应 < `max-active` * 服务数（7 × 8 = 56，含 Gateway）
 4. **缓存命中率**：`item:info:*` 命中率应 > 80%
 5. **日志关键字**：关注 `"降级处理"`（Redis 异常）和 `"降级到 MySQL"`（业务回退）
 
 ### 6.4 启动检查清单
 
 - [ ] Redis 服务已启动（`redis-cli PING` → `PONG`）
-- [ ] 各微服务 `application-local.yaml` 中 `spring.redis.host` 正确配置
+- [ ] 各微服务 + Gateway `application-local.yaml` 中 `spring.redis.host` 正确配置
 - [ ] 启动无报错：控制台无 `RedisConnectionFailureException`
 - [ ] 购物车功能正常：加购 → 查购物车 → 删商品
 - [ ] 商品查询正常：首页商品列表、商品详情
 - [ ] 下单扣款正常：创建订单 → 支付 → 扣款成功
+- [ ] 验证码登录正常：发送验证码 → 验证码登录 → 跳转首页
+- [ ] 登出失效正常：登录 → 登出 → 用旧 token 请求受保护页面 → 返回 401
 
 ---
 
@@ -477,12 +649,15 @@ spring:
 4. **MQ 消息积压监控**：补偿任务是最终兜底，需监控 `cart.sync.queue` 和 `item.cache.invalidate.queue` 的消息积压量
 5. **监控面板**：接入 Redis 监控大盘（如 Grafana + Redis Exporter）
 
-> **已完成**：购物车 Redis+MySQL 双写架构（Lua 原子操作 + MQ 异步 + 5min 版本补偿）、购物车删除双删同步、商品缓存三层失效保障（同步删除 + MQ 二次确认 + 补偿任务）、扣款分布式锁的 Lua 释放、SET NX EX 原子缓存回写。
+> **已完成**：购物车 Redis+MySQL 双写架构（Lua 原子操作 + MQ 异步 + 5min 版本补偿）、购物车删除双删同步、商品缓存三层失效保障（同步删除 + MQ 二次确认 + 补偿任务）、扣款分布式锁的 Lua 释放、SET NX EX 原子缓存回写、**验证码存储（sms:code: 5min TTL + 一次性校验）**、**Token 黑名单登出失效（jti + Gateway 黑名单检查 + 前端联动登出）**。
 >
 > **已修复的序列化问题**：
 > - `add_cart.lua`：`HLEN or 0` 防御 nil + Lua 端所有数值参数使用 `tonumber()` 显式转换
 > - `set_if_absent.lua`：`tonumber(ARGV[2])` 显式转换
 > - 双 Template 设计：Lua 脚本 + String 读写使用 `StringRedisTemplate`，消除 Jackson 对 Lua 返回值 "OK" 的非 JSON 解析异常
-> - `get(key, clazz)`：使用 `objectMapper.readValue()` 精确还原类型，解决 LinkedHashMap 强转 ClassCastException
-> - `RedisCacheAspect`：根据返回类型返回安全默认值，避免 `boolean` 基本类型 null 拆箱 NPE
+> - `RedisService.get(key, clazz)`：使用 `objectMapper.readValue()` 精确还原类型，解决 LinkedHashMap 强转 ClassCastException
+> - `RedisService.set/get`：String 读写统一走 `stringRedisTemplate` + 手动 `ObjectMapper`，消除 Jackson 序列化器无类型信息退化为 LinkedHashMap 的隐患
+> - `RedisCacheAspect`：根据返回类型返回安全默认值（`boolean`→false、`long`→0L、`int`→0），避免基本类型 null 拆箱 NPE
 > - Java 端 Lua args：数值参数直接传 Long/Integer，禁止 `String.valueOf()`（`StringRedisTemplate` 中 `Long.toString()` 无引号包裹）
+> - `LogDirectoryInitializer`：启动时自动创建 `./logs/` 目录，防止 Logback 1.2.x 父目录缺失导致文件日志静默丢失
+> - `api.log` 排查：Windows 下手动创建的 `api.log` 可能被独占锁或权限阻止写入，删除后让 Logback 自建即可

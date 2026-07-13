@@ -4,10 +4,12 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmall.common.exception.BadRequestException;
 import com.hmall.common.exception.BizIllegalException;
 import com.hmall.common.exception.ForbiddenException;
+import com.hmall.common.service.RedisService;
 import com.hmall.common.utils.RedisLockUtil;
 import com.hmall.common.utils.UserContext;
 
 import com.hmall.user.config.JwtProperties;
+import com.hmall.user.domain.dto.LoginByCodeDTO;
 import com.hmall.user.domain.dto.LoginFormDTO;
 import com.hmall.user.domain.po.User;
 import com.hmall.user.domain.vo.UserLoginVO;
@@ -21,6 +23,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
 
+import java.util.Random;
 import java.util.UUID;
 
 /**
@@ -43,6 +46,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     private final RedisLockUtil redisLockUtil;
 
+    private final RedisService redisService;
+
     private static final String DEDUCT_LOCK_PREFIX = "lock:deduct:";
     private static final long LOCK_EXPIRE_SECONDS = 5;
 
@@ -51,7 +56,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         // 1.数据校验
         String username = loginDTO.getUsername();
         String password = loginDTO.getPassword();
-        // 2.根据用户名或手机号查询
+        // 2.根据用户名查询
         User user;
         try {
             user = lambdaQuery().eq(User::getUsername, username).one();
@@ -76,6 +81,70 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         vo.setBalance(user.getBalance());
         vo.setToken(token);
         return vo;
+    }
+
+    // ==================== 3.5 验证码存储 ====================
+
+    @Override
+    public void sendCode(String phone) {
+        // 1. 生成6位随机验证码
+        String code = String.format("%06d", new Random().nextInt(999999));
+        // 2. 模拟发送短信（生产环境对接短信SDK）
+        log.info("【验证码】向手机 {} 发送验证码: {} （5分钟内有效）", phone, code);
+        // 3. 存入 Redis，TTL 自动过期
+        redisService.saveSmsCode(phone, code);
+    }
+
+    @Override
+    public UserLoginVO loginByCode(LoginByCodeDTO dto) {
+        String phone = dto.getPhone();
+        String inputCode = dto.getCode();
+        // 1. 从 Redis 获取验证码
+        String cachedCode = redisService.getSmsCode(phone);
+        if (cachedCode == null) {
+            throw new BadRequestException("验证码已过期，请重新获取");
+        }
+        // 2. 对比验证码
+        if (!cachedCode.equals(inputCode)) {
+            throw new BadRequestException("验证码错误");
+        }
+        // 3. 验证通过后删除验证码（一次性使用）
+        redisService.deleteSmsCode(phone);
+        // 4. 根据手机号查询用户
+        User user = lambdaQuery().eq(User::getPhone, phone).one();
+        Assert.notNull(user, "手机号未注册");
+        // 5. 校验是否禁用
+        if (user.getStatus() == UserStatus.FROZEN) {
+            throw new ForbiddenException("用户被冻结");
+        }
+        // 6. 生成 JWT token
+        String token = jwtTool.createToken(user.getId(), jwtProperties.getTokenTTL());
+        // 7. 封装返回
+        UserLoginVO vo = new UserLoginVO();
+        vo.setUserId(user.getId());
+        vo.setUsername(user.getUsername());
+        vo.setBalance(user.getBalance());
+        vo.setToken(token);
+        log.info("用户 {} 通过验证码登录成功", user.getUsername());
+        return vo;
+    }
+
+    // ==================== 3.6 Token 黑名单（登出） ====================
+
+    @Override
+    public void logout(String token) {
+        // 1. 提取 jti
+        String jti = jwtTool.getJti(token);
+        // 2. 计算 token 剩余有效期（秒）
+        long remainingTTL = jwtTool.getRemainingTTL(token);
+        if (remainingTTL <= 0) {
+            log.info("token 已过期，无需加入黑名单, jti={}", jti);
+            return;
+        }
+        // 3. 将 jti 加入 Redis 黑名单，TTL = token 剩余有效期
+        redisService.addTokenToBlacklist(jti, remainingTTL);
+        log.info("用户 {} 登出，token 已加入黑名单, jti={}, ttl={}s",
+                UserContext.getUser(), jti, remainingTTL);
     }
 
     @Override
