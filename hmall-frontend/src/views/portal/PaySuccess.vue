@@ -18,10 +18,18 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { CheckCircle2 } from 'lucide-vue-next'
 import PortalLayout from './PortalLayout.vue'
+import { useCartStore } from '@/stores/cart'
 
 const route = useRoute()
+const cartStore = useCartStore()
 const orderId = route.params.orderId as string
+
+onMounted(() => {
+  // 支付成功后清空前端购物车缓存，下次查询时自动从 Redis/MySQL 拉取最新数据
+  cartStore.clearCart()
+})
 </script>

@@ -203,7 +203,7 @@ const floorItems = reactive<Record<string, Item[]>>({
 })
 
 function goDetail(id: number) {
-  router.push(`/portal/search`) // 暂无商品详情页，跳转搜索页
+  router.push(`/portal/product/${id}`)
 }
 
 async function fetchRecommend() {

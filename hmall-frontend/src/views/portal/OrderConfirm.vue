@@ -27,7 +27,12 @@
 
         <!-- Address -->
         <div class="mb-6">
-          <h4 class="font-medium mb-3 text-sm text-gray-500 border-b pb-2">收货地址</h4>
+          <div class="flex items-center justify-between mb-3 border-b pb-2">
+            <h4 class="font-medium text-sm text-gray-500">收货地址</h4>
+            <router-link to="/portal/address" class="text-xs text-[#E4393C] hover:underline">
+              管理收货地址
+            </router-link>
+          </div>
           <div v-if="loadingAddress" class="text-sm text-gray-400">加载中...</div>
           <div v-else-if="addresses.length === 0" class="text-sm text-gray-400">暂无收货地址</div>
           <div v-else class="space-y-2">

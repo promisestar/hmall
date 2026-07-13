@@ -18,6 +18,11 @@ const router = createRouter({
       component: () => import('@/views/portal/HomePage.vue'),
     },
     {
+      path: '/portal/product/:itemId',
+      name: 'ProductDetail',
+      component: () => import('@/views/portal/ProductDetail.vue'),
+    },
+    {
       path: '/portal/login',
       name: 'Login',
       component: () => import('@/views/portal/LoginPage.vue'),
@@ -43,6 +48,18 @@ const router = createRouter({
       path: '/portal/orders',
       name: 'OrderList',
       component: () => import('@/views/portal/OrderList.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/portal/address',
+      name: 'AddressList',
+      component: () => import('@/views/portal/AddressList.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/portal/profile',
+      name: 'UserProfile',
+      component: () => import('@/views/portal/UserProfile.vue'),
       meta: { requiresAuth: true },
     },
     {

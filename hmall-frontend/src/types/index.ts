@@ -172,5 +172,6 @@ export interface Address {
   city: string
   town: string
   street: string
-  isDefault: boolean
+  isDefault: number
+  notes?: string
 }

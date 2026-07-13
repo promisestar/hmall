@@ -9,7 +9,9 @@
             请登录
           </router-link>
           <template v-else>
-            <span class="text-white">{{ userStore.username }}</span>
+            <router-link to="/portal/profile" class="text-white hover:text-[#E4393C] transition-colors">
+              {{ userStore.username }}
+            </router-link>
             <span @click="handleLogout" class="cursor-pointer hover:text-white transition-colors">退出</span>
           </template>
           <router-link to="/portal/home" class="hover:text-white transition-colors">首页</router-link>
