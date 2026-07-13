@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -56,6 +57,17 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
     private static final long CART_TTL_DAYS = 30;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    /**
+     * 待失效用户标记（Redis 宕机导致 invalidateRedisCart 失败时记录）
+     * <p>
+     * 正常操作下此集合为空，查询时 O(1) 检查不产生任何 I/O 开销。
+     * 仅在 Redis 曾宕机且降级写 MySQL 的用户查询时触发一次重新加载，
+     * 完成后自动移除标记，后续查询恢复纯 Redis 快速路径。
+     * <p>
+     * 多实例/重启场景由补偿任务（@5min）兜底。
+     */
+    private final Set<Long> pendingInvalidationUsers = ConcurrentHashMap.newKeySet();
 
     // ==================== Lua 脚本 ====================
 
@@ -105,14 +117,15 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
             long ttlSeconds = TimeUnit.DAYS.toSeconds(CART_TTL_DAYS);
 
             // Lua 原子执行：HEXISTS/HLEN 检查 → HSET/HINCRBY → SET version → EXPIRE
-            // 注意：ttlSeconds/maxItems/version 直接传 Long/Integer 而非 String.valueOf()
-            // 否则 Jackson2Json 序列化后会带引号 ("\"2592000\"")，Lua 中 tonumber() 解析失败
+            // 注意：executeScript 底层使用 StringRedisTemplate，所有 args 必须为 String 类型
+            // （StringRedisSerializer 期望 String，传 Long/Integer 会触发 ClassCastException）
+            // Lua 端用 tonumber() 将字符串转为数字，所以传 String 不影响 tonumber 解析
             Long result = redisService.executeScript(
                     ADD_CART_LUA, Long.class,
                     Arrays.asList(cartKey, numKey, versionKey),
-                    fieldKey, itemDataJson, ttlSeconds,
-                    cartProperties.getMaxItems(),
-                    version
+                    fieldKey, itemDataJson, String.valueOf(ttlSeconds),
+                    String.valueOf(cartProperties.getMaxItems()),
+                    String.valueOf(version)
             );
 
             if (result != null && result == -1) {
@@ -130,6 +143,9 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
             // Redis 不可用，降级到纯 MySQL
             log.warn("Redis 操作失败，降级到 MySQL 处理加购", e);
             addItem2CartMysql(cartFormDTO, userId);
+            // 清除 Redis 旧缓存，防止下次查询读到过期数据（MySQL 已写入最新数据）
+            // 下次查询时 Redis 为空 → 回退 MySQL → lazy sync 回填 Redis
+            invalidateRedisCart(userId);
         }
     }
 
@@ -144,7 +160,19 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
             Map<Object, Object> cartMap = redisService.hGetAll(cartKey);
             Map<Object, Object> numMap = redisService.hGetAll(numKey);
             if (cartMap != null && !cartMap.isEmpty()) {
-                vos = convertRedisMapToCartVOList(cartMap, numMap);
+                // 检查待失效标记（内存 O(1)，无 I/O 开销）
+                // 场景：Redis 宕机期间降级写 MySQL，Redis 恢复后旧数据仍在
+                if (pendingInvalidationUsers.contains(userId)) {
+                    log.info("检测到待失效标记，从 MySQL 重新加载购物车，userId={}", userId);
+                    invalidateRedisCart(userId); // 再次尝试清除（Redis 可能已恢复）
+                    vos = queryMyCartsMysql(userId);
+                    if (CollUtils.isNotEmpty(vos)) {
+                        syncCartsToRedis(userId, vos);
+                    }
+                } else {
+                    // 正常路径：纯 Redis 读取，零 MySQL 查询
+                    vos = convertRedisMapToCartVOList(cartMap, numMap);
+                }
             } else {
                 // Redis 为空 → 回退 MySQL + 回填 Redis（冷启动/lazy sync）
                 log.info("Redis 购物车为空，从 MySQL 加载并回填，userId={}", userId);
@@ -179,6 +207,7 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
         String versionKey = buildCartVersionKey(userId);
 
         // 1. Redis Lua 原子删除（双 Hash）+ 更新版本号
+        boolean redisFailed = false;
         try {
             Object[] fields = itemIds.stream().map(String::valueOf).toArray();
             redisService.executeScript(REMOVE_CART_LUA,
@@ -187,11 +216,16 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
             redisService.set(versionKey, String.valueOf(System.currentTimeMillis()), CART_TTL_DAYS, TimeUnit.DAYS);
         } catch (Exception e) {
             log.warn("Redis 删除购物车条目失败", e);
+            redisFailed = true;
         }
 
         // 2. MySQL 同步 DELETE（必须同步，不走 MQ，防止补偿任务回填）
         try {
             removeByItemIdsMysql(itemIds, userId);
+            // Redis 删除失败但 MySQL 成功 → 清除 Redis 旧缓存，防止下次查询读到已删除的商品
+            if (redisFailed) {
+                invalidateRedisCart(userId);
+            }
         } catch (Exception e) {
             log.error("MySQL 删除购物车条目失败, userId={}, itemIds={}", userId, itemIds, e);
         }
@@ -200,13 +234,15 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
     // ==================== MySQL 降级方法 ====================
 
     private void addItem2CartMysql(CartFormDTO cartFormDTO, Long userId) {
+        long version = System.currentTimeMillis();
         if (checkItemExists(cartFormDTO.getItemId(), userId)) {
-            baseMapper.updateNum(cartFormDTO.getItemId(), userId);
+            baseMapper.updateNum(cartFormDTO.getItemId(), userId, version);
             return;
         }
         checkCartsFull(userId);
         Cart cart = BeanUtils.copyBean(cartFormDTO, Cart.class);
         cart.setUserId(userId);
+        cart.setVersion(version);
         save(cart);
     }
 
@@ -227,6 +263,27 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
     }
 
     // ==================== Redis-MySQL 同步方法 ====================
+
+    /**
+     * 清除用户购物车的 Redis 缓存（三个 Key：商品数据、数量、版本号）
+     * <p>
+     * Redis 可用时：立即清除，下次查询走 MySQL lazy sync 回填。<br>
+     * Redis 不可用时：标记到 pendingInvalidationUsers，下次该用户查询时
+     * 检测到标记 → 从 MySQL 重新加载 → 回填 Redis → 移除标记。
+     */
+    private void invalidateRedisCart(Long userId) {
+        try {
+            redisService.delete(buildCartKey(userId));
+            redisService.delete(buildCartNumKey(userId));
+            redisService.delete(buildCartVersionKey(userId));
+            pendingInvalidationUsers.remove(userId); // 清除成功，移除待失效标记
+            log.info("已清除 Redis 购物车缓存，userId={}", userId);
+        } catch (Exception e) {
+            // Redis 不可达，标记待失效，下次查询时重试
+            pendingInvalidationUsers.add(userId);
+            log.warn("清除 Redis 购物车缓存失败，已标记待失效，userId={}", userId, e);
+        }
+    }
 
     /**
      * 确保 Redis 中有用户购物车数据（冷启动 lazy sync）

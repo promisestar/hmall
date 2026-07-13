@@ -85,8 +85,10 @@ public class CartSyncCompensationTask {
         String versionKey = cartKey + CART_VERSION_KEY_SUFFIX;
 
         // 获取 Redis 版本号（不存在则视为 0）
-        String redisVersionStr = (String) redisService.get(versionKey);
-        long redisVersion = parseVersion(redisVersionStr);
+        // 注意：版本号可能由 Lua 脚本 SET（裸数字 → get 返回 Long）
+        // 或由 redisService.set()（JSON 字符串 → get 返回 String）存储
+        // 必须用 Object 接收再统一解析，不能直接 (String) 强转
+        long redisVersion = parseRedisVersion(redisService.get(versionKey));
 
         // 获取 MySQL 最大版本号
         Long mysqlMaxVersion = getMysqlMaxVersion(userId);
@@ -94,6 +96,10 @@ public class CartSyncCompensationTask {
         if (redisVersion > 0 && (mysqlMaxVersion == null || redisVersion > mysqlMaxVersion)) {
             // Redis 版本更高 → Redis → MySQL 全量同步
             syncRedisToMysql(userId, cartKey, numKey);
+            return true;
+        } else if (mysqlMaxVersion != null && mysqlMaxVersion > redisVersion) {
+            // MySQL 版本更高（Redis 宕机期间降级写了 MySQL）→ MySQL → Redis 回填
+            syncMysqlToRedis(userId, cartKey, numKey, versionKey);
             return true;
         } else if (redisVersion == 0 && mysqlMaxVersion != null) {
             // Redis 为空，MySQL 有数据 → MySQL → Redis 回填
@@ -182,12 +188,17 @@ public class CartSyncCompensationTask {
         return carts.get(0).getVersion();
     }
 
-    private long parseVersion(String str) {
-        if (str == null || str.isEmpty()) {
-            return 0L;
-        }
+    /**
+     * 解析 Redis 版本号（兼容 Long 和 String 两种存储格式）
+     * <p>
+     * Lua 脚本 SET 存储为裸数字 → objectMapper.readValue 返回 Long；
+     * redisService.set() 存储为 JSON 字符串 → objectMapper.readValue 返回 String。
+     */
+    private long parseRedisVersion(Object value) {
+        if (value == null) return 0L;
+        if (value instanceof Number) return ((Number) value).longValue();
         try {
-            return Long.parseLong(str);
+            return Long.parseLong(value.toString());
         } catch (NumberFormatException e) {
             return 0L;
         }

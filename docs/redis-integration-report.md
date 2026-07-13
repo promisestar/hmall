@@ -661,3 +661,119 @@ spring:
 > - Java 端 Lua args：数值参数直接传 Long/Integer，禁止 `String.valueOf()`（`StringRedisTemplate` 中 `Long.toString()` 无引号包裹）
 > - `LogDirectoryInitializer`：启动时自动创建 `./logs/` 目录，防止 Logback 1.2.x 父目录缺失导致文件日志静默丢失
 > - `api.log` 排查：Windows 下手动创建的 `api.log` 可能被独占锁或权限阻止写入，删除后让 Logback 自建即可
+
+---
+
+## 八、已知问题与修复记录（2026-07-13 会话）
+
+### 8.1 Gateway 中 RedisTemplate Bean 重名冲突
+
+**问题**：`RedisConfig` 和 Spring Boot 内置 `RedisAutoConfiguration` 都注册名为 `redisTemplate` 的 Bean。在 Servlet 微服务中因自配置数量多、排序结果恰好让 `RedisConfig` 先处理而"碰巧正常"；在 Gateway（WebFlux）中自配置链极短，`RedisAutoConfiguration` 先于 `RedisConfig` 处理 → 同名 Bean 冲突。
+
+**修复**（`RedisConfig.java`）：
+- 添加 `@AutoConfigureBefore(RedisAutoConfiguration.class)` 显式声明处理顺序
+- 保证 `RedisConfig` 的自定义 `redisTemplate`（Jackson 序列化器）始终先注册
+- `RedisAutoConfiguration` 的 `@ConditionalOnMissingBean(name = "redisTemplate")` 检测到已有 Bean 自动跳过
+
+**影响范围**：`hm-common/config/RedisConfig.java`
+
+---
+
+### 8.2 executeScript 传入 Long/Integer 导致 ClassCastException
+
+**问题**：`RedisService.executeScript()` 底层使用 `StringRedisTemplate`，其 `StringRedisSerializer` 只接受 `String` 类型的 args。传入 `Long`/`Integer` 时，序列化器的桥接方法 `serialize(Object)` → `(String)` 强转 → `ClassCastException`。
+
+旧代码中的注释"传 Long 避免 Jackson 引号"是针对 `RedisTemplate`（Jackson 序列化器）的防御措施，切到 `StringRedisTemplate` 后该防御已过时且有害。
+
+**修复**（`CartServiceImpl.java`）：
+- `add_cart.lua` 的三个数值参数改为 `String.valueOf()` 传入：
+  - `ttlSeconds` (long) → `String.valueOf(ttlSeconds)`
+  - `maxItems` (Integer) → `String.valueOf(cartProperties.getMaxItems())`
+  - `version` (long) → `String.valueOf(version)`
+- Lua 端已使用 `tonumber()` 将字符串转回数字，传 String 不影响解析
+- 更新注释说明新的序列化机制
+
+**影响范围**：`cart-service/service/impl/CartServiceImpl.java`（行 110-116）
+
+---
+
+### 8.3 降级写 MySQL 后 Redis 旧缓存不失效
+
+**问题链**：
+```
+加购: executeScript() 异常 → catch → addItem2CartMysql() 写 MySQL
+      → Redis 仍有旧数据（不含新商品）
+查询: hGetAll(cartKey) → 非空（旧数据）→ 直接返回 → 用户看不到新商品
+```
+`queryMyCarts()` 只在 Redis **为空**时才回退 MySQL，非空时有旧数据就永远返回旧数据。
+
+**修复分两层**：
+
+#### 8.3.1 Redis 可用但 Lua 异常 → invalidateRedisCart（即时）
+
+`addItem2Cart()` catch 块中新增 `invalidateRedisCart(userId)`：
+- Redis Lua 写入失败 → 写 MySQL → **清除 Redis 旧缓存**
+- 下次查询：Redis 为空 → 回退 MySQL（含新商品）→ lazy sync 回填 Redis
+
+`removeByItemIds()` 同理：Redis 删除失败 + MySQL 删除成功 → 清除 Redis 旧缓存。
+
+#### 8.3.2 Redis 宕机（不可达）→ pendingInvalidationUsers 内存标记
+
+Redis 宕机时 `invalidateRedisCart()` 也会失败。用 `ConcurrentHashMap.newKeySet()` 记录"待失效"用户：
+
+| 场景 | 行为 |
+|------|------|
+| `invalidateRedisCart()` 失败 | `pendingInvalidationUsers.add(userId)` |
+| `queryMyCarts()` Redis 命中 | `contains(userId)` → O(1) 检查 → 命中则从 MySQL 重新加载 |
+| 重新加载成功 | `pendingInvalidationUsers.remove(userId)` → 后续查询恢复零开销 |
+
+**性能**：正常 `contains()` 不产生任何 I/O；只有曾因 Redis 宕机降级过的用户才触发一次 MySQL 重新加载。
+
+**局限**：内存标记在服务重启或多实例间丢失，由补偿任务（@5min）兜底。
+
+**影响范围**：`cart-service/service/impl/CartServiceImpl.java`
+
+---
+
+### 8.4 降级写 MySQL 不设置 version 字段
+
+**问题**：`addItem2CartMysql()` 中：
+- `updateNum()` 只做 `UPDATE cart SET num = num + 1` — 不更新 version
+- `save(cart)` 创建新条目 — `cart.version` 为 null
+
+导致 MySQL 没有版本号或版本号为旧值，补偿任务的版本比对完全失效。
+
+**修复**：
+- `CartMapper.updateNum()` SQL 增加 `version = #{version}`
+- `addItem2CartMysql()` 两条路径都设 `version = System.currentTimeMillis()`
+
+**影响范围**：`cart-service/mapper/CartMapper.java`、`cart-service/service/impl/CartServiceImpl.java`
+
+---
+
+### 8.5 补偿任务版本解析 ClassCastException + 缺失同步分支
+
+**问题①**：`CartSyncCompensationTask.syncUserCartIfNeeded()` 中：
+```java
+String redisVersionStr = (String) redisService.get(versionKey);
+```
+`redisService.get()` 返回类型取决于存储方式：
+- Lua `redis.call('SET', ...)` 存裸数字 → `ObjectMapper.readValue("1700123456789")` → `Long`
+- `redisService.set()` 存 JSON 字符串 → `ObjectMapper.readValue("\"1700123456789\"")` → `String`
+
+对前者 `(String)` 强转直接 `ClassCastException`，导致该用户的补偿同步失败。
+
+**修复**（`CartSyncCompensationTask.java`）：
+- `parseVersion(String)` → `parseRedisVersion(Object)`
+- 内部处理：`instanceof Number` → `longValue()`，否则 `Long.parseLong(value.toString())`
+
+**问题②**：补偿任务只处理了 `redisVersion > mysqlMaxVersion` 和 `redisVersion == 0` 两种情况，缺失 `redisVersion < mysqlMaxVersion`（Redis 宕机期间降级写 MySQL 后，MySQL 版本 > Redis 旧版本）。
+
+**修复**（`CartSyncCompensationTask.java`）：
+- 新增分支：`mysqlMaxVersion != null && mysqlMaxVersion > redisVersion` → MySQL → Redis 回填
+
+**影响范围**：`cart-service/task/CartSyncCompensationTask.java`
+
+---
+
+> **已完成**：购物车 Redis+MySQL 双写架构（Lua 原子操作 + MQ 异步 + 5min 版本补偿）、购物车删除双删同步、商品缓存三层失效保障（同步删除 + MQ 二次确认 + 补偿任务）、扣款分布式锁的 Lua 释放、SET NX EX 原子缓存回写、**验证码存储（sms:code: 5min TTL + 一次性校验）**、**Token 黑名单登出失效（jti + Gateway 黑名单检查 + 前端联动登出）**。
