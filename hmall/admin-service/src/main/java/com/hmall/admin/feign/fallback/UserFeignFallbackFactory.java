@@ -17,7 +17,7 @@ public class UserFeignFallbackFactory implements FallbackFactory<UserFeignClient
         return new UserFeignClient() {
             @Override
             public PageDTO<Object> queryUserByPage(PageQuery pageQuery, String keyword, Integer status) {
-                return PageDTO.empty();
+                return new PageDTO<>();
             }
 
             @Override

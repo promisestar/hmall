@@ -20,7 +20,7 @@ public class TradeFeignFallbackFactory implements FallbackFactory<TradeFeignClie
             @Override
             public PageDTO<Object> queryOrderByPage(PageQuery pageQuery, Integer status, Long orderId,
                                                       String startTime, String endTime) {
-                return PageDTO.empty();
+                return new PageDTO<>();
             }
 
             @Override

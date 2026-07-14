@@ -19,9 +19,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -75,7 +75,7 @@ public class AdminAuthServiceImpl implements IAdminAuthService {
         if (jti != null) {
             long ttl = adminJwtTool.getRemainingTTL(token);
             if (ttl > 0) {
-                redisService.set(BLACKLIST_KEY_PREFIX + jti, "1", Duration.ofSeconds(ttl));
+                redisService.set(BLACKLIST_KEY_PREFIX + jti, "1", ttl, TimeUnit.SECONDS);
             }
         }
         log.info("管理员登出成功");

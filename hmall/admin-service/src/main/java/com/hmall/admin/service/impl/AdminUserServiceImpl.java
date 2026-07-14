@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -49,7 +50,7 @@ public class AdminUserServiceImpl extends ServiceImpl<AdminUserMapper, AdminUser
         }
         AdminUserDTO dto = AdminUserDTO.fromPO(adminUser);
         dto.setRoleIds(roleService.getRolesByAdminId(id).stream()
-                .map(r -> r.getId()).toList());
+                .map(r -> r.getId()).collect(Collectors.toList()));
         return dto;
     }
 
@@ -115,7 +116,7 @@ public class AdminUserServiceImpl extends ServiceImpl<AdminUserMapper, AdminUser
         Long adminId = UserContext.getUser();
         AdminUser adminUser = getById(adminId);
         if (adminUser == null) {
-            throw new CommonException(401, "管理员不存在");
+            throw new CommonException("管理员不存在", 401);
         }
         if (!passwordEncoder.matches(oldPassword, adminUser.getPassword())) {
             throw new BadRequestException("旧密码不正确");
@@ -141,6 +142,6 @@ public class AdminUserServiceImpl extends ServiceImpl<AdminUserMapper, AdminUser
     @Override
     public List<Long> getRoleIdsByAdminId(Long adminId) {
         return roleService.getRolesByAdminId(adminId).stream()
-                .map(r -> r.getId()).toList();
+                .map(r -> r.getId()).collect(Collectors.toList());
     }
 }

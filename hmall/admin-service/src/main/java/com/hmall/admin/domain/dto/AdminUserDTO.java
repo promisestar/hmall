@@ -14,6 +14,7 @@ public class AdminUserDTO {
     private String nickName;
     private String note;
     private Integer status;
+    private String password;
     private String createTime;
     private String loginTime;
     private List<Long> roleIds;

@@ -38,9 +38,9 @@ public class RoleServiceImpl extends ServiceImpl<RoleMapper, Role> implements IR
             for (Long roleId : roleIds) {
                 Role role = getById(roleId);
                 if (role != null) {
-                    Long count = adminUserRoleRelMapper.selectCount(new LambdaQueryWrapper<AdminUserRoleRel>()
+                    long count = adminUserRoleRelMapper.selectCount(new LambdaQueryWrapper<AdminUserRoleRel>()
                             .eq(AdminUserRoleRel::getRoleId, roleId));
-                    role.setAdminCount(count.intValue());
+                    role.setAdminCount((int) count);
                     updateById(role);
                 }
             }

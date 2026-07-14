@@ -21,7 +21,7 @@ public class ItemFeignFallbackFactory implements FallbackFactory<ItemFeignClient
         return new ItemFeignClient() {
             @Override
             public PageDTO<ItemDTO> queryItemByPage(PageQuery pageQuery) {
-                return PageDTO.empty();
+                return new PageDTO<>();
             }
 
             @Override
