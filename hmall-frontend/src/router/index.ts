@@ -6,8 +6,6 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     // 用户端商城路由
-    // 注意：PortalLayout 由各页面组件自行在模板中引入包裹（<PortalLayout>...</PortalLayout>），
-    // 而不是作为路由的父组件渲染，因此这里不能用 children 嵌套（PortalLayout 内部没有 <router-view>）。
     {
       path: '/portal',
       redirect: '/portal/home',
@@ -74,7 +72,13 @@ const router = createRouter({
       component: () => import('@/views/portal/PaySuccess.vue'),
       meta: { requiresAuth: true },
     },
-    // 管理后台路由
+    // 管理后台登录页（不进入 AdminLayout）
+    {
+      path: '/admin/login',
+      name: 'AdminLogin',
+      component: () => import('@/views/admin/AdminLogin.vue'),
+    },
+    // 管理后台主框架
     {
       path: '/admin',
       component: () => import('@/views/admin/AdminLayout.vue'),
@@ -92,18 +96,43 @@ const router = createRouter({
           component: () => import('@/views/admin/ItemManage.vue'),
         },
         {
+          path: 'orders',
+          name: 'OrderManage',
+          component: () => import('@/views/admin/OrderManage.vue'),
+        },
+        {
+          path: 'orders/:id',
+          name: 'OrderDetail',
+          component: () => import('@/views/admin/OrderDetail.vue'),
+          meta: { hidden: true },
+        },
+        {
           path: 'users',
           name: 'UserManage',
           component: () => import('@/views/admin/UserManage.vue'),
         },
+        {
+          path: 'system/admin',
+          name: 'AdminUserManage',
+          component: () => import('@/views/admin/system/AdminUserManage.vue'),
+        },
+        {
+          path: 'system/role',
+          name: 'RoleManage',
+          component: () => import('@/views/admin/system/RoleManage.vue'),
+        },
+        {
+          path: 'system/menu',
+          name: 'MenuManage',
+          component: () => import('@/views/admin/system/MenuManage.vue'),
+        },
+        {
+          path: 'system/resource',
+          name: 'ResourceManage',
+          component: () => import('@/views/admin/system/ResourceManage.vue'),
+        },
       ],
     },
-    {
-      path: '/admin/login',
-      name: 'AdminLogin',
-      component: () => import('@/views/admin/AdminLogin.vue'),
-    },
-    // 默认重定向到用户端首页
     {
       path: '/',
       redirect: '/portal/home',
@@ -111,22 +140,28 @@ const router = createRouter({
   ],
 })
 
-// 路由守卫
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const userStore = useUserStore()
   const adminStore = useAdminStore()
 
-  // 用户端鉴权
   if (to.meta.requiresAuth && !userStore.isLogin) {
     return next('/portal/login')
   }
 
-  // 管理后台鉴权
   if (to.meta.requiresAdmin && !adminStore.isAdminLogin) {
     return next('/admin/login')
   }
 
-  // 已登录用户访问登录页 → 重定向到首页
+  // 首次进入后台时加载管理员信息和权限
+  if (to.meta.requiresAdmin && adminStore.isAdminLogin && !adminStore.menus.length) {
+    try {
+      await adminStore.fetchAdminInfo()
+    } catch {
+      await adminStore.logout()
+      return next('/admin/login')
+    }
+  }
+
   if (to.name === 'Login' && userStore.isLogin) {
     return next('/portal/home')
   }

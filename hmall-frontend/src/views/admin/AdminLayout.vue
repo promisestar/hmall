@@ -16,25 +16,29 @@
         router
         class="border-none"
       >
-        <el-menu-item index="/admin/dashboard">
-          <el-icon><DataAnalysis /></el-icon>
-          <span>数据概览</span>
-        </el-menu-item>
-        <el-menu-item index="/admin/items">
-          <el-icon><Goods /></el-icon>
-          <span>商品管理</span>
-        </el-menu-item>
-        <el-menu-item index="/admin/users">
-          <el-icon><UserFilled /></el-icon>
-          <span>用户管理</span>
-        </el-menu-item>
-        <el-sub-menu index="order">
-          <template #title>
-            <el-icon><Tickets /></el-icon>
-            <span>订单管理</span>
-          </template>
-          <el-menu-item index="/admin/orders">订单列表</el-menu-item>
-        </el-sub-menu>
+        <template v-for="menu in adminStore.menus" :key="menu.id">
+          <!-- 有子菜单 -->
+          <el-sub-menu v-if="menu.children?.length && !menu.path" :index="menu.name || String(menu.id)">
+            <template #title>
+              <el-icon><component :is="getIcon(menu.icon)" /></el-icon>
+              <span>{{ menu.title }}</span>
+            </template>
+            <el-menu-item
+              v-for="child in menu.children"
+              v-if="!child.hidden"
+              :key="child.id"
+              :index="child.path"
+            >
+              <el-icon v-if="child.icon"><component :is="getIcon(child.icon)" /></el-icon>
+              <span>{{ child.title }}</span>
+            </el-menu-item>
+          </el-sub-menu>
+          <!-- 无子菜单 -->
+          <el-menu-item v-else-if="!menu.hidden && menu.path" :index="menu.path">
+            <el-icon><component :is="getIcon(menu.icon)" /></el-icon>
+            <span>{{ menu.title }}</span>
+          </el-menu-item>
+        </template>
       </el-menu>
     </el-aside>
 
@@ -52,7 +56,7 @@
         </div>
         <div class="flex items-center gap-3">
           <el-tag size="small" type="success">在线</el-tag>
-          <span class="text-sm text-gray-600">{{ adminStore.adminUser?.username || '管理员' }}</span>
+          <span class="text-sm text-gray-600">{{ adminStore.username }}</span>
           <el-button text type="danger" size="small" @click="handleLogout">退出登录</el-button>
         </div>
       </el-header>
@@ -65,9 +69,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Fold, Expand, DataAnalysis, Goods, UserFilled, Tickets } from '@element-plus/icons-vue'
+import { Fold, Expand, DataAnalysis, Goods, UserFilled, Tickets, User, Menu as MenuIcon, Setting } from '@element-plus/icons-vue'
 import { useAdminStore } from '@/stores/admin'
 
 const route = useRoute()
@@ -80,10 +84,31 @@ const currentTitle = computed(() => {
   const map: Record<string, string> = {
     '/admin/dashboard': '数据概览',
     '/admin/items': '商品管理',
+    '/admin/orders': '订单管理',
     '/admin/users': '用户管理',
+    '/admin/system/admin': '管理员管理',
+    '/admin/system/role': '角色管理',
+    '/admin/system/menu': '菜单管理',
+    '/admin/system/resource': '资源管理',
   }
   return map[route.path] || ''
 })
+
+/** 图标名称映射 */
+const iconMap: Record<string, any> = {
+  DataAnalysis: markRaw(DataAnalysis),
+  Goods: markRaw(Goods),
+  UserFilled: markRaw(UserFilled),
+  Tickets: markRaw(Tickets),
+  User: markRaw(User),
+  Menu: markRaw(MenuIcon),
+  Setting: markRaw(Setting),
+}
+
+function getIcon(iconName?: string) {
+  if (!iconName) return markRaw(MenuIcon)
+  return iconMap[iconName] || markRaw(MenuIcon)
+}
 
 async function handleLogout() {
   await adminStore.logout()

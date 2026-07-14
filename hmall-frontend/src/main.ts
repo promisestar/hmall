@@ -5,6 +5,7 @@ import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
+import { permission } from './directives/permission'
 import './style.css'
 
 const app = createApp(App)
@@ -18,5 +19,8 @@ app.use(ElementPlus)
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }
+
+// 注册 v-permission 按钮级权限指令
+app.directive('permission', permission)
 
 app.mount('#app')

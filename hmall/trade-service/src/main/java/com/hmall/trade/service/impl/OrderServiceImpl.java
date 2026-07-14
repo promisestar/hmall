@@ -1,5 +1,6 @@
 package com.hmall.trade.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -201,6 +202,48 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             }
         }
 
+        return PageDTO.of(page, voList);
+    }
+
+    @Override
+    public PageDTO<OrderVO> queryOrderAdminPage(PageQuery pageQuery, Integer status, Long orderId,
+                                                  String startTime, String endTime) {
+        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
+        if (status != null) {
+            wrapper.eq(Order::getStatus, status);
+        }
+        if (orderId != null) {
+            wrapper.eq(Order::getId, orderId);
+        }
+        if (startTime != null && !startTime.isEmpty()) {
+            wrapper.ge(Order::getCreateTime, LocalDateTime.parse(startTime));
+        }
+        if (endTime != null && !endTime.isEmpty()) {
+            wrapper.le(Order::getCreateTime, LocalDateTime.parse(endTime));
+        }
+        wrapper.orderByDesc(Order::getCreateTime);
+        Page<Order> page = page(pageQuery.toMpPage("create_time", false), wrapper);
+
+        List<Order> orders = page.getRecords();
+        if (CollUtils.isEmpty(orders)) {
+            return PageDTO.empty(page);
+        }
+
+        // 批量查询订单详情
+        List<Long> orderIds = orders.stream().map(Order::getId).collect(Collectors.toList());
+        List<OrderDetail> allDetails = detailService.lambdaQuery()
+                .in(OrderDetail::getOrderId, orderIds)
+                .list();
+        Map<Long, List<OrderDetail>> detailMap = allDetails.stream()
+                .collect(Collectors.groupingBy(OrderDetail::getOrderId));
+
+        List<OrderVO> voList = BeanUtils.copyList(orders, OrderVO.class);
+        for (OrderVO vo : voList) {
+            List<OrderDetail> details = detailMap.get(vo.getId());
+            if (details != null) {
+                vo.setDetailVOs(BeanUtils.copyList(details, OrderDetailVO.class));
+            }
+        }
         return PageDTO.of(page, voList);
     }
 

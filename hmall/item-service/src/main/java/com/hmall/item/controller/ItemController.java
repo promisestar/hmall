@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
 import java.util.List;
+import java.util.Map;
 
 @Api(tags = "商品管理相关接口")
 @Slf4j
@@ -131,6 +132,59 @@ public class ItemController {
     @PutMapping("/stock/deduct")
     public void deductStock(@RequestBody List<OrderDetailDTO> items){
         itemService.deductStock(items);
+    }
+
+    // ==================== 管理后台接口（admin-service 调用） ====================
+
+    @ApiOperation("批量修改商品状态(上下架)")
+    @PutMapping("/batch/status")
+    public void batchUpdateStatus(@RequestParam List<Long> ids, @RequestParam Integer status) {
+        for (Long id : ids) {
+            Item item = new Item();
+            item.setId(id);
+            item.setStatus(status);
+            itemService.updateById(item);
+            // 同步 ES 缓存
+            Item updated = itemService.getById(id);
+            try {
+                rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.UPDATE_DOCUMENT_KEY,
+                        BeanUtils.copyBean(updated, ItemDTO.class));
+            } catch (Exception e) {
+                log.error("同步ES更新商品状态失败, itemId={}", id, e);
+            }
+            deleteItemCache(id);
+            itemCacheSender.sendInvalidate(id);
+            cacheCompensationTask.markDirty(id);
+        }
+    }
+
+    @ApiOperation("批量修改商品库存")
+    @PutMapping("/batch/stock")
+    public void batchUpdateStock(@RequestBody Map<Long, Integer> stockMap) {
+        for (Map.Entry<Long, Integer> entry : stockMap.entrySet()) {
+            Item item = new Item();
+            item.setId(entry.getKey());
+            item.setStock(entry.getValue());
+            itemService.updateById(item);
+            deleteItemCache(entry.getKey());
+            itemCacheSender.sendInvalidate(entry.getKey());
+        }
+    }
+
+    @ApiOperation("批量删除商品(逻辑删除)")
+    @DeleteMapping("/batch")
+    public void batchDelete(@RequestParam List<Long> ids) {
+        for (Long id : ids) {
+            itemService.removeById(id);
+            try {
+                rabbitTemplate.convertAndSend(MQConstants.SEARCH_EXCHANGE_NAME, MQConstants.REMOVE_DOCUMENT_KEY, id);
+            } catch (Exception e) {
+                log.error("同步ES删除商品失败, itemId={}", id, e);
+            }
+            deleteItemCache(id);
+            itemCacheSender.sendInvalidate(id);
+            cacheCompensationTask.markDirty(id);
+        }
     }
 
     @ApiOperation("恢复库存")

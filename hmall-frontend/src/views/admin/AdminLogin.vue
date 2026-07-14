@@ -50,7 +50,6 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import { useAdminStore } from '@/stores/admin'
-import { login as loginApi } from '@/api/user'
 
 const router = useRouter()
 const adminStore = useAdminStore()
@@ -66,8 +65,7 @@ async function handleLogin() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const res = await loginApi(form)
-    adminStore.login(res.username, res.token)
+    await adminStore.login({ ...form })
     router.push('/admin/dashboard')
   } catch {
     errorMsg.value = '用户名或密码错误'

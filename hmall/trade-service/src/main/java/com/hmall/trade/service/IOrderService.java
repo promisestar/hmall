@@ -29,4 +29,10 @@ public interface IOrderService extends IService<Order> {
      * @return 订单分页结果
      */
     PageDTO<OrderVO> queryOrderPage(PageQuery pageQuery);
+
+    /**
+     * 管理后台分页查询订单（支持多条件筛选）
+     */
+    PageDTO<OrderVO> queryOrderAdminPage(PageQuery pageQuery, Integer status, Long orderId,
+                                          String startTime, String endTime);
 }

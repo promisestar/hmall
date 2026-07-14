@@ -17,16 +17,44 @@
           </el-input>
           <el-button type="primary" @click="fetchData">搜索</el-button>
         </div>
-        <el-button type="primary" @click="openAddDialog">
-          <el-icon><Plus /></el-icon>
-          新增商品
-        </el-button>
+        <div class="flex items-center gap-2">
+          <el-button
+            v-if="selectedIds.length"
+            type="warning"
+            size="small"
+            @click="handleBatchPublish(1)"
+          >批量上架</el-button>
+          <el-button
+            v-if="selectedIds.length"
+            type="info"
+            size="small"
+            @click="handleBatchPublish(2)"
+          >批量下架</el-button>
+          <el-button
+            v-if="selectedIds.length"
+            type="danger"
+            size="small"
+            @click="handleBatchDelete"
+          >批量删除</el-button>
+          <el-button type="primary" @click="openAddDialog">
+            <el-icon><Plus /></el-icon>
+            新增商品
+          </el-button>
+        </div>
       </div>
     </el-card>
 
     <!-- Table -->
     <el-card>
-      <el-table :data="items" v-loading="loading" stripe border style="width: 100%">
+      <el-table
+        :data="items"
+        v-loading="loading"
+        stripe
+        border
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="50" align="center" />
         <el-table-column prop="id" label="ID" width="80" align="center" />
         <el-table-column label="图片" width="100" align="center">
           <template #default="{ row }">
@@ -117,9 +145,15 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { Search, Plus } from '@element-plus/icons-vue'
-import { getItemPage, saveItem, updateItem, updateItemStatus, deleteItem } from '@/api/item'
+import {
+  getAdminProductPage,
+  createProduct,
+  updateProduct,
+  batchUpdatePublishStatus,
+  deleteProducts,
+} from '@/api/admin/product'
 import { formatPrice } from '@/utils/format'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Item, PageResult } from '@/types'
 
 const items = ref<Item[]>([])
@@ -128,6 +162,7 @@ const total = ref(0)
 const pageNo = ref(1)
 const pageSize = ref(10)
 const searchText = ref('')
+const selectedIds = ref<number[]>([])
 
 const dialogVisible = ref(false)
 const editingItem = ref<Item | null>(null)
@@ -150,6 +185,10 @@ const formRules = {
   stock: [{ required: true, message: '请输入库存', trigger: 'blur' }],
   category: [{ required: true, message: '请输入分类', trigger: 'blur' }],
   brand: [{ required: true, message: '请输入品牌', trigger: 'blur' }],
+}
+
+function handleSelectionChange(rows: Item[]) {
+  selectedIds.value = rows.map(r => r.id)
 }
 
 function openAddDialog() {
@@ -189,16 +228,14 @@ async function handleSave() {
 
   try {
     if (editingItem.value) {
-      await updateItem(data)
+      await updateProduct(editingItem.value.id, data)
       ElMessage.success('更新成功')
     } else {
-      await saveItem(data)
+      await createProduct(data)
       ElMessage.success('新增成功')
     }
     dialogVisible.value = false
     fetchData()
-  } catch {
-    ElMessage.error('操作失败')
   } finally {
     saving.value = false
   }
@@ -206,7 +243,7 @@ async function handleSave() {
 
 async function toggleStatus(item: Item) {
   try {
-    await updateItemStatus(item.id, item.status === 1 ? 2 : 1)
+    await batchUpdatePublishStatus([item.id], item.status === 1 ? 2 : 1)
     ElMessage.success('状态已更新')
     fetchData()
   } catch {
@@ -216,7 +253,7 @@ async function toggleStatus(item: Item) {
 
 async function handleDelete(id: number) {
   try {
-    await deleteItem(id)
+    await deleteProducts([id])
     ElMessage.success('删除成功')
     fetchData()
   } catch {
@@ -224,10 +261,33 @@ async function handleDelete(id: number) {
   }
 }
 
+async function handleBatchPublish(status: number) {
+  try {
+    await batchUpdatePublishStatus(selectedIds.value, status)
+    ElMessage.success(`已${status === 1 ? '上架' : '下架'} ${selectedIds.value.length} 个商品`)
+    fetchData()
+  } catch {
+    ElMessage.error('操作失败')
+  }
+}
+
+async function handleBatchDelete() {
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selectedIds.value.length} 个商品吗？`, '批量删除', {
+      type: 'warning',
+    })
+    await deleteProducts(selectedIds.value)
+    ElMessage.success('批量删除成功')
+    fetchData()
+  } catch {
+    // 用户取消
+  }
+}
+
 async function fetchData() {
   loading.value = true
   try {
-    const res: PageResult<Item> = await getItemPage({
+    const res: PageResult<Item> = await getAdminProductPage({
       pageNo: pageNo.value,
       pageSize: pageSize.value,
       key: searchText.value || undefined,
