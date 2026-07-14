@@ -15,6 +15,7 @@ hm:
       - /users/code
       - /items/**
       - /hi
+      - /admin/**
 spring:
   redis:
     host: ${REDIS_HOST:localhost}

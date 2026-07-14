@@ -4,6 +4,7 @@ import com.hmall.admin.interceptor.AdminAuthInterceptor;
 import com.hmall.admin.security.AdminJwtTool;
 import com.hmall.admin.security.DynamicSecurityService;
 import com.hmall.admin.service.IResourceService;
+import com.hmall.common.service.RedisService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -27,7 +28,8 @@ public class AdminInterceptorConfig {
     public AdminAuthInterceptor adminAuthInterceptor(
             AdminJwtTool adminJwtTool,
             AdminAuthProperties authProperties,
-            DynamicSecurityService dynamicSecurityService) {
-        return new AdminAuthInterceptor(adminJwtTool, authProperties, dynamicSecurityService);
+            DynamicSecurityService dynamicSecurityService,
+            RedisService redisService) {
+        return new AdminAuthInterceptor(adminJwtTool, authProperties, dynamicSecurityService, redisService);
     }
 }

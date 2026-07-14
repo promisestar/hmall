@@ -1,14 +1,10 @@
 server:
   port: 8090
 spring:
-  datasource:
-    url: jdbc:mysql://${hm.db.host:192.168.100.128}:3306/hm-admin?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-    username: ${hm.db.username:root}
-    password: ${hm.db.password:123}
   redis:
     host: ${REDIS_HOST:192.168.100.128}
     port: ${REDIS_PORT:6379}
-    password: ${REDIS_PASSWORD:}
+    password: ${REDIS_PASSWORD:123456}
     database: 0
     timeout: 5000ms
     lettuce:
@@ -16,12 +12,6 @@ spring:
         max-active: 8
         max-idle: 8
         min-idle: 0
-mybatis-plus:
-  configuration:
-    map-underscore-to-camel-case: true
-  global-config:
-    db-config:
-      id-type: auto
 hm:
   admin:
     jwt:
@@ -44,6 +34,8 @@ hm:
   swagger:
     title: hmall 管理后台接口文档
     package: com.hmall.admin.controller
+  db:
+    database: hm-admin
 feign:
   okhttp:
     enabled: true

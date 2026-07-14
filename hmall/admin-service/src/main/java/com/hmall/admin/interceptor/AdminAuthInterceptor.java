@@ -15,7 +15,6 @@ import org.springframework.http.MediaType;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.util.HashMap;
@@ -37,11 +36,9 @@ public class AdminAuthInterceptor implements HandlerInterceptor {
     private final AdminJwtTool adminJwtTool;
     private final AdminAuthProperties authProperties;
     private final DynamicSecurityService dynamicSecurityService;
+    private final RedisService redisService;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @Resource(name = "redisService")
-    private RedisService redisService;
 
     private static final String BLACKLIST_KEY_PREFIX = "admin:blacklist:";
 

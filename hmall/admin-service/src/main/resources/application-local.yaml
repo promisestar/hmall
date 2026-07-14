@@ -6,4 +6,4 @@ logging:
   pattern:
     dateformat: MM-dd HH:mm:ss:SSS
   level:
-    com.hmall.cart: debug
+    com.hmall.admin: debug
