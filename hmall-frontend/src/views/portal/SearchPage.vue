@@ -120,6 +120,7 @@
           v-for="item in items"
           :key="item.id"
           class="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group"
+          @click="goDetail(item.id)"
         >
           <div class="relative overflow-hidden">
             <img :src="item.image || '/img/like_01.png'" class="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300" />
@@ -313,6 +314,10 @@ async function fetchData() {
   } finally {
     loading.value = false
   }
+}
+
+function goDetail(id: number) {
+  router.push(`/portal/product/${id}`)
 }
 
 async function addToCart(item: Item) {
