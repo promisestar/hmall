@@ -41,14 +41,9 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { LineChart, PieChart } from 'echarts/charts'
-import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
+import 'echarts'
 import { ShoppingCart, User, Money, Box } from '@element-plus/icons-vue'
-
-use([CanvasRenderer, LineChart, PieChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent])
 
 const stats = [
   { label: '今日订单', value: '156', color: 'bg-blue-500', icon: ShoppingCart },

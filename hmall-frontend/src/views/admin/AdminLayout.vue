@@ -23,15 +23,12 @@
               <el-icon><component :is="getIcon(menu.icon)" /></el-icon>
               <span>{{ menu.title }}</span>
             </template>
-            <el-menu-item
-              v-for="child in menu.children"
-              v-if="!child.hidden"
-              :key="child.id"
-              :index="child.path"
-            >
-              <el-icon v-if="child.icon"><component :is="getIcon(child.icon)" /></el-icon>
-              <span>{{ child.title }}</span>
-            </el-menu-item>
+            <template v-for="child in menu.children" :key="child.id">
+              <el-menu-item v-if="!child.hidden" :index="child.path">
+                <el-icon v-if="child.icon"><component :is="getIcon(child.icon)" /></el-icon>
+                <span>{{ child.title }}</span>
+              </el-menu-item>
+            </template>
           </el-sub-menu>
           <!-- 无子菜单 -->
           <el-menu-item v-else-if="!menu.hidden && menu.path" :index="menu.path">
