@@ -102,10 +102,9 @@ CREATE TABLE IF NOT EXISTS `role_resource_rel` (
 -- 初始化数据
 -- ============================================================
 
--- 超级管理员 (密码: admin123)
--- 注意：实际部署时需用 BCryptPasswordEncoder 生成真实哈希
+-- 超级管理员 (密码: admin123, BCrypt 加密结果: 60 字符)
 INSERT INTO `admin_user` (`username`, `password`, `nick_name`, `note`, `status`)
-VALUES ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8l7m8o5tq3CYHhQmK', '超级管理员', '系统初始管理员', 1)
+VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '超级管理员', '系统初始管理员', 1)
 ON DUPLICATE KEY UPDATE `username` = `username`;
 
 -- 超级管理员角色
