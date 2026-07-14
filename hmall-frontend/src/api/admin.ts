@@ -1,5 +1,4 @@
 import axios from 'axios'
-import router from '@/router'
 import { ElMessage } from 'element-plus'
 
 /**
@@ -43,9 +42,9 @@ adminInstance.interceptors.response.use(
       sessionStorage.removeItem('admin-token')
       sessionStorage.removeItem('admin-info')
       ElMessage.warning('登录已过期，请重新登录')
-      const currentPath = router.currentRoute?.value?.path || ''
-      if (!currentPath.includes('/admin/login')) {
-        router.push('/admin/login')
+      // 用 location.hash 避免循环依赖，直接跳转登录页
+      if (!location.hash.includes('/admin/login')) {
+        location.hash = '#/admin/login'
       }
     } else if (error.response?.status === 403) {
       ElMessage.error('无权限执行此操作')
