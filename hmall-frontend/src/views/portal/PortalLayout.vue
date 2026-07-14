@@ -15,6 +15,9 @@
             <span @click="handleLogout" class="cursor-pointer hover:text-white transition-colors">退出</span>
           </template>
           <router-link to="/portal/home" class="hover:text-white transition-colors">首页</router-link>
+          <router-link to="/portal/seckill" class="hover:text-white transition-colors text-[#FF6B35] font-medium">
+            限时秒杀
+          </router-link>
         </div>
         <div class="flex items-center gap-4">
           <router-link to="/portal/orders" class="hover:text-white transition-colors">我的订单</router-link>

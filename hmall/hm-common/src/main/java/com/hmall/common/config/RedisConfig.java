@@ -1,6 +1,7 @@
 package com.hmall.common.config;
 
 import com.hmall.common.service.RedisService;
+import com.hmall.common.utils.RateLimitUtil;
 import com.hmall.common.utils.RedisLockUtil;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -25,7 +26,7 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 @Configuration
 @ConditionalOnProperty(prefix = "spring.redis", name = "host")
 @AutoConfigureBefore(RedisAutoConfiguration.class)
-@Import({RedisService.class, RedisLockUtil.class})
+@Import({RedisService.class, RedisLockUtil.class, RateLimitUtil.class})
 public class RedisConfig {
 
     @Bean

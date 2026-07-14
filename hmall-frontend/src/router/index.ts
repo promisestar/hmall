@@ -31,6 +31,17 @@ const router = createRouter({
       component: () => import('@/views/portal/SearchPage.vue'),
     },
     {
+      path: '/portal/seckill',
+      name: 'SeckillList',
+      component: () => import('@/views/portal/SeckillList.vue'),
+    },
+    {
+      path: '/portal/seckill/:relationId',
+      name: 'SeckillDetail',
+      component: () => import('@/views/portal/SeckillDetail.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/portal/cart',
       name: 'Cart',
       component: () => import('@/views/portal/CartPage.vue'),

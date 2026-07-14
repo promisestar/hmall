@@ -22,4 +22,12 @@ public interface MQConstants {
     String CLEAR_CART_QUEUE_NAME = "clear.cart.queue";
 
     String CLEAR_CART_KEY = "order.create";
+
+    // ==================== 秒杀 MQ 常量 ====================
+
+    String SECKILL_EXCHANGE_NAME = "seckill.topic";
+
+    String SECKILL_ORDER_QUEUE_NAME = "seckill.order.queue";
+
+    String SECKILL_ORDER_KEY = "seckill.order";
 }

@@ -12,7 +12,9 @@ import com.hmall.common.domain.PageDTO;
 import com.hmall.common.domain.PageQuery;
 import com.hmall.common.exception.BadRequestException;
 import com.hmall.common.exception.BizIllegalException;
+import com.hmall.common.service.RedisService;
 import com.hmall.common.utils.BeanUtils;
+import com.hmall.common.utils.CollUtils;
 import com.hmall.common.utils.UserContext;
 
 import com.hmall.trade.constants.MQConstants;
@@ -20,11 +22,13 @@ import com.hmall.trade.domain.dto.OrderFormDTO;
 import com.hmall.trade.domain.po.LocalMessage;
 import com.hmall.trade.domain.po.Order;
 import com.hmall.trade.domain.po.OrderDetail;
-import com.hmall.common.utils.CollUtils;
+import com.hmall.trade.domain.po.SeckillOrder;
 import com.hmall.trade.domain.vo.OrderDetailVO;
 import com.hmall.trade.domain.vo.OrderVO;
 import com.hmall.trade.mapper.LocalMessageMapper;
 import com.hmall.trade.mapper.OrderMapper;
+import com.hmall.trade.mapper.SeckillDailyStockMapper;
+import com.hmall.trade.mapper.SeckillOrderMapper;
 import com.hmall.trade.service.IOrderDetailService;
 import com.hmall.trade.service.IOrderService;
 import io.seata.spring.annotation.GlobalTransactional;
@@ -56,6 +60,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private final CartClient cartClient;
     private final RabbitTemplate rabbitTemplate;
     private final LocalMessageMapper localMessageMapper;
+    private final SeckillOrderMapper seckillOrderMapper;
+    private final SeckillDailyStockMapper seckillDailyStockMapper;
+    private final RedisService redisService;
+
+    private static final String SECKILL_STOCK_PREFIX = "seckill:stock:";
+    private static final String SECKILL_LIMIT_PREFIX = "seckill:limit:";
 
     @Override
     @GlobalTransactional
@@ -157,17 +167,60 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order == null || order.getStatus() != 1) {
            return;
         }
-        // 2. 恢复库存
-        List<OrderDetail> orderDetails = detailService.lambdaQuery().eq(OrderDetail::getOrderId, orderId).list();
-        List<OrderDetailDTO> orderDetailDTOS = BeanUtils.copyList(orderDetails, OrderDetailDTO.class);
-        try {
-            itemClient.recoverStock(orderDetailDTOS);
-        } catch (Exception e) {
-            log.error("恢复库存失败，orderId={}", orderId, e);
+
+        // 2. 检查是否为秒杀订单
+        SeckillOrder seckillOrder = seckillOrderMapper.selectOne(
+                new LambdaQueryWrapper<SeckillOrder>().eq(SeckillOrder::getOrderId, orderId)
+        );
+
+        if (seckillOrder != null) {
+            // 秒杀订单：回补秒杀库存（Redis + MySQL + 限购额度），不走 item-service
+            recoverSeckillStock(order, seckillOrder);
+        } else {
+            // 普通订单：恢复 item-service 库存
+            List<OrderDetail> orderDetails = detailService.lambdaQuery().eq(OrderDetail::getOrderId, orderId).list();
+            List<OrderDetailDTO> orderDetailDTOS = BeanUtils.copyList(orderDetails, OrderDetailDTO.class);
+            try {
+                itemClient.recoverStock(orderDetailDTOS);
+            } catch (Exception e) {
+                log.error("恢复库存失败，orderId={}", orderId, e);
+            }
         }
+
         // 3. 删除订单
         this.removeById(orderId);
+    }
 
+    /**
+     * 秒杀订单库存回补：回补 Redis 库存 + MySQL 库存 + 限购额度
+     */
+    private void recoverSeckillStock(Order order, SeckillOrder seckillOrder) {
+        Long relationId = seckillOrder.getRelationId();
+        int quantity = seckillOrder.getQuantity();
+        Long userId = order.getUserId();
+
+        // 1. 回补 Redis 库存
+        try {
+            redisService.incrBy(SECKILL_STOCK_PREFIX + relationId, quantity);
+            redisService.hIncrBy(SECKILL_LIMIT_PREFIX + relationId, String.valueOf(userId), -quantity);
+        } catch (Exception e) {
+            log.error("回补Redis秒杀库存失败, orderId={}, relationId={}", order.getId(), relationId, e);
+        }
+
+        // 2. 回补 MySQL 库存
+        try {
+            seckillDailyStockMapper.recoverStock(relationId, java.time.LocalDate.now(), quantity);
+        } catch (Exception e) {
+            log.error("回补MySQL秒杀库存失败, orderId={}, relationId={}", order.getId(), relationId, e);
+        }
+
+        // 3. 更新秒杀订单状态为已关闭
+        SeckillOrder update = new SeckillOrder();
+        update.setId(seckillOrder.getId());
+        update.setStatus(3);
+        seckillOrderMapper.updateById(update);
+
+        log.info("秒杀库存回补 orderId={}, relationId={}, quantity={}", order.getId(), relationId, quantity);
     }
 
     @Override

@@ -16,6 +16,12 @@ hm:
       - /items/**
       - /hi
       - /admin/**
+  ratelimit:
+    enabled: true
+    rules:
+      - paths: ["/seckill/**"]
+        max-requests: 1
+        window-ms: 5000
 spring:
   redis:
     host: ${REDIS_HOST:localhost}
