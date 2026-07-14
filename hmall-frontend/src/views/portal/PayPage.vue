@@ -125,6 +125,13 @@ async function payByBalance() {
   paying.value = true
   try {
     await tryPayOrderByBalance(payOrderId.value, { id: payOrderId.value, pw: password.value })
+    // 支付成功后同步更新 sessionStorage 中的余额，避免页面刷新后展示陈旧数据
+    if (userStore.userInfo) {
+      userStore.setUserInfo({
+        ...userStore.userInfo,
+        balance: userStore.balance - amount.value,
+      })
+    }
     router.push(`/portal/pay-success/${orderId.value}`)
   } catch {
     ElMessage.error('支付失败，请检查密码或余额')
