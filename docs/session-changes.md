@@ -1,6 +1,6 @@
 # hmall 项目修改记录
 
-> 本文档记录了 2026-07-07 至 2026-07-08 期间对 hmall（黑马商城）前后端项目的全部修改，涵盖搜索、下单、支付、类型对齐、精度保护、工程化等模块。
+> 本文档记录了 2026-07-07 至 2026-07-14 期间对 hmall（黑马商城）前后端项目的全部修改，涵盖搜索、下单、支付、类型对齐、精度保护、工程化、Redis 基础设施、验证码登录、Token 续期、前端新页面等模块。
 
 ---
 
@@ -8,23 +8,40 @@
 
 | 项目 | 数据 |
 |------|------|
-| 时间跨度 | 2026-07-07 ~ 2026-07-08 |
-| 修改文件 | 20+ 文件（前后端） |
-| 涉及模块 | search-service, trade-service, pay-service, item-service, cart-service, hm-common, hmall-frontend |
-| 核心领域 | ES 搜索修复、雪花 ID 精度保护、前后端 DTO 对齐、下单/支付链路修复、购物车状态管理 |
+| 时间跨度 | 2026-07-07 ~ 2026-07-14 |
+| 修改文件 | 100+ 文件（前后端） |
+| 涉及模块 | search-service, trade-service, pay-service, item-service, cart-service, user-service, hm-common, hm-gateway, hmall-frontend |
+| 核心领域 | ES 搜索修复、雪花 ID 精度保护、前后端 DTO 对齐、下单/支付链路、购物车状态管理、工程稳定性、Redis 基础设施、Token 续期与黑名单、验证码登录、前端 P0/P1 新页面 |
 
 ### 演进阶段总览
 
 ```mermaid
 flowchart LR
-    P1["Phase 1<br/>搜索功能修复<br/>07-07"]
-    P2["Phase 2<br/>数据精度保护<br/>07-07"]
-    P3["Phase 3<br/>下单与支付链路<br/>07-08"]
-    P4["Phase 4<br/>购物车状态修复<br/>07-08"]
-    P5["Phase 5<br/>前后端DTO对齐<br/>07-08"]
-    P6["Phase 6<br/>工程化收尾<br/>07-08"]
+    subgraph Day1 ["07-07 ~ 07-08"]
+        P1["Phase 1<br/>搜索修复"]
+        P2["Phase 2<br/>精度保护"]
+        P3["Phase 3<br/>下单支付"]
+        P4["Phase 4<br/>购物车修复"]
+        P5["Phase 5<br/>DTO对齐"]
+        P6["Phase 6<br/>工程化"]
+    end
+
+    subgraph Day2 ["07-09 ~ 07-10"]
+        P7["Phase 7<br/>订单扩展"]
+        P8["Phase 8<br/>日志稳定性"]
+        P9["Phase 9<br/>Token续期"]
+        P10["Phase 10<br/>Redis基础设施"]
+    end
+
+    subgraph Day3 ["07-13 ~ 07-14"]
+        P11["Phase 11<br/>验证码登出"]
+        P12["Phase 12<br/>Redis稳健性"]
+        P13["Phase 13<br/>前端新页面"]
+    end
 
     P1 --> P2 --> P3 --> P4 --> P5 --> P6
+    P6 --> P7 --> P8 --> P9 --> P10
+    P10 --> P11 --> P12 --> P13
 
     style P1 fill:#e3f2fd,stroke:#1976d2
     style P2 fill:#fff3e0,stroke:#f57c00
@@ -32,6 +49,13 @@ flowchart LR
     style P4 fill:#e8f5e9,stroke:#388e3c
     style P5 fill:#ede7f6,stroke:#5e35b1
     style P6 fill:#e0e0e0,stroke:#616161
+    style P7 fill:#f3e5f5,stroke:#7b1fa2
+    style P8 fill:#e0f2f1,stroke:#00796b
+    style P9 fill:#fff8e1,stroke:#ff8f00
+    style P10 fill:#ffebee,stroke:#b71c1c
+    style P11 fill:#e8eaf6,stroke:#283593
+    style P12 fill:#fce4ec,stroke:#ad1457
+    style P13 fill:#e8f5e9,stroke:#2e7d32
 ```
 
 ---
@@ -277,4 +301,344 @@ if (userStore.isLogin && cartStore.cartList.length === 0) {
 
 ---
 
-*文档更新时间：2026-07-08*
+## 10. Phase 7: 订单功能扩展（2026-07-08）
+
+> **目标**：从只支持订单创建/支付，扩展到订单列表浏览和订单详情查看。
+
+### 10.1 订单列表页
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall-frontend/src/views/portal/OrderList.vue` | **新建** — 订单列表页（状态筛选、商品缩略图、分页） |
+| `hmall-frontend/src/router/index.ts` | 新增 `/portal/orders` 路由，`requiresAuth` |
+| `hmall/trade/.../OrderService/IOrderService.java` | 新增 `getOrdersByUser` / `getOrderDetail` 方法 |
+| `hmall/trade/.../OrderController.java` | 新增 `GET /orders` / `GET /orders/{id}` |
+| `hmall/trade/.../domain/vo/OrderVO.java` | 新增 `detailVOs` 字段 |
+| `hmall/trade/.../domain/vo/OrderDetailVO.java` | 新增 VO（itemId/num/name/price/image） |
+| `hmall/trade/.../OrderServiceImpl.java` | 实现订单列表 + 详情查询，关联商品明细 |
+
+### 10.2 支付成功页
+
+**文件**：`hmall-frontend/src/views/portal/PaySuccess.vue`
+
+新增支付成功跳转页，显示订单编号 + 引导返回首页/查看订单。
+
+---
+
+## 11. Phase 8: 工程稳定性与日志（2026-07-09）
+
+> **目标**：统一异常处理、请求日志落盘、Gateway 兼容性修复。
+
+### 11.1 异常捕获
+
+**文件**：`hmall/hm-common/.../advice/CommonExceptionAdvice.java`
+
+为所有微服务增加统一的 `@ControllerAdvice` 全局异常处理，覆盖 `BadRequestException`、`UnauthorizedException`、`DbException`、通用 `Exception`。
+
+### 11.2 AOP 请求日志落盘
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall/hm-common/.../advice/WebLogAspect.java` | **新建** — `@Aspect` 环绕通知，拦截 `@RequestMapping` 方法，记录 URL/HTTP 方法/IP/参数/响应/耗时 |
+| `hmall/hm-common/.../config/LogDirectoryInitializer.java` | **新建** — `ApplicationRunner`，启动时创建 `logs/` 目录 |
+| `hmall/hm-common/.../config/WebMvcAutoConfiguration.java` | **新建** — 注册 `WebLogAspect` Bean（解决 `@Aspect` 不自动注册问题） |
+| `hmall/hm-common/.../resources/logback-spring.xml` | **新建** — Logback 配置，按日期 + 级别滚动归档 |
+
+### 11.3 Gateway Servlet 兼容性
+
+**根因**：`WebLogAspect` 依赖 `HttpServletRequest`，Gateway 是 WebFlux 不包含 Servlet API → `NoClassDefFoundError`。
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall/hm-common/.../config/WebMvcAutoConfiguration.java` | 添加 `@ConditionalOnWebApplication(type = SERVLET)`，仅在 Servlet 环境下启用 |
+| `hmall/hm-gateway/.../application.yml` | 移除对 `hm-common` 依赖携带的无效自动配置 |
+
+### 11.4 `@Configuration` 注解修复
+
+**根因**：`spring.factories` 的 `EnableAutoConfiguration` 要求每个条目是 `@Configuration` 类，而 `WebLogAspect` 是 `@Component @Aspect`，Spring Boot 无法识别。
+
+**修复**：新增 `WebMvcAutoConfiguration` 作为 `@Configuration` 入口，通过 `@Bean` 注册 `WebLogAspect`。
+
+---
+
+## 12. Phase 9: Token 续期（2026-07-10）
+
+> **目标**：用户登录后保持活跃则无需重复登录。
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall/hm-gateway/.../utils/JwtTool.java` | 新增 `refreshTokenIfNeeded()` — 检查 token 剩余有效期 < 阈值时自动签发新 token |
+| `hmall/hm-gateway/.../config/JwtProperties.java` | 新增 `refreshThreshold` 配置项 |
+| `hmall/hm-gateway/.../filters/AuthGlobalFilter.java` | 步骤 4 新增续期逻辑：验证通过后检查是否需要续期 → 是则签发新 token 并写入响应头 `X-New-Token` |
+| 前端 `api/index.ts` | 响应拦截器检测 `X-New-Token` 头 → 更新 sessionStorage |
+
+**设计要点**：续期在 Gateway 层透明完成，后端微服务无感知；前端自动接管新 token，用户无感知。
+
+---
+
+## 13. Phase 10: Redis 基础设施搭建（2026-07-10）
+
+> **目标**：引入 Redis 层，实现购物车/商品缓存/分布式锁三大核心能力，建立 Redis + MySQL 双写体系。
+
+### 13.1 hm-common 基础设施
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall/hm-common/pom.xml` | 新增 `spring-boot-starter-data-redis` + `commons-pool2` |
+| `hmall/hm-common/.../config/RedisConfig.java` | **新建** — **双 Template 设计**：`RedisTemplate<String, Object>`（Jackson 序列化，Hash/Set 用）+ `StringRedisTemplate`（String 序列化，Lua 脚本+String 读/写用） |
+| `hmall/hm-common/.../service/RedisService.java` | **新建** — 封装常用 Redis 操作：Hash CRUD、String 读写、分布式锁、SMS 验证码、Token 黑名单 |
+| `hmall/hm-common/.../utils/RedisLockUtil.java` | **新建** — `tryLock`（`SET NX EX`）+ `releaseLock`（Lua 原子释放） |
+| `hmall/hm-common/.../utils/LuaScriptLoader.java` | **新建** — 从 classpath 加载 `.lua` 脚本文件 |
+| `hmall/hm-common/.../aspect/RedisCacheAspect.java` | **新建** — Redis 异常隔离切面，宕机自动降级（返回默认值，不阻断业务） |
+| `hmall/hm-common/.../resources/lua/hdel_atomic.lua` | **新建** — Hash 字段原子删除 |
+| `hmall/hm-common/.../resources/lua/release_lock.lua` | **新建** — 分布式锁原子释放 |
+| `hmall/hm-common/.../resources/lua/set_if_absent.lua` | **新建** — `SET NX EX` Lua 版 |
+| `hmall/hm-common/.../resources/META-INF/spring.factories` | 新增 `RedisConfig`、`WebMvcAutoConfiguration` |
+| 各微服务 `application.yaml` | 新增 `spring.redis` 配置（host/port/password/pool） |
+
+### 13.2 购物车迁 Redis
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall/cart-service/.../CartServiceImpl.java` | 全面重写：读写路径改为 `cart:user:{userId}` Hash + `cart:user:{userId}:num` Hash + `cart:user:{userId}:v` 版本号 |
+| `hmall/cart-service/.../resources/lua/add_cart.lua` | **新建** — 原子加购：HLEN 上限检查 → HSET/HINCRBY → EXPIRE → SET version |
+| `hmall/cart-service/.../resources/lua/remove_cart.lua` | **新建** — 原子删除：双 Hash HDEL + SET version |
+| `hmall/cart-service/.../mq/CartSyncReceiver.java` | **新建** — MQ 监听，消费购物车变更消息 → MySQL UPSERT |
+| `hmall/cart-service/.../mq/CartSyncSender.java` | **新建** — 发送购物车变更到 RabbitMQ `cart.sync.topic` |
+| `hmall/cart-service/.../task/CartSyncCompensationTask.java` | **新建** — `@Scheduled 5min` 版本比对补偿（Redis vs MySQL `MAX(version)` 对齐） |
+| `hmall/cart-service/.../domain/dto/CartSyncMessage.java` | **新建** — MQ 消息 DTO |
+| `hmall/cart-service/.../domain/po/Cart.java` | 新增 `version` 字段 |
+| `hmall/cart-service/.../mapper/CartMapper.java` | 新增 `selectMaxVersionByUser` / `deleteAll` |
+| 数据库 `V1__add_cart_version.sql` | `ALTER TABLE cart ADD COLUMN version BIGINT` + 索引 |
+
+**三路策略**：
+```
+写：Redis Lua 原子写（含 version）→ MQ 异步 → MySQL UPSERT
+删：Redis Lua 双 Hash HDEL + SET version → MySQL DELETE（同步双删，不走 MQ）
+读：Redis HGETALL → miss → MySQL → HSET 回填
+补偿：@Scheduled 5min → 版本比对 → 双向修复
+```
+
+### 13.3 商品信息缓存
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall/item-service/.../ItemServiceImpl.java` | `getById` / `queryItemsByIds` 增加缓存层：先查 Redis → miss 查 DB → `SET NX EX` 回写 |
+| `hmall/item-service/.../mq/ItemCacheReceiver.java` | **新建** — MQ 监听，二次确认删除缓存 |
+| `hmall/item-service/.../mq/ItemCacheSender.java` | **新建** — 写操作后发送缓存失效 MQ |
+| `hmall/item-service/.../task/ItemCacheCompensationTask.java` | **新建** — `@Scheduled 5min` → dirty Set 遍历清理 |
+| `hmall/item-service/.../domain/dto/ItemCacheMessage.java` | **新建** — MQ 消息 DTO |
+
+**三层失效保障**：同步 DELETE → MQ 异步二次确认 → 定时任务 dirty Set 兜底。
+
+### 13.4 分布式锁 — 扣款/扣库存保护
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall/user-service/.../UserServiceImpl.java` | `deductMoney` 加 `RedisLockUtil` 保护（`lock:deduct:{userId}`） |
+| `hmall/item-service/.../ItemServiceImpl.java` | `deductStock` 加分布式锁保护 |
+
+### 13.5 Jackson 序列化陷阱修复（系列提交）
+
+| 提交 | 问题 | 修复 |
+|------|------|------|
+| `1db0047` | Lua `tonumber()` 返回 nil（Jackson 引号包裹参数） | 参数改为传 Long 类型 |
+| `b3cd1f3` | Lua 返回值"OK"被 Jackson 反序列化异常 | 改用 `StringRedisTemplate` 执行 Lua |
+| `4dd8473` | `StringRedisTemplate` 强制 String 转换，Long 不行 | 手动 `String.valueOf()` 转换 |
+| `d5a153b` | String 类型 Redis 操作散落各处 | 统一封装到 `RedisService.getStringOps()` |
+| `b6483dc` | 缓存回写 `SET NX EX` 用 RedisTemplate 失败 | 改用 StringRedisTemplate + Lua |
+| `80bcc57` | 其他微服务不扫描 hm-common 包，无法加载 RedisService | 通过 `@Import` 挂在 RedisConfig 上 |
+| `cd94a73` | `RedisTemplate` 与 Spring Boot 自动配置同名 Bean 冲突 | 显式定义注册时序，先于 `RedisAutoConfiguration` |
+
+---
+
+## 14. Phase 11: 验证码登录与登出（2026-07-13）
+
+> **目标**：支持手机验证码登录；实现登出时 JWT token 服务端失效。
+
+### 14.1 验证码登录
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall/user-service/.../controller/UserController.java` | 新增 `POST /users/code`（发送验证码）、`POST /users/login/code`（验证码登录） |
+| `hmall/user-service/.../domain/dto/SendCodeDTO.java` | **新建** — `{ phone }` |
+| `hmall/user-service/.../domain/dto/LoginByCodeDTO.java` | **新建** — `{ phone, code }` |
+| `hmall/user-service/.../service/impl/UserServiceImpl.java` | `sendCode` → Redis 5min TTL；`loginByCode` → 校验 → 签发 JWT |
+| `hmall/common/.../service/RedisService.java` | 新增 `saveSmsCode` / `getSmsCode` / `deleteSmsCode` |
+| `hmall-frontend/src/api/user.ts` | 新增 `sendCode()` / `loginByCode()` |
+| `hmall-frontend/src/views/portal/LoginPage.vue` | 新增"密码登录/验证码登录"双 Tab 切换，60s 发送倒计时 |
+| `hmall-frontend/src/stores/user.ts` | 新增 `loginByCode()` 方法；`logout()` 改为 async（先调后端 API） |
+
+### 14.2 Token 黑名单（登出失效）
+
+**原理**：JWT 创建时嵌入 `jti`（UUID 唯一标识），登出时将 `jti` 写入 Redis 黑名单 TTL = token 剩余有效期。Gateway 校验时额外检查黑名单。
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall/user-service/.../utils/JwtTool.java` | `createToken` 增加 `setJWTId`；新增 `getJti()` / `getRemainingTTL()` |
+| `hmall/hm-gateway/.../utils/JwtTool.java` | 同上（Gateway 校验所需） |
+| `hmall/hm-gateway/.../filters/AuthGlobalFilter.java` | 步骤 5 新增黑名单检查 → 命中返回 401 |
+| `hmall/hm-gateway/.../application.yml` | 新增 `spring.redis` 配置 |
+| 前端 `stores/user.ts` / `stores/admin.ts` | `logout()` → async：先调 `/users/logout` 再清除本地 |
+
+---
+
+## 15. Phase 12: Redis 稳健性修复（2026-07-13）
+
+> **目标**：修复购物车 Redis 切换后暴露的一系列并发一致性、数据同步、数值类型问题。
+
+### 15.1 数值类型修复 + 异常防御
+
+**提交**：`b40cb6a`
+
+- 修复 `HINCRBY` 参数类型：Lua 脚本中 `tonumber()` 要求传入数字，Java 端全部显式传 Long
+- 增加 Redis 异常防御：Redis 宕机时降级到 MySQL 直读直写
+- MQ 发送失败 → catch 不阻塞主流程，依赖补偿任务兜底
+
+### 15.2 商品主键 id 缺失修复
+
+**提交**：`24f233d`
+
+- **根因**：购物车 Redis Hash 中仅存储 `itemId`，未存储商品名/价格/图片等元数据 → 结算页商品清单只显示 ID
+- **修复**：CartFormDTO 补全 `name/price/image/spec` 字段，`addToCart` 传完整数据
+
+### 15.3 异步清空购物车修复
+
+**提交**：`679bf65`
+
+- **根因**：下单成功后 `clearCartListener` 异步清空购物车，MQ 消息可能延迟 → 用户立即回到购物车页看到旧数据
+- **修复**：下单成功时前端 `cartStore.clearCart()` 同步清空本地状态，MQ 消费端做二次确认
+
+---
+
+## 16. Phase 13: 前端 P0/P1 新页面（2026-07-13 ~ 07-14）
+
+> **目标**：根据 `hmall-frontend-optimization-plan.md` 实现商品详情页、收货地址管理、个人中心页。
+
+### 16.1 商品详情页
+
+**提交**：`fc091b3`
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall-frontend/src/views/portal/ProductDetail.vue` | **新建** — 大图区/价格卡片/库存销量/分类品牌规格标签/数量选择器（Minus/Plus/input）/加购按钮/商品详情描述 |
+| `hmall-frontend/src/views/portal/HomePage.vue` | `goDetail()` 从跳搜索页 → `/portal/product/${id}` |
+| `hmall-frontend/src/router/index.ts` | 新增 `/portal/product/:itemId` |
+
+技术要点：`cartStore.addToCart()` 加购 → 自动跳转购物车；面包屑：首页 > 商品名。
+
+### 16.2 收货地址管理页
+
+**提交**：`fc091b3`
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall-frontend/src/views/portal/AddressList.vue` | **新建** — 地址卡片列表（默认标签、设为默认/编辑/删除操作）、el-dialog 表单 CRUD、手机号校验 |
+| `hmall-frontend/src/api/address.ts` | 新增 `addAddress` / `updateAddress` / `deleteAddress` / `setDefaultAddress` |
+| `hmall-frontend/src/types/index.ts` | `Address.isDefault` 从 `boolean` → `number`（对齐后端 Integer） |
+| `hmall-frontend/src/views/portal/OrderConfirm.vue` | 地址区域添加"管理收货地址"入口链接 |
+| `hmall/user-service/.../AddressController.java` | 新增 POST/PUT/DELETE/PUT-default 四个接口 |
+| `hmall/user-service/.../IAddressService.java` | 新增 `setDefaultAddress(userId, addressId)` — 先清所有默认再设目标 |
+| `hmall/user-service/.../AddressServiceImpl.java` | `@Transactional` 实现 |
+
+### 16.3 个人中心页
+
+**提交**：`fc091b3`
+
+**文件**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall-frontend/src/views/portal/UserProfile.vue` | **新建** — 用户信息卡片（头像/用户名/余额）、4 宫格快捷入口（订单/地址/购物车/首页）、退出登录 |
+| `hmall-frontend/src/views/portal/PortalLayout.vue` | 顶部栏用户名从 `<span>` → `<router-link to="/portal/profile">` |
+
+### 16.4 支付后余额同步
+
+**提交**：`0bd8dc7`
+
+- **问题**：余额仅在登录时写入 sessionStorage，支付成功后 store 余额不变 → UserProfile 显示陈旧余额
+- **修复**：`PayPage.vue` `payByBalance()` 成功后 → `userStore.setUserInfo({ balance: 新值 })` → 同步更新 store + sessionStorage
+
+### 16.5 搜索页商品跳转
+
+**提交**：`9ead7f9`
+
+- **问题**：`SearchPage.vue` 商品卡片无 `@click` 跳转，只有加购按钮能交互
+- **修复**：卡片 div 加 `@click="goDetail(item.id)"`，加购按钮上 `@click.stop` 防止冒泡
+
+---
+
+## 17. 新增文档
+
+| 文件 | 内容 |
+|------|------|
+| `docs/hmall-frontend-optimization-plan.md` | 前端优化需求文档（P0/P1 商品详情/收货地址/个人中心） |
+| `docs/nova-mall-best-practices.md` | nova-mall 项目最佳实践分析（架构/设计模式/技术选型） |
+| `docs/redis-application-analysis.md` | Redis 在 hmall 中的应用分析（购物车/缓存/锁/验证码/秒杀/限流） |
+| `docs/redis-integration-report.md` | Redis 集成实施报告（详细记录每一步的实现细节和踩坑记录） |
+| `docs/session-changes.md` | 本文档 — 项目历史修改记录 |
+
+---
+
+## 18. Phase 7~13 文件变更分布
+
+| 文件 | Phase | 变更主题 |
+|------|-------|---------|
+| `hmall-frontend/src/views/portal/OrderList.vue` | 7 | 订单列表页（新建） |
+| `hmall-frontend/src/views/portal/PaySuccess.vue` | 7 | 支付成功页（新建） |
+| `hmall/trade/.../OrderDetailVO.java` | 7 | 订单明细 VO（新建） |
+| `hmall/hm-common/.../WebLogAspect.java` | 8 | AOP 请求日志（新建） |
+| `hmall/hm-common/.../LogDirectoryInitializer.java` | 8 | log 目录初始化（新建） |
+| `hmall/hm-common/.../WebMvcAutoConfiguration.java` | 8 | WebMvc 自动配置（新建） |
+| `hmall/hm-common/.../logback-spring.xml` | 8 | Logback 配置（新建） |
+| `hmall/hm-gateway/.../JwtTool.java` | 9, 14 | Token 续期 + jti 黑名单 |
+| `hmall/hm-gateway/.../AuthGlobalFilter.java` | 9, 14 | 续期逻辑 + 黑名单检查 |
+| `hmall/hm-common/.../RedisConfig.java` | 10 | 双 Template 配置（新建） |
+| `hmall/hm-common/.../RedisService.java` | 10 | Redis 操作封装（新建） |
+| `hmall/hm-common/.../RedisLockUtil.java` | 10 | 分布式锁（新建） |
+| `hmall/hm-common/.../RedisCacheAspect.java` | 10 | 异常隔离切面（新建） |
+| `hmall/hm-common/.../resources/lua/*.lua` | 10 | Lua 脚本 3 个（新建） |
+| `hmall/cart-service/.../CartServiceImpl.java` | 10 | 购物车全面迁 Redis |
+| `hmall/cart-service/.../resources/lua/*.lua` | 10 | 购物车 Lua 脚本 2 个（新建） |
+| `hmall/cart-service/.../mq/CartSync*.java` | 10 | MQ 同步（新建） |
+| `hmall/cart-service/.../task/CartSyncCompensationTask.java` | 10 | 补偿任务（新建） |
+| `hmall/item-service/.../mq/ItemCache*.java` | 10 | 缓存失效 MQ（新建） |
+| `hmall/item-service/.../task/ItemCacheCompensationTask.java` | 10 | 补偿任务（新建） |
+| `hmall/user-service/.../AddressController.java` | 13 | POST/PUT/DELETE 地址 CRUD |
+| `hmall/user-service/.../UserServiceImpl.java` | 10, 11 | 分布式锁 + 验证码 + 登出 |
+| `hmall-frontend/.../LoginPage.vue` | 11 | 双 Tab 验证码登录 |
+| `hmall-frontend/.../ProductDetail.vue` | 13 | 商品详情页（新建） |
+| `hmall-frontend/.../AddressList.vue` | 13 | 地址管理页（新建） |
+| `hmall-frontend/.../UserProfile.vue` | 13 | 个人中心页（新建） |
+| `hmall-frontend/.../SearchPage.vue` | 13 | 商品跳转修复 |
+| `hmall-frontend/.../PayPage.vue` | 13 | 余额同步修复 |
+| 各微服务 `application.yaml` | 10 | Redis 连接配置 |
+| `docs/*.md` | 17 | 5 份技术文档（新建） |
+
+---
+
+*文档更新时间：2026-07-14*

@@ -315,15 +315,117 @@ if (redisService.isTokenBlacklisted(jti)) {
 
 #### 3.7 秒杀库存 Lua 原子预减
 
-依赖先实现秒杀功能（参考 nova-mall 的三层防超卖架构），核心 Lua 脚本可直接复用：
+> **设计参考**：nova-mall 秒杀模块（5 张数据库表 + Redis 库存预扣 + MySQL 行锁兜底 + 分布式锁限流）。
+
+##### 3.7.1 秒杀需要新增的数据库表
+
+| 表 | 字段要点 | 说明 |
+|----|---------|------|
+| `seckill_promotion` | `id`, `title`, `start_date`, `end_date`, `status` | 秒杀活动（eg: "618 专场"） |
+| `seckill_session` | `id`, `name`, `start_time`, `end_time` | 秒杀场次（eg: 10:00–12:00） |
+| `seckill_product_relation` | `id`, `promotion_id`, `session_id`, `product_id`, `seckill_price`, `stock`, `limit` | 活动-商品关联（含秒杀价+库存+限购数） |
+| `seckill_daily_stock` | `id`, `relation_id`, `batch_date`, `stock`, `sold` — **UNIQUE(relation_id, batch_date)** | 每日库存快照（底层防超卖行锁目标） |
+
+##### 3.7.2 整体架构：三层防超卖
+
+```
+                  用户请求
+                     │
+         ┌───────────▼───────────┐
+         │  Gateway: 限流（可复用  │  第一层：流量削峰
+         │  3.8 节滑动窗口限流）   │  每用户 N 秒内只放 1 个请求
+         └───────────┬───────────┘
+                     │
+         ┌───────────▼───────────┐
+         │  Redis Lua 原子预减     │  第二层：极速过滤
+         │  DECRBY seckill:stock:{id} │  库存不足直接拒绝，不穿透 DB
+         │  返回 -1(未初始化)/0(售罄)/1(成功)
+         └───────────┬───────────┘
+                     │ (减库存成功)
+         ┌───────────▼───────────┐
+         │  MQ 异步下单            │  削峰填谷
+         │  消息: {userId, relationId,  │  订单服务消费 → 写 DB → 扣 DB 库存
+         │         productId, quantity} │
+         └───────────┬───────────┘
+                     │
+         ┌───────────▼───────────┐
+         │  MySQL 行锁最终扣库存    │  第三层：绝对兜底
+         │  UPDATE seckill_daily_stock  │  WHERE stock >= quantity
+         │  SET stock = stock - ?      │  行锁保证绝对不超卖
+         └───────────────────────────┘
+```
+
+##### 3.7.3 核心 Lua 脚本（复用 nova-mall）
 
 ```lua
+-- 原子预减库存，返回值：
+--  1: 扣减成功
+--  0: 库存不足
+-- -1: 库存未初始化（Redis Key 不存在）
 local stock = tonumber(redis.call('get', KEYS[1]))
-if stock == nil then return -1 end
-if stock <= 0 then return 0 end
+if stock == nil then
+    return -1
+end
+if stock <= 0 then
+    return 0
+end
 redis.call('decrby', KEYS[1], ARGV[1])
 return 1
 ```
+
+**调用方式**：
+- `KEYS[1]` = `seckill:stock:{relationId}`
+- `ARGV[1]` = 购买数量（通常为 1）
+- 使用 `StringRedisTemplate` 执行（避免 Jackson 序列化导致 `tonumber()` 失败）
+
+##### 3.7.4 秒杀下单完整流程
+
+```
+活动开始前：预热
+├── 查询 seckill_product_relation 库存
+├── SET seckill:stock:{relationId} {stock} （String，无过期时间，活动结束后手动清除）
+└── 初始化 seckill_daily_stock 行（stock = 总库存，sold = 0）
+
+用户下单：
+├── ① 分布式锁（per-user）：SET NX EX "seckill:lock:user:{userId}" → 防止同一用户并发刷单
+├── ② 限购检查：HINCRBY seckill:limit:{relationId} {userId} 1 → 超限则回滚①并拒绝
+├── ③ 执行 Lua 预减库存 → 返回 0 则回滚①②并提示"已售罄"
+├── ④ 发送 MQ 消息（relationId, userId, productId, quantity）
+└── ⑤ MQ 消费者：
+      ├── SELECT ... FROM seckill_daily_stock WHERE relation_id=? FOR UPDATE（行锁）
+      ├── if stock >= quantity → UPDATE SET stock=stock-?, sold=sold+?
+      ├── INSERT INTO order + order_item（秒杀价写入 order_item）
+      └── if 扣减失败 → DEL seckill:limit:{relationId} {userId}（释放限购额度）
+                        → INCRBY seckill:stock:{relationId} quantity（回补 Redis 库存）
+
+超时未支付：
+└── 定时任务：status=待支付 且 超时
+      → 关单 → INCRBY seckill:stock:{relationId} quantity（回补 Redis）
+      → UPDATE seckill_daily_stock SET stock=stock+?（回补 MySQL）
+      → DEL seckill:limit:{relationId} {userId}（归还限购额度）
+```
+
+##### 3.7.5 Redis 数据结构全景
+
+| Key | 类型 | 内容 | TTL |
+|-----|------|------|-----|
+| `seckill:stock:{relationId}` | String | 当前剩余库存数 | 活动结束后清理 |
+| `seckill:limit:{relationId}` | Hash | `{userId} → 已购数量` | 活动结束后清理 |
+| `seckill:lock:user:{userId}` | String | 分布式锁（UUID value） | 5s 锁超时 |
+
+##### 3.7.6 设计要点
+
+1. **三层兜底保证不超卖**：Lua 原子预减是第一道闸（O(1) 极快），MQ 削峰是第二道缓冲，MySQL 行锁 `FOR UPDATE` 是最终兜底。
+
+2. **预减失败不穿透 DB**：99% 的无效请求在第二层就返回"售罄"，不产生 MQ 消息，不访问 MySQL。
+
+3. **per-user 锁 + Hash 限购**：分布式锁防重复提交，Hash 计数器防超限购买。两者配合可阻止脚本批量刷单。
+
+4. **超时回补**：关单定时任务将未支付订单的库存回补到 Redis 和 MySQL，确保不浪费库存。
+
+5. **活动预热**：秒杀开始前必须将库存预热到 Redis。若 Redis Key 不存在（服务器重启/缓存过期），Lua 返回 -1 提示系统错误，不穿透 DB。
+
+6. **Lua 参数类型**：必须用 `StringRedisTemplate` 执行脚本，传入 `Long`/`Integer` 类型参数，避免 Jackson 序列化引号导致 `tonumber()` 失败。
 
 #### 3.8 接口限流
 
