@@ -82,12 +82,7 @@
             <groupId>io.github.openfeign</groupId>
             <artifactId>feign-okhttp</artifactId>
         </dependency>
-        <!--knife4j (swagger UI)-->
-        <dependency>
-            <groupId>com.github.xiaoymin</groupId>
-            <artifactId>knife4j-spring-boot-starter</artifactId>
-            <version>3.0.3</version>
-        </dependency>
+        <!--knife4j 统一由 hm-common 传递 knife4j-openapi2-spring-boot-starter:4.1.0，无需重复声明-->
     </dependencies>
     <build>
         <finalName>${project.artifactId}</finalName>
