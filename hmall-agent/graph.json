@@ -1,0 +1,14 @@
+{
+    "dependencies": ["."],
+    "graphs": {
+        "customer_agent": {
+            "path": "./src/agents/customer/agent.py:agent",
+            "description": "客服助手 Agent：商品浏览、秒杀、购物车、订单、地址全链路自然语言交互"
+        },
+        "admin_agent": {
+            "path": "./src/agents/admin/agent.py:agent",
+            "description": "管理助手 Agent：秒杀管理、订单查询、商品管理、库存查看、运营日报"
+        }
+    },
+    "env": ".env"
+}

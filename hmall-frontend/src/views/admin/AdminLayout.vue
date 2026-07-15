@@ -52,6 +52,7 @@
           </el-breadcrumb>
         </div>
         <div class="flex items-center gap-3">
+          <AdminChat />
           <el-tag size="small" type="success">在线</el-tag>
           <span class="text-sm text-gray-600">{{ adminStore.username }}</span>
           <el-button text type="danger" size="small" @click="handleLogout">退出登录</el-button>
@@ -70,6 +71,7 @@ import { ref, computed, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Fold, Expand, DataAnalysis, Goods, UserFilled, Tickets, AlarmClock, User, Menu as MenuIcon, Setting } from '@element-plus/icons-vue'
 import { useAdminStore } from '@/stores/admin'
+import AdminChat from '@/components/chat/AdminChat.vue'
 
 const route = useRoute()
 const router = useRouter()

@@ -123,6 +123,9 @@
         </div>
       </div>
     </footer>
+
+    <!-- AI 客服浮动组件 -->
+    <ChatWidget />
   </div>
 </template>
 
@@ -132,6 +135,7 @@ import { useRouter } from 'vue-router'
 import { ShoppingCart } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
 import { useCartStore } from '@/stores/cart'
+import ChatWidget from '@/components/chat/ChatWidget.vue'
 
 defineProps<{ showSearch?: boolean }>()
 

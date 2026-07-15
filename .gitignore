@@ -4,6 +4,7 @@
 !/hmall-frontend/
 !/docs/
 !.gitignore
+!/hmall-agent/
 /logs/
 
 # Maven 构建产物
