@@ -1,7 +1,7 @@
 # hmall 秒杀模块设计文档
 
-> 版本：v1.0  
-> 日期：2026-07-14  
+> 版本：v1.1  
+> 日期：2026-07-15  
 > 参考文档：`docs/redis功能相关文档/redis-application-analysis.md` 3.7 节（秒杀库存 Lua 原子预减）+ 3.8 节（滑动窗口限流）
 
 ---
@@ -291,7 +291,7 @@ CREATE TABLE IF NOT EXISTS `seckill_order` (
 
 | Key | 类型 | TTL | 说明 |
 |-----|------|-----|------|
-| `seckill:stock:{relationId}` | String | 无过期（活动结束手动清除） | 当前剩余库存 |
+| `seckill:stock:{relationId}` | String | 无过期（hasKey 守卫防覆盖，活动结束手动清除） | 当前剩余库存 |
 | `seckill:limit:{relationId}` | Hash | 无过期 | `{userId → 已购数量}` 限购计数器 |
 | `seckill:lock:user:{userId}` | String | 5 秒 | per-user 分布式锁（防重复提交） |
 | `seckill:result:{userId}:{relationId}` | String | 120 秒 | 下单结果（`orderId` 或 `0`），前端轮询用 |
@@ -460,9 +460,9 @@ onSeckillOrder(message)  @Transactional
   ├─ 3. UPDATE ... WHERE stock >= quantity（原子扣减）
   │     └─ 影响行数=0 → 并发竞争失败 → 回补 Redis → 设结果 "0" → return
   │
-  ├─ 4. 创建订单（order 表，status=1 待支付）
-  ├─ 5. 创建订单详情（order_detail，price=秒杀价）
-  ├─ 6. 创建秒杀订单关联（seckill_order，status=1）
+    ├─ 4. 创建订单（order 表，status=1 待支付）
+    ├─ 5. 创建订单详情（order_detail，price=秒杀价；通过 Feign GET /items/{id} 查询商品名称/规格/图片）
+    ├─ 6. 创建秒杀订单关联（seckill_order，status=1）
   ├─ 7. 发送延迟消息（30 分钟超时取消，复用现有 DELAY 机制）
   └─ 8. 设 Redis 结果 key = orderId（前端轮询用）
 ```
@@ -508,23 +508,23 @@ int recoverStock(Long relationId, LocalDate batchDate, int quantity);
   → 逐条调用 cancelOrder(orderId)
 ```
 
-#### 5.4.3 cancelOrder 修改
+#### 5.4.3 cancelOrder 与 markOrderPaySuccess 修改
 
-`OrderServiceImpl.cancelOrder()` 增加秒杀订单判断：
+`OrderServiceImpl.cancelOrder()` 和 `markOrderPaySuccess()` 均增加秒杀订单判断：
 
 ```
-cancelOrder(orderId)
-  ├─ 查询 order（status != 1 → return）
-  ├─ 查询 seckill_order（by order_id）
-  │
-  ├─ seckill_order 存在 → recoverSeckillStock()
-  │    ├─ Redis: incrBy(stock) + hIncrBy(limit, -quantity)
-  │    ├─ MySQL: recoverStock(relationId, today, quantity)
-  │    └─ 更新 seckill_order.status = 3（已关闭）
-  │
-  └─ seckill_order 不存在 → 普通订单：itemClient.recoverStock()
-  │
-  └─ 删除订单
+cancelOrder(orderId)                                           | markOrderPaySuccess(orderId)
+  ├─ 查询 order（status != 1 → return）                       |   ├─ 更新 order.status=2, payTime=now
+  ├─ 查询 seckill_order（by order_id）                        |   ├─ 查询 seckill_order（by order_id）
+  │                                                             |   └─ 存在且 status=1 → 更新为 status=2（已支付）
+  ├─ seckill_order 存在 → recoverSeckillStock()                |
+  │    ├─ Redis: incrBy(stock) + hIncrBy(limit, -quantity)     |
+  │    ├─ MySQL: recoverStock(relationId, today, quantity)     |
+  │    └─ 更新 seckill_order.status = 3（已关闭）              |
+  │                                                             |
+  └─ seckill_order 不存在 → 普通订单：itemClient.recoverStock()|
+  │                                                             |
+  └─ 删除订单                                                   |
 ```
 
 ### 5.5 活动预热机制
@@ -536,7 +536,7 @@ cancelOrder(orderId)
   → 查询未来 5 分钟内开始的场次
   → 遍历场次下的商品关联
   → seckillService.preheat(relationId)
-      ├─ Redis: SET seckill:stock:{relationId} = stock
+      ├─ Redis: hasKey 检查 → 不存在才 SET（SETNX 语义，防定时任务覆盖已扣减库存）
       └─ MySQL: INSERT seckill_daily_stock（当天不存在时）
 ```
 

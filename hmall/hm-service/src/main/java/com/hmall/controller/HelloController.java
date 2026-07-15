@@ -24,6 +24,6 @@ public class HelloController {
             ai = new AtomicInteger(0);
             countMap.put(ip, ai);
         }
-        return String.format("<h5>欢迎访问黑马商城, 这是您第%d次访问<h5>", ai.incrementAndGet());
+        return String.format("<h5>欢迎访问枫叶商城, 这是您第%d次访问<h5>", ai.incrementAndGet());
     }
 }

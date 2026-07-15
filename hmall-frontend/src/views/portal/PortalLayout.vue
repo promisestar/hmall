@@ -4,7 +4,7 @@
     <div class="bg-[#333] text-gray-300 text-xs">
       <div class="container-main flex justify-between items-center h-8">
         <div class="flex items-center gap-4">
-          <span>黑马商城欢迎您！</span>
+          <span>枫叶商城欢迎您！</span>
           <router-link v-if="!userStore.isLogin" to="/portal/login" class="hover:text-white transition-colors">
             请登录
           </router-link>
@@ -35,7 +35,7 @@
         <div class="flex items-center justify-between">
           <!-- Logo -->
           <router-link to="/portal/home" class="flex-shrink-0">
-            <img src="/img/logo.png" alt="黑马商城" class="h-12" />
+            <img src="/img/logo.png" alt="枫叶商城" class="h-12" />
           </router-link>
 
           <!-- Search Bar -->
@@ -119,7 +119,7 @@
           </div>
         </div>
         <div class="border-t border-gray-600 mt-6 pt-6 text-center">
-          <p>&copy; 2025 黑马商城 hmall.com 版权所有</p>
+          <p>&copy; 2025 枫叶商城 hmall.com 版权所有</p>
         </div>
       </div>
     </footer>

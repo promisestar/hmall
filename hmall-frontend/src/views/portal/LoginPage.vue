@@ -4,7 +4,7 @@
     <div class="bg-white border-b">
       <div class="container-main py-3">
         <router-link to="/portal/home">
-          <img src="/img/logo.png" alt="黑马商城" class="h-12" />
+          <img src="/img/logo.png" alt="枫叶商城" class="h-12" />
         </router-link>
       </div>
     </div>

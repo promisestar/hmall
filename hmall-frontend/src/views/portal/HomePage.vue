@@ -32,7 +32,7 @@
           <!-- Side Panel -->
           <div class="w-[200px] flex-shrink-0">
             <div class="bg-white rounded shadow-sm p-4 mb-2">
-              <h4 class="font-bold text-sm mb-3 border-b pb-2">黑马快报</h4>
+              <h4 class="font-bold text-sm mb-3 border-b pb-2">枫叶快报</h4>
               <ul class="space-y-2 text-xs text-gray-600">
                 <li v-for="n in 5" :key="n" class="flex items-start gap-1">
                   <span class="text-[#E4393C] font-bold shrink-0 whitespace-nowrap">[特惠]</span>

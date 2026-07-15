@@ -1,7 +1,7 @@
 # hmall 秒杀模块实现说明文档
 
-> 版本：v1.0  
-> 日期：2026-07-14  
+> 版本：v1.1  
+> 日期：2026-07-15  
 > 设计文档：`docs/秒杀功能实现/seckill-design.md`  
 > 参考文档：`docs/redis功能相关文档/redis-application-analysis.md` 3.7 + 3.8 节
 
@@ -653,25 +653,25 @@ VALUES (1, 1, 100, 599900, 100, 1);
 
 ## 八、已知问题与后续优化
 
-### 8.1 活动管理后台缺失
+### 8.1 活动管理后台缺失 ~~（已解决）~~
 
-**现象**：秒杀活动/场次/商品关联数据需手动 SQL 插入，无管理后台界面。
+~~**现象**：秒杀活动/场次/商品关联数据需手动 SQL 插入，无管理后台界面。~~
 
-**后续优化**：在 admin-service 中新增秒杀活动管理页面（活动 CRUD + 场次管理 + 商品关联 + 库存配置），对应文档 3.7.1 节的表结构已预留。
+**解决**：v1.1 已在 admin-service 新增秒杀管理功能，含活动 CRUD、场次管理、商品关联管理、秒杀订单查询、库存状态查看和手动预热。详见 `docs/秒杀功能实现/seckill-admin-design.md` 和 `seckill-admin-implementation-report.md`。
 
-### 8.2 库存预热幂等性
+### 8.2 库存预热幂等性 ~~（已解决）~~
 
-**现象**：`SeckillPreheatTask` 每分钟执行，若活动已预热则重复 `redisService.set()` 覆盖 Redis 库存。
+~~**现象**：`SeckillPreheatTask` 每分钟执行，若活动已预热则重复 `redisService.set()` 覆盖 Redis 库存。~~
 
-**影响**：若预热期间已有用户下单（Redis 库存已减少），预热任务会用 MySQL 原始库存覆盖 Redis 实时库存，导致超卖。
+~~**影响**：若预热期间已有用户下单（Redis 库存已减少），预热任务会用 MySQL 原始库存覆盖 Redis 实时库存，导致库存被回补。~~
 
-**缓解**：预热任务仅预热"未来 5 分钟内开始"的场次（尚未开始，无用户下单）。场次开始后不再预热。
+**解决**：v1.1 修复。`preheat()` 方法改用 `hasKey` 守卫（SETNX 语义），首次预热后 key 已存在则跳过写入，定时任务不再覆盖已扣减的实时库存。
 
-**后续优化**：预热时检查 Redis Key 是否已存在，存在则跳过（`SET NX`）。
+### 8.3 查询活动列表 N+1 问题 ~~（已解决）~~
 
-### 8.3 查询活动列表 N+1 问题
+~~**现象**：`queryActivities()` 对每个商品关联调用 `itemClient.queryItemById()` 查询商品信息，存在 N+1 Feign 调用。~~
 
-**现象**：`queryActivities()` 对每个商品关联调用 `itemClient.queryItemById()` 查询商品信息，存在 N+1 Feign 调用。
+**解决**：v1.1 修复。`queryItemById` 的 Feign 声明从 `@RequestParam` 改为 `@PathVariable`，与 item-service 实际接口 `GET /items/{id}` 对齐，Feign 调用不再失败。管理后台的批量查询使用 `queryItemsByIds` 批量接口，无 N+1 问题。
 
 **影响**：商品数量多时查询延迟较高。
 
@@ -697,9 +697,68 @@ VALUES (1, 1, 100, 599900, 100, 1);
 
 **后续优化**：使用 ReactiveRedisTemplate 实现非阻塞限流。
 
+
 ---
 
-## 九、与本仓库其他文档的关联
+## 九、v1.1 修复记录（2026-07-15）
+
+### 9.1 ItemClient Feign 声明不匹配导致商品信息获取失败
+
+**问题**：`hm-api` 中 `ItemClient.queryItemById` 声明为 `@GetMapping("/items")` + `@RequestParam("id")`，但 item-service 的实际接口是 `@GetMapping("{id}")` + `@PathVariable`。Feign 发出 `GET /items?id=123` 请求，item-service 无此路由 → 调用失败 → 被 catch 后 item=null。
+
+**影响**：
+- `SeckillOrderListener.onSeckillOrder()` — 秒杀下单后 `OrderDetail.name/spec/image` 为空
+- `SeckillServiceImpl.buildProductVO()` — C 端秒杀商品详情中商品名称/图片/规格为空
+
+**修复**（`hm-api/.../client/ItemClient.java`）：
+```java
+// 修复前
+@GetMapping("/items")
+ItemDTO queryItemById(@RequestParam("id") Long id);
+
+// 修复后
+@GetMapping("/items/{id}")
+ItemDTO queryItemById(@PathVariable("id") Long id);
+```
+
+### 9.2 定时预热任务覆盖已扣减的 Redis 库存
+
+**问题**：`SeckillPreheatTask` 每分钟扫描"未来5分钟内开始且尚未结束"的场次并调用 `preheat()`，`preheat()` 方法用 `redisService.set()`（SET 命令）无条件覆盖 Redis 库存为 MySQL 原始值。场次开始后秒杀扣减发生 → 下一分钟预热任务再次触发 → 库存被回补。
+
+**修复**（`trade-service/.../impl/SeckillServiceImpl.java`）：
+```java
+// 修复前：无条件覆盖
+redisService.set(stockKey, relation.getStock());
+
+// 修复后：hasKey 守卫（SETNX 语义），key 已存在则跳过
+if (!redisService.hasKey(stockKey)) {
+    redisService.set(stockKey, relation.getStock());
+}
+```
+
+### 9.3 支付成功后 seckill_order 表状态未同步
+
+**问题**：支付成功后 `paySuccessListener` → `markOrderPaySuccess(orderId)` 只更新了 `order.status=2`，未更新 `seckill_order.status=2`。导致管理后台秒杀订单状态始终显示"待支付"。
+
+**修复**（`trade-service/.../impl/OrderServiceImpl.java`）：
+```java
+// markOrderPaySuccess 方法增加：
+SeckillOrder seckillOrder = seckillOrderMapper.selectOne(
+    new LambdaQueryWrapper<SeckillOrder>().eq(SeckillOrder::getOrderId, orderId)
+);
+if (seckillOrder != null && seckillOrder.getStatus() == 1) {
+    SeckillOrder update = new SeckillOrder();
+    update.setId(seckillOrder.getId());
+    update.setStatus(2);
+    seckillOrderMapper.updateById(update);
+}
+```
+
+该修复与已有的 `cancelOrder` 逻辑对称：超时取消时更新 `seckill_order.status=3`（已关闭）+ 回补库存；支付成功时更新 `seckill_order.status=2`（已支付）。
+
+---
+
+## 十、与本仓库其他文档的关联
 
 | 文档 | 关系 |
 |------|------|

@@ -3,8 +3,8 @@
     <!-- Sidebar -->
     <el-aside :width="collapsed ? '64px' : '220px'" class="bg-[#304156] transition-all duration-300">
       <div class="h-16 flex items-center justify-center border-b border-gray-700">
-        <h1 v-if="!collapsed" class="text-white text-lg font-bold">黑马商城后台</h1>
-        <span v-else class="text-white text-xl font-bold">HM</span>
+        <h1 v-if="!collapsed" class="text-white text-lg font-bold">枫叶商城后台</h1>
+        <span v-else class="text-white text-xl font-bold">FY</span>
       </div>
       <el-menu
         :default-active="activeMenu"

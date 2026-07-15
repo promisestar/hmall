@@ -154,7 +154,7 @@
           </div>
           <div class="pt-4 text-sm text-gray-600 leading-relaxed">
             <p>{{ item.name }} —— 优质好物，品质保障。{{ item.spec ? '规格：' + item.spec + '。' : '' }}{{ item.brand ? '品牌：' + item.brand + '。' : '' }}</p>
-            <p class="mt-2 text-gray-400">本商品由黑马商城自营发货，享受七天无理由退换货服务。</p>
+            <p class="mt-2 text-gray-400">本商品由枫叶商城自营发货，享受七天无理由退换货服务。</p>
           </div>
         </div>
       </template>

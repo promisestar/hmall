@@ -3,7 +3,7 @@
     <div class="bg-white rounded-2xl shadow-xl p-10 w-[420px]">
       <div class="text-center mb-8">
         <h1 class="text-2xl font-bold text-gray-800">管理后台登录</h1>
-        <p class="text-sm text-gray-500 mt-2">黑马商城管理系统</p>
+        <p class="text-sm text-gray-500 mt-2">枫叶商城管理系统</p>
       </div>
 
       <el-form :model="form" label-position="top" size="large">

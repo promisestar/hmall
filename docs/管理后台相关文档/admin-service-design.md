@@ -1315,7 +1315,7 @@ export function updateOrderNote(id: string, note: string, status: number): Promi
 ┌──────────────────────────────────────────────┐
 │                                              │
 │            ┌────────────────────┐            │
-│            │   黑马商城管理系统    │            │
+│            │   枫叶商城管理系统    │            │
 │            │                    │            │
 │            │  [👤 用户名       ]  │            │
 │            │  [🔒 密码         ]  │
