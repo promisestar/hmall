@@ -57,6 +57,19 @@ def main():
 
     port = int(os.getenv("AGENT_PORT", "8090"))
 
+    # 导入 LangGraph Server 的 FastAPI app 并添加 CORS 中间件
+    # 必须先 setup_environment()（设置 langgraph 所需环境变量），再导入
+    from fastapi.middleware.cors import CORSMiddleware
+    from langgraph_api.server import app as langgraph_app
+
+    langgraph_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],          # 开发环境允许所有来源
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     print(f"🚀 Starting hmall Agent Server on port {port}")
     print(f"📍 API:      http://localhost:{port}")
     print(f"📚 Docs:     http://localhost:{port}/docs")
@@ -65,7 +78,7 @@ def main():
 
     import uvicorn
     uvicorn.run(
-        "langgraph_api.server:app",
+        langgraph_app,
         host="0.0.0.0",
         port=port,
         reload=False,

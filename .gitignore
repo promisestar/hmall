@@ -5,6 +5,8 @@
 !/docs/
 !.gitignore
 !/hmall-agent/
+/hmall-agent/.env
+/hmall-agent/.venv
 /logs/
 
 # Maven 构建产物
