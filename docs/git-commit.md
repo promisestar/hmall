@@ -1,6 +1,6 @@
 # hmall 项目修改记录
 
-> 本文档记录了 2026-07-07 至 2026-07-14 期间对 hmall（枫叶商城）前后端项目的全部修改，涵盖搜索、下单、支付、类型对齐、精度保护、工程化、Redis 基础设施、验证码登录、Token 续期、前端新页面等模块。
+> 本文档记录了 2026-07-07 至 2026-07-15 期间对 hmall（枫叶商城）前后端项目的全部修改，涵盖搜索、下单、支付、类型对齐、精度保护、工程化、Redis 基础设施、验证码登录、Token 续期、前端新页面、秒杀系统、管理后台、项目重命名等模块。
 
 ---
 
@@ -8,10 +8,10 @@
 
 | 项目 | 数据 |
 |------|------|
-| 时间跨度 | 2026-07-07 ~ 2026-07-14 |
-| 修改文件 | 100+ 文件（前后端） |
-| 涉及模块 | search-service, trade-service, pay-service, item-service, cart-service, user-service, hm-common, hm-gateway, hmall-frontend |
-| 核心领域 | ES 搜索修复、雪花 ID 精度保护、前后端 DTO 对齐、下单/支付链路、购物车状态管理、工程稳定性、Redis 基础设施、Token 续期与黑名单、验证码登录、前端 P0/P1 新页面 |
+| 时间跨度 | 2026-07-07 ~ 2026-07-15 |
+| 修改文件 | 150+ 文件（前后端） |
+| 涉及模块 | search-service, trade-service, pay-service, item-service, cart-service, user-service, admin-service, hm-common, hm-api, hm-gateway, hmall-frontend |
+| 核心领域 | ES 搜索修复、雪花 ID 精度保护、前后端 DTO 对齐、下单/支付链路、购物车状态管理、工程稳定性、Redis 基础设施、Token 续期与黑名单、验证码登录、前端 P0/P1 新页面、**高并发秒杀系统**、**RBAC 管理后台**、项目重命名 |
 
 ### 演进阶段总览
 
@@ -641,4 +641,150 @@ if (userStore.isLogin && cartStore.cartList.length === 0) {
 
 ---
 
-*文档更新时间：2026-07-14*
+## 19. Phase 14: 秒杀系统 + 管理后台 + 项目重命名（2026-07-15）
+
+> **目标**：完整实现秒杀管理系统（C 端 + 管理后台）、修复秒杀核心链路 Bug、项目重命名为枫叶商城。
+
+### 19.1 秒杀系统实现
+
+三层防超卖架构全部落地：
+
+| 层级 | 机制 | 实现文件 |
+|------|------|---------|
+| 第一层 | Gateway 滑动窗口限流 | `RateLimitFilter.java`、`sliding_window_rate_limit.lua` |
+| 第二层 | Redis Lua 原子预减 | `SeckillServiceImpl.doSeckill()`、`seckill_deduct.lua` |
+| 第三层 | MySQL 行锁兜底 | `SeckillOrderListener.onSeckillOrder()`、`selectForUpdate` + `deductStock` |
+
+**后端新增（trade-service）**：
+
+| 文件 | 说明 |
+|------|------|
+| `controller/SeckillController.java` | C 端 API：activities/products/order/result |
+| `service/SeckillService.java` + `impl/SeckillServiceImpl.java` | 秒杀核心引擎 |
+| `Listener/SeckillOrderListener.java` | MQ 消费者（行锁扣库存 + 创建订单） |
+| `task/SeckillPreheatTask.java` | 定时预热（每分钟扫描未来5分钟场次） |
+| `task/SeckillTimeoutTask.java` | 超时兜底（每5分钟扫描超时订单） |
+| `domain/po/` (5 PO) + `domain/vo/` (3 VO) + `domain/dto/SeckillOrderMessage.java` | 数据模型 |
+| `mapper/` (5 Mapper) | ORM（含 FOR UPDATE + 原子扣减 SQL） |
+| `resources/db/migration/V2__seckill_tables.sql` | 5 张秒杀表建表 SQL |
+
+**基础设施**：
+
+| 文件 | 说明 |
+|------|------|
+| `hm-common/.../lua/seckill_deduct.lua` | 秒杀原子预减 Lua（限购+库存合一） |
+| `hm-common/.../lua/sliding_window_rate_limit.lua` | 滑动窗口限流 Lua |
+| `hm-common/.../RateLimitUtil.java` | 限流工具类 |
+| `hm-gateway/.../RateLimitFilter.java` | 限流 GlobalFilter |
+| `hm-gateway/.../RateLimitProperties.java` | 限流配置 |
+| `hm-gateway/.../application.yml` | 限流规则配置 |
+
+**前端新增（C 端）**：
+
+| 文件 | 说明 |
+|------|------|
+| `api/seckill.ts` | 秒杀 API + 轮询工具 |
+| `views/portal/SeckillList.vue` | 秒杀活动列表页（场次切换 + 库存进度条） |
+| `views/portal/SeckillDetail.vue` | 秒杀商品详情页（倒计时 + 排队轮询） |
+
+### 19.2 管理后台秒杀管理
+
+**后端新增**：
+
+| 文件 | 说明 |
+|------|------|
+| `trade-service/domain/dto/` (3 DTO) | SeckillPromotionDTO、SeckillSessionDTO、SeckillProductRelationDTO |
+| `trade-service/domain/vo/` (5 VO) | PromoAdmin、SessionAdmin、RelationAdmin、OrderAdmin、StockAdmin |
+| `trade-service/controller/SeckillController.java` | 新增 17 个 `/seckill/admin/**` 管理接口 |
+| `admin-service/controller/SeckillAdminController.java` | `/admin/seckill/**` 代理转发 |
+| `admin-service/feign/TradeFeignClient.java` | 新增 17 个秒杀管理 Feign 方法 |
+| `admin-service/resources/seckill-admin-menu.sql` | 菜单 + 权限点初始化 SQL |
+
+**前端新增（管理后台）**：
+
+| 文件 | 说明 |
+|------|------|
+| `api/admin/seckill.ts` | 秒杀管理 API 模块（18 个函数） |
+| `types/admin.ts` | 新增 8 个秒杀管理类型 |
+| `views/admin/SeckillManage.vue` | 4-Tab 管理页（活动/场次/商品/订单） |
+| `router/index.ts` | 新增 `/admin/seckill` 路由 |
+| `views/admin/AdminLayout.vue` | 面包屑映射 + AlarmClock 图标 |
+
+### 19.3 秒杀核心链路 Bug 修复
+
+| Bug | 根因 | 修复文件 |
+|-----|------|---------|
+| 秒杀订单详情 name/spec/image 为空 | `ItemClient.queryItemById` Feign 声明为 `@RequestParam`，但 item-service 实际是 `@PathVariable("id")` 路径 | `hm-api/.../client/ItemClient.java` |
+| 定时预热任务覆盖已扣减库存 | `preheat()` 用 `redisService.set()` 无条件覆盖，定时任务每分钟触发 | `SeckillServiceImpl.java`：改用 `hasKey` 守卫（SETNX 语义） |
+| 支付成功未同步 seckill_order 状态 | `markOrderPaySuccess` 只更新 `order` 表，漏了 `seckill_order` 表 | `OrderServiceImpl.java`：新增 seckill_order.status=2 更新 |
+
+### 19.4 项目重命名：黑马商城 → 枫叶商城
+
+**涉及文件（16 个，20 处）**：
+
+| 类别 | 文件 |
+|------|------|
+| 前端 Vue 3 SPA | `ProductDetail.vue`、`PortalLayout.vue`（3处）、`LoginPage.vue`、`HomePage.vue`、`AdminLogin.vue`、`AdminLayout.vue` |
+| 前端入口 | `hmall-frontend/index.html` |
+| Nginx 静态页 | `search.html`、`pay.html`、`login.html`、`index.html`、`cart.html` |
+| 后端 | `hm-service/application.yaml`、`HelloController.java` |
+| 文档 | `README.md`、`git-commit.md`、`admin-service-design.md`、`hmall-frontend-optimization-plan.md` |
+
+AdminLayout 侧边栏折叠缩写同步更新：`HM` → `FY`。
+
+### 19.5 工程化清理
+
+| 操作 | 说明 |
+|------|------|
+| `.gitignore` | 移除 `!/hmall-nginx/`，排除 Nginx 目录跟踪 |
+| `git rm --cached -r hmall-nginx` | 213 个文件从 Git 索引移除，本地保留 |
+| `README.md` | 全面重写（新增秒杀/管理后台章节、架构图更新、前端 Vue3 SPA 说明、移除 Nginx 相关） |
+| 文档更新 | `seckill-design.md` v1.0→v1.1、`seckill-implementation-report.md` v1.0→v1.1（新增修复记录和已解决问题标注） |
+
+### 19.6 Phase 14 文件变更分布
+
+| 文件 | 变更主题 |
+|------|---------|
+| `hm-common/.../lua/seckill_deduct.lua` | 秒杀原子预减 Lua |
+| `hm-common/.../lua/sliding_window_rate_limit.lua` | 滑动窗口限流 Lua |
+| `hm-common/.../RateLimitUtil.java` | 限流工具类 |
+| `hm-gateway/.../RateLimitFilter.java` | 限流 GlobalFilter |
+| `hm-gateway/.../RateLimitProperties.java` | 限流配置 |
+| `trade-service/controller/SeckillController.java` | C 端 + 管理端秒杀 API（21 个端点） |
+| `trade-service/service/SeckillService.java` | 秒杀服务接口（C 端 5 + 管理端 17） |
+| `trade-service/service/impl/SeckillServiceImpl.java` | 秒杀核心实现（C 端 + 管理端 + 修复） |
+| `trade-service/Listener/SeckillOrderListener.java` | MQ 消费者 |
+| `trade-service/task/SeckillPreheatTask.java` | 定时预热 |
+| `trade-service/task/SeckillTimeoutTask.java` | 超时兜底 |
+| `trade-service/domain/po/` (5 PO) | 秒杀实体 |
+| `trade-service/domain/dto/` (4 DTO) | 秒杀 DTO |
+| `trade-service/domain/vo/` (8 VO) | 秒杀 VO |
+| `trade-service/mapper/` (5 Mapper) | 秒杀 Mapper |
+| `trade-service/V2__seckill_tables.sql` | 建表 SQL |
+| `trade-service/OrderServiceImpl.java` | markOrderPaySuccess 秒杀同步 |
+| `admin-service/SeckillAdminController.java` | 管理端代理 |
+| `admin-service/TradeFeignClient.java` | Feign 方法扩展 |
+| `admin-service/TradeFeignFallbackFactory.java` | Fallback 扩展 |
+| `admin-service/seckill-admin-menu.sql` | 菜单初始化 SQL |
+| `hm-api/ItemClient.java` | `@RequestParam` → `@PathVariable` 修复 |
+| `hm-service/HelloController.java` | 枫叶商城重命名 |
+| `hm-service/application.yaml` | 枫叶商城重命名 |
+| `.gitignore` | 排除 hmall-nginx |
+| `README.md` | 全面重写 |
+| `docs/秒杀功能实现/seckill-design.md` | 秒杀设计文档 v1.1 |
+| `docs/秒杀功能实现/seckill-implementation-report.md` | 秒杀实现文档 v1.1 |
+| `docs/秒杀功能实现/seckill-admin-design.md` | 管理后台秒杀设计文档 |
+| `docs/秒杀功能实现/seckill-admin-implementation-report.md` | 管理后台秒杀实现报告 |
+| `hmall-frontend/api/seckill.ts` | 秒杀 API 模块 |
+| `hmall-frontend/api/admin/seckill.ts` | 管理端秒杀 API |
+| `hmall-frontend/types/admin.ts` | 秒杀类型定义 |
+| `hmall-frontend/views/portal/SeckillList.vue` | 秒杀列表页 |
+| `hmall-frontend/views/portal/SeckillDetail.vue` | 秒杀详情页 |
+| `hmall-frontend/views/admin/SeckillManage.vue` | 管理端秒杀页 |
+| `hmall-frontend/views/admin/AdminLayout.vue` | 面包屑 + 重命名 |
+| `hmall-frontend/views/portal/*.vue` (6 files) | 重命名：黑马商城 → 枫叶商城 |
+| `hmall-frontend/index.html` | 标题重命名 |
+
+---
+
+*文档更新时间：2026-07-15*
