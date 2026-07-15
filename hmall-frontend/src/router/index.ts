@@ -123,6 +123,11 @@ const router = createRouter({
           component: () => import('@/views/admin/UserManage.vue'),
         },
         {
+          path: 'seckill',
+          name: 'SeckillManage',
+          component: () => import('@/views/admin/SeckillManage.vue'),
+        },
+        {
           path: 'system/admin',
           name: 'AdminUserManage',
           component: () => import('@/views/admin/system/AdminUserManage.vue'),

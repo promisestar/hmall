@@ -1,8 +1,11 @@
 package com.hmall.trade.service;
 
-import com.hmall.trade.domain.vo.SeckillActivityVO;
-import com.hmall.trade.domain.vo.SeckillProductVO;
-import com.hmall.trade.domain.vo.SeckillResultVO;
+import com.hmall.common.domain.PageDTO;
+import com.hmall.common.domain.PageQuery;
+import com.hmall.trade.domain.dto.SeckillProductRelationDTO;
+import com.hmall.trade.domain.dto.SeckillPromotionDTO;
+import com.hmall.trade.domain.dto.SeckillSessionDTO;
+import com.hmall.trade.domain.vo.*;
 
 import java.util.List;
 
@@ -10,6 +13,8 @@ import java.util.List;
  * 秒杀服务接口
  */
 public interface SeckillService {
+
+    // ==================== C 端接口 ====================
 
     /**
      * 预热秒杀库存到 Redis
@@ -56,4 +61,104 @@ public interface SeckillService {
      * @return 订单结果（success=成功含orderId, pending=排队中, failed=失败）
      */
     SeckillResultVO getOrderResult(Long relationId);
+
+    // ==================== 管理后台 - 活动管理 ====================
+
+    /**
+     * 分页查询秒杀活动列表
+     */
+    PageDTO<SeckillPromotionAdminVO> queryPromotionPage(PageQuery pageQuery, String title, Integer status);
+
+    /**
+     * 查询秒杀活动详情
+     */
+    SeckillPromotionAdminVO getPromotionDetail(Long id);
+
+    /**
+     * 创建秒杀活动
+     */
+    Long createPromotion(SeckillPromotionDTO dto);
+
+    /**
+     * 修改秒杀活动
+     */
+    void updatePromotion(SeckillPromotionDTO dto);
+
+    /**
+     * 删除秒杀活动（级联删除场次和商品关联）
+     */
+    void deletePromotion(Long id);
+
+    // ==================== 管理后台 - 场次管理 ====================
+
+    /**
+     * 分页查询秒杀场次列表
+     */
+    PageDTO<SeckillSessionAdminVO> querySessionPage(PageQuery pageQuery, Long promotionId);
+
+    /**
+     * 查询秒杀场次详情
+     */
+    SeckillSessionAdminVO getSessionDetail(Long id);
+
+    /**
+     * 创建秒杀场次
+     */
+    Long createSession(SeckillSessionDTO dto);
+
+    /**
+     * 修改秒杀场次
+     */
+    void updateSession(SeckillSessionDTO dto);
+
+    /**
+     * 删除秒杀场次（级联删除商品关联）
+     */
+    void deleteSession(Long id);
+
+    // ==================== 管理后台 - 商品关联管理 ====================
+
+    /**
+     * 分页查询秒杀商品关联列表
+     */
+    PageDTO<SeckillProductRelationAdminVO> queryRelationPage(PageQuery pageQuery, Long sessionId, Long promotionId);
+
+    /**
+     * 查询秒杀商品关联详情
+     */
+    SeckillProductRelationAdminVO getRelationDetail(Long id);
+
+    /**
+     * 创建秒杀商品关联
+     */
+    Long createRelation(SeckillProductRelationDTO dto);
+
+    /**
+     * 修改秒杀商品关联
+     */
+    void updateRelation(SeckillProductRelationDTO dto);
+
+    /**
+     * 删除秒杀商品关联
+     */
+    void deleteRelation(Long id);
+
+    /**
+     * 手动预热秒杀库存到 Redis
+     */
+    void manualPreheat(Long relationId);
+
+    // ==================== 管理后台 - 秒杀订单管理 ====================
+
+    /**
+     * 分页查询秒杀订单
+     */
+    PageDTO<SeckillOrderAdminVO> querySeckillOrderPage(PageQuery pageQuery, Integer status, Long relationId, Long userId);
+
+    // ==================== 管理后台 - 库存查询 ====================
+
+    /**
+     * 查询商品关联的每日库存快照列表
+     */
+    List<SeckillStockAdminVO> queryStockStatus(Long relationId);
 }

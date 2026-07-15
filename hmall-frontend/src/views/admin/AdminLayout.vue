@@ -68,7 +68,7 @@
 <script setup lang="ts">
 import { ref, computed, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Fold, Expand, DataAnalysis, Goods, UserFilled, Tickets, User, Menu as MenuIcon, Setting } from '@element-plus/icons-vue'
+import { Fold, Expand, DataAnalysis, Goods, UserFilled, Tickets, AlarmClock, User, Menu as MenuIcon, Setting } from '@element-plus/icons-vue'
 import { useAdminStore } from '@/stores/admin'
 
 const route = useRoute()
@@ -83,6 +83,7 @@ const currentTitle = computed(() => {
     '/admin/items': '商品管理',
     '/admin/orders': '订单管理',
     '/admin/users': '用户管理',
+    '/admin/seckill': '秒杀管理',
     '/admin/system/admin': '管理员管理',
     '/admin/system/role': '角色管理',
     '/admin/system/menu': '菜单管理',
@@ -97,6 +98,7 @@ const iconMap: Record<string, any> = {
   Goods: markRaw(Goods),
   UserFilled: markRaw(UserFilled),
   Tickets: markRaw(Tickets),
+  AlarmClock: markRaw(AlarmClock),
   User: markRaw(User),
   Menu: markRaw(MenuIcon),
   Setting: markRaw(Setting),
