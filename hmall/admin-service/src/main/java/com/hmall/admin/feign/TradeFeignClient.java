@@ -27,13 +27,13 @@ public interface TradeFeignClient {
     R<Object> queryOrderById(@PathVariable Long id);
 
     @PostMapping("/orders/batch/delivery")
-    R<Void> batchDelivery(@RequestBody List<Long> orderIds);
+    void batchDelivery(@RequestBody List<Long> orderIds);
 
     @PostMapping("/orders/batch/close")
-    R<Void> batchCloseOrders(@RequestBody List<Long> orderIds);
+    void batchCloseOrders(@RequestBody List<Long> orderIds);
 
     @PostMapping("/orders/{id}/note")
-    R<Void> updateNote(@PathVariable Long id, @RequestParam(required = false) String note,
+    void updateNote(@PathVariable Long id, @RequestParam(required = false) String note,
                        @RequestParam(required = false) Integer status);
 
     // ==================== 秒杀管理 ====================

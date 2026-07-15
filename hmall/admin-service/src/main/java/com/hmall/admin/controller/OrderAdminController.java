@@ -38,13 +38,15 @@ public class OrderAdminController {
     @ApiOperation("批量发货")
     @PostMapping("/delivery")
     public R<Void> batchDelivery(@RequestBody List<Long> orderIds) {
-        return tradeFeignClient.batchDelivery(orderIds);
+        tradeFeignClient.batchDelivery(orderIds);
+        return R.ok();
     }
 
     @ApiOperation("批量关闭订单")
     @PostMapping("/close")
     public R<Void> batchClose(@RequestBody List<Long> orderIds) {
-        return tradeFeignClient.batchCloseOrders(orderIds);
+        tradeFeignClient.batchCloseOrders(orderIds);
+        return R.ok();
     }
 
     @ApiOperation("修改备注")
@@ -52,6 +54,7 @@ public class OrderAdminController {
     public R<Void> updateNote(@RequestParam Long id,
                               @RequestParam(required = false) String note,
                               @RequestParam(required = false) Integer status) {
-        return tradeFeignClient.updateNote(id, note, status);
+        tradeFeignClient.updateNote(id, note, status);
+        return R.ok();
     }
 }

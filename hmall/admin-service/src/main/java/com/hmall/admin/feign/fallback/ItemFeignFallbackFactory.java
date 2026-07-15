@@ -4,7 +4,6 @@ import com.hmall.admin.feign.ItemFeignClient;
 import com.hmall.api.dto.ItemDTO;
 import com.hmall.common.domain.PageDTO;
 import com.hmall.common.domain.PageQuery;
-import com.hmall.common.domain.R;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.openfeign.FallbackFactory;
 import org.springframework.stereotype.Component;
@@ -25,38 +24,32 @@ public class ItemFeignFallbackFactory implements FallbackFactory<ItemFeignClient
             }
 
             @Override
-            public R<ItemDTO> queryItemById(Long id) {
-                return R.error("商品服务暂时不可用");
+            public ItemDTO queryItemById(Long id) {
+                return null;
             }
 
             @Override
-            public R<Void> saveItem(ItemDTO item) {
-                return R.error("商品服务暂时不可用");
+            public void saveItem(ItemDTO item) {
             }
 
             @Override
-            public R<Void> updateItem(ItemDTO item) {
-                return R.error("商品服务暂时不可用");
+            public void updateItem(ItemDTO item) {
             }
 
             @Override
-            public R<Void> deleteItemById(Long id) {
-                return R.error("商品服务暂时不可用");
+            public void deleteItemById(Long id) {
             }
 
             @Override
-            public R<Void> batchUpdateStatus(List<Long> ids, Integer status) {
-                return R.error("商品服务暂时不可用");
+            public void batchUpdateStatus(List<Long> ids, Integer status) {
             }
 
             @Override
-            public R<Void> batchUpdateStock(Map<Long, Integer> stockMap) {
-                return R.error("商品服务暂时不可用");
+            public void batchUpdateStock(Map<Long, Integer> stockMap) {
             }
 
             @Override
-            public R<Void> batchDeleteItems(List<Long> ids) {
-                return R.error("商品服务暂时不可用");
+            public void batchDeleteItems(List<Long> ids) {
             }
         };
     }

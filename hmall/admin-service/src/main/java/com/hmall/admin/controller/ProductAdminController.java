@@ -31,38 +31,43 @@ public class ProductAdminController {
     @ApiOperation("商品详情")
     @GetMapping("/{id}")
     public R<ItemDTO> getInfo(@PathVariable Long id) {
-        return itemFeignClient.queryItemById(id);
+        return R.ok(itemFeignClient.queryItemById(id));
     }
 
     @ApiOperation("新增商品")
     @PostMapping
     public R<Void> create(@RequestBody ItemDTO item) {
-        return itemFeignClient.saveItem(item);
+        itemFeignClient.saveItem(item);
+        return R.ok();
     }
 
     @ApiOperation("更新商品")
     @PutMapping("/{id}")
     public R<Void> update(@PathVariable Long id, @RequestBody ItemDTO item) {
         item.setId(id);
-        return itemFeignClient.updateItem(item);
+        itemFeignClient.updateItem(item);
+        return R.ok();
     }
 
     @ApiOperation("批量上下架")
     @PostMapping("/publishStatus")
     public R<Void> updatePublishStatus(@RequestParam List<Long> ids,
                                         @RequestParam Integer publishStatus) {
-        return itemFeignClient.batchUpdateStatus(ids, publishStatus);
+        itemFeignClient.batchUpdateStatus(ids, publishStatus);
+        return R.ok();
     }
 
     @ApiOperation("批量删除商品")
     @DeleteMapping
     public R<Void> delete(@RequestParam List<Long> ids) {
-        return itemFeignClient.batchDeleteItems(ids);
+        itemFeignClient.batchDeleteItems(ids);
+        return R.ok();
     }
 
     @ApiOperation("调整库存")
     @PutMapping("/stock/{id}")
     public R<Void> updateStock(@PathVariable Long id, @RequestParam Integer stock) {
-        return itemFeignClient.batchUpdateStock(Map.of(id, stock));
+        itemFeignClient.batchUpdateStock(Map.of(id, stock));
+        return R.ok();
     }
 }

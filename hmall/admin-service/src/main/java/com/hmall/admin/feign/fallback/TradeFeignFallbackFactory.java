@@ -29,18 +29,15 @@ public class TradeFeignFallbackFactory implements FallbackFactory<TradeFeignClie
             }
 
             @Override
-            public R<Void> batchDelivery(List<Long> orderIds) {
-                return R.error("订单服务暂时不可用");
+            public void batchDelivery(List<Long> orderIds) {
             }
 
             @Override
-            public R<Void> batchCloseOrders(List<Long> orderIds) {
-                return R.error("订单服务暂时不可用");
+            public void batchCloseOrders(List<Long> orderIds) {
             }
 
             @Override
-            public R<Void> updateNote(Long id, String note, Integer status) {
-                return R.error("订单服务暂时不可用");
+            public void updateNote(Long id, String note, Integer status) {
             }
 
             // ==================== 秒杀管理 Fallback ====================
