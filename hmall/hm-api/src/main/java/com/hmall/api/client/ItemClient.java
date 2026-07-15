@@ -5,6 +5,7 @@ import com.hmall.api.dto.ItemDTO;
 import com.hmall.api.dto.OrderDetailDTO;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -25,8 +26,8 @@ import java.util.List;
 public interface ItemClient {
     @GetMapping("/items")
     List<ItemDTO> queryItemsByIds(@RequestParam("ids") Collection<Long> ids);
-    @GetMapping("/items")
-    ItemDTO queryItemById(@RequestParam("id") Long id);
+    @GetMapping("/items/{id}")
+    ItemDTO queryItemById(@PathVariable("id") Long id);
     @PutMapping("/items/stock/deduct")
     public void deductStock(@RequestBody List<OrderDetailDTO> items);
     @PutMapping("/items/stock/recover")
