@@ -94,9 +94,12 @@ public class SeckillServiceImpl implements SeckillService {
             throw new BizIllegalException("秒杀商品不存在, relationId=" + relationId);
         }
 
-        // 1. 将库存写入 Redis（String 类型，无过期时间，活动结束后手动清除）
+        // 1. 将库存写入 Redis（SETNX 防覆盖：定时任务重复触发时不回补已扣减的库存）
+        //    TTL 设为 24 小时，足够覆盖单场秒杀活动；活动结束后可通过管理端手动清除
         String stockKey = STOCK_KEY_PREFIX + relationId;
-        redisService.set(stockKey, relation.getStock());
+        if (!redisService.hasKey(stockKey)) {
+            redisService.set(stockKey, relation.getStock());
+        }
 
         // 2. 初始化每日库存快照（如果当天不存在）
         LocalDate today = LocalDate.now();

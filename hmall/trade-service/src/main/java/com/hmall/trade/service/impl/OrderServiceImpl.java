@@ -158,6 +158,17 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         order.setStatus(2);
         order.setPayTime(LocalDateTime.now());
         updateById(order);
+
+        // 如果是秒杀订单，同步更新 seckill_order 状态为已支付
+        SeckillOrder seckillOrder = seckillOrderMapper.selectOne(
+                new LambdaQueryWrapper<SeckillOrder>().eq(SeckillOrder::getOrderId, orderId)
+        );
+        if (seckillOrder != null && seckillOrder.getStatus() == 1) {
+            SeckillOrder update = new SeckillOrder();
+            update.setId(seckillOrder.getId());
+            update.setStatus(2);
+            seckillOrderMapper.updateById(update);
+        }
     }
 
     @Override
