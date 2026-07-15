@@ -30,14 +30,14 @@ export interface AgentContext {
 }
 
 export interface UseLangGraphOptions {
-  /** LangGraph Server URL，默认 http://localhost:8090 */
+  /** LangGraph Server URL，默认取 VITE_AGENT_URL 环境变量 */
   apiUrl?: string
   /** Agent ID：customer_agent 或 admin_agent */
   assistantId: 'customer_agent' | 'admin_agent'
 }
 
 export function useLangGraph(options: UseLangGraphOptions) {
-  const apiUrl = options.apiUrl || 'http://localhost:8090'
+  const apiUrl = options.apiUrl || import.meta.env.VITE_AGENT_URL || 'http://localhost:8090'
   const assistantId = options.assistantId
 
   const client = new Client({ apiUrl })
