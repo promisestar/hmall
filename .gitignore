@@ -7,7 +7,16 @@
 !/hmall-agent/
 /hmall-agent/.env
 /hmall-agent/.venv
+/hmall-agent/.langgraph_api
 /logs/
+
+# Python 字节码缓存
+**/__pycache__/
+**/*.pyc
+
+# Agent log
+**server_stdout.log
+**server_stderr.log
 
 # Maven 构建产物
 **/target/
