@@ -16,6 +16,7 @@ from deepagents.backends import FilesystemBackend
 from deepagents.middleware import SkillsMiddleware
 
 from src.core.llms import qwen_model
+from src.core.redis_checkpoint import checkpointer
 from src.middleware.auth import AuthMiddleware
 from src.middleware.permission import PermissionMiddleware
 from src.middleware.regex_shortcut import RegexShortcutMiddleware
@@ -82,4 +83,5 @@ agent = create_agent(
     ],
     system_prompt=SYSTEM_PROMPT,
     context_schema=Context,
+    checkpointer=checkpointer,            # Redis Checkpoint 持久化 + interrupt 恢复
 )
