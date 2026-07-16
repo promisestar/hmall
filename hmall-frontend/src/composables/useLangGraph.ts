@@ -177,14 +177,13 @@ export function useLangGraph(options: UseLangGraphOptions) {
       }
 
       // 流式调用 Agent —— SDK 1.x 正确转发 context 字段
-      // token 同时放在 context（中间件读）和 config.configurable（工具读）
+      // LangGraph 0.6.0+ 禁止同时传 configurable 和 context，统一用 context
       const streamResponse = client.runs.stream(threadId.value, assistantId, {
         input: {
           messages: [{ type: 'human', content: text }],
         },
         config: {
           recursion_limit: 100,
-          configurable: { user_token: context.user_token },
         },
         context,
         streamMode: ['messages', 'values'],
@@ -230,7 +229,6 @@ export function useLangGraph(options: UseLangGraphOptions) {
         command: { resume: value },
         config: {
           recursion_limit: 100,
-          configurable: { user_token: _currentContext?.user_token || '' },
         },
         context: _currentContext || undefined,
         streamMode: ['messages', 'values'],
