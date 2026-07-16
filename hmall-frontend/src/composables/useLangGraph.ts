@@ -48,6 +48,7 @@ export function useLangGraph(options: UseLangGraphOptions) {
   const interruptData: Ref<InterruptData | null> = ref(null)
   const threadId: Ref<string | null> = ref(null)
   const error: Ref<string | null> = ref(null)
+  let _currentToken = ''  // 缓存当前 token，供 resume 复用
 
   // ==================== 内部方法 ====================
 
@@ -129,6 +130,7 @@ export function useLangGraph(options: UseLangGraphOptions) {
 
     error.value = null
     isLoading.value = true
+    _currentToken = context.user_token  // 缓存 token，供 resume 复用
 
     // 添加用户消息到 UI
     messages.value.push({
@@ -146,11 +148,16 @@ export function useLangGraph(options: UseLangGraphOptions) {
       }
 
       // 流式调用 Agent
+      // 注意：token 需要同时放在 context（中间件读）和 config.configurable（工具读）
+      // context 存到 State，中间件可访问；configurable 原样传到工具的 RunnableConfig
       const streamResponse = client.runs.stream(threadId.value, assistantId, {
         input: {
           messages: [{ type: 'human', content: text }],
         },
-        config: { recursion_limit: 100 },
+        config: {
+          recursion_limit: 100,
+          configurable: { user_token: context.user_token },
+        },
         context,
         streamMode: ['messages', 'values'],
       })
@@ -192,7 +199,10 @@ export function useLangGraph(options: UseLangGraphOptions) {
     try {
       const streamResponse = client.runs.stream(threadId.value, assistantId, {
         command: { resume: value },
-        config: { recursion_limit: 100 },
+        config: {
+          recursion_limit: 100,
+          configurable: { user_token: _currentToken },
+        },
         streamMode: ['messages', 'values'],
       })
 
@@ -247,6 +257,7 @@ export function useLangGraph(options: UseLangGraphOptions) {
     messages.value = []
     interruptData.value = null
     error.value = null
+    _currentToken = ''
   }
 
   return {

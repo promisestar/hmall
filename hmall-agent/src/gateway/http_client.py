@@ -151,22 +151,38 @@ def extract_token_from_config(config) -> str:
     """从 LangGraph RunnableConfig 中提取 user_token。
 
     LangGraph 在调用工具时自动注入 config 参数（不展示给 LLM）。
-    context_schema 中的 user_token 可通过 config 获取。
+    token 来源优先级：
+    1. config.configurable.user_token（前端通过 config.configurable 传入，LangGraph 原样透传）
+    2. config.configurable.context.user_token（中间件注入等场景）
+    3. config.runtime.context.user_token（DeepAgents 运行时上下文）
     """
     if not config:
         return ""
 
-    # 尝试从 configurable.context 获取
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    context = configurable.get("context")
-    if context and hasattr(context, "user_token"):
-        return context.user_token or ""
+    if not isinstance(config, dict):
+        return ""
 
-    # 尝试从 runtime 获取
+    # 1. config.configurable 中的 user_token（前端传入，最可靠）
+    configurable = config.get("configurable", {})
+    if isinstance(configurable, dict):
+        token = configurable.get("user_token", "")
+        if token:
+            return token
+
+    # 2. configurable.context.user_token（中间件/状态注入）
+    context = configurable.get("context") if isinstance(configurable, dict) else None
+    if context and hasattr(context, "user_token"):
+        token = context.user_token
+        if token:
+            return token
+
+    # 3. runtime.context.user_token（DeepAgents 运行时上下文）
     runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
     context = runtime.get("context")
     if context and hasattr(context, "user_token"):
-        return context.user_token or ""
+        token = context.user_token
+        if token:
+            return token
 
     return ""
 
