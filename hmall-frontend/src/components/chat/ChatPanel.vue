@@ -114,18 +114,21 @@
         </div>
       </div>
 
-      <!-- 快捷操作 -->
-      <div v-if="shortcuts.length > 0 && messages.length === 0" class="px-6 py-3 bg-white border-b border-gray-200">
-        <p class="text-[12px] text-gray-500 mb-2.5">快捷操作</p>
-        <div class="flex flex-wrap gap-2">
+      <!-- 快捷操作卡片（欢迎区，首次进入时显示） -->
+      <div v-if="actionCards.length > 0 && messages.length === 0" class="px-6 py-4 bg-white border-b border-gray-100">
+        <p class="text-[12px] text-gray-400 mb-3 font-medium">试试这些操作</p>
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
           <button
-            v-for="shortcut in shortcuts"
-            :key="shortcut"
-            @click="inputText = shortcut; handleSend()"
-            class="px-3.5 py-1.5 text-[13px] rounded-lg border transition-all duration-200"
-            :class="theme.shortcutClass"
+            v-for="card in actionCards"
+            :key="card.text"
+            @click="handleQuickAction(card.text)"
+            class="quick-card flex flex-col items-center gap-2 px-3 py-3.5 rounded-xl border border-gray-150 bg-gray-50/50 text-gray-600 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group"
+            :class="theme.cardHoverClass"
           >
-            {{ shortcut }}
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center transition-colors duration-200" :class="theme.cardIconBgClass">
+              <svg class="w-5 h-5 text-gray-500 group-hover:text-current transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" v-html="card.iconSvg"></svg>
+            </div>
+            <span class="text-[12px] font-medium whitespace-nowrap group-hover:text-current transition-colors">{{ card.label }}</span>
           </button>
         </div>
       </div>
@@ -162,27 +165,45 @@
       </div>
 
       <!-- 输入区域 -->
-      <div class="border-t border-gray-200 bg-white px-6 py-3.5">
-        <div class="max-w-4xl mx-auto flex items-end gap-3">
-          <el-input
-            v-model="inputText"
-            type="textarea"
-            :autosize="{ minRows: 1, maxRows: 4 }"
-            :placeholder="inputPlaceholder"
-            class="flex-1 chat-input"
-            @keyup.enter.exact.prevent="handleSend"
-            :disabled="isLoading || !!interruptData"
-          />
-          <button
-            @click="handleSend"
-            :disabled="!inputText.trim() || isLoading || !!interruptData"
-            class="flex-shrink-0 w-11 h-11 rounded-xl text-white flex items-center justify-center transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-            :class="theme.sendBtnClass"
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          </button>
+      <div class="border-t border-gray-200 bg-white px-6 py-3">
+        <div class="max-w-4xl mx-auto">
+          <!-- 快捷操作卡片（输入框上方，始终可见） -->
+          <div v-if="actionCards.length > 0" class="flex items-center gap-2 mb-3 overflow-x-auto scrollbar-hide pb-0.5">
+            <button
+              v-for="card in actionCards"
+              :key="'input-' + card.text"
+              @click="handleQuickAction(card.text)"
+              :disabled="isLoading || !!interruptData"
+              class="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-50/80 text-[12px] text-gray-600 hover:shadow-sm hover:-translate-y-px disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 group"
+              :class="theme.cardHoverClass"
+            >
+              <svg class="w-3.5 h-3.5 flex-shrink-0 text-gray-400 group-hover:text-current transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" v-html="card.iconSvg"></svg>
+              <span class="whitespace-nowrap group-hover:text-current transition-colors">{{ card.label }}</span>
+            </button>
+          </div>
+
+          <!-- 输入框 -->
+          <div class="flex items-end gap-3">
+            <el-input
+              v-model="inputText"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 4 }"
+              :placeholder="inputPlaceholder"
+              class="flex-1 chat-input"
+              @keyup.enter.exact.prevent="handleSend"
+              :disabled="isLoading || !!interruptData"
+            />
+            <button
+              @click="handleSend"
+              :disabled="!inputText.trim() || isLoading || !!interruptData"
+              class="flex-shrink-0 w-11 h-11 rounded-xl text-white flex items-center justify-center transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              :class="theme.sendBtnClass"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -203,7 +224,15 @@ interface Theme {
   welcomeBgClass: string
   sendBtnClass: string
   shortcutClass: string
+  cardHoverClass: string
+  cardIconBgClass: string
   indicatorClass: string
+}
+
+interface QuickActionCard {
+  text: string
+  label: string
+  iconSvg: string
 }
 
 const props = withDefaults(defineProps<{
@@ -232,6 +261,8 @@ const theme = computed<Theme>(() => {
       welcomeBgClass: 'bg-gradient-to-br from-[#FF6B35] to-[#E4393C]',
       sendBtnClass: 'bg-gradient-to-br from-[#E4393C] to-[#C81623] hover:shadow-lg hover:shadow-red-200',
       shortcutClass: 'text-[#E4393C] bg-red-50 border-red-200 hover:border-[#E4393C] hover:bg-red-100',
+      cardHoverClass: 'hover:border-[#E4393C]/30 hover:text-[#E4393C] hover:bg-red-50/50',
+      cardIconBgClass: 'bg-red-50 group-hover:bg-red-100',
       indicatorClass: 'bg-[#E4393C]',
     }
   }
@@ -242,9 +273,65 @@ const theme = computed<Theme>(() => {
     welcomeBgClass: 'bg-gradient-to-br from-[#304156] to-[#409EFF]',
     sendBtnClass: 'bg-gradient-to-br from-[#304156] to-[#409EFF] hover:shadow-lg hover:shadow-blue-200',
     shortcutClass: 'text-[#304156] bg-[#f0f2f5] border-gray-200 hover:border-[#409EFF] hover:text-[#409EFF]',
+    cardHoverClass: 'hover:border-[#409EFF]/30 hover:text-[#304156] hover:bg-blue-50/50',
+    cardIconBgClass: 'bg-blue-50 group-hover:bg-blue-100',
     indicatorClass: 'bg-[#409EFF]',
   }
 })
+
+// ==================== 快捷操作卡片定义 ====================
+
+// 卡片图标 SVG（内联路径片段，通过 v-html 注入到 <svg> 中）
+const ICONS: Record<string, string> = {
+  cart: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" />',
+  order: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 5h6m-6 4h.01M9 13h.01M13 9h.01M13 13h.01" />',
+  flash: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />',
+  search: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />',
+  recommend: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l1 8h-8l1-8zM13 19l1-8h-8l1 8zM21 12l-1 8h-8l1-8z" />',
+  report: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />',
+  users: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />',
+  package: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />',
+}
+
+// C 端（customer_agent）快捷操作卡片
+const CUSTOMER_CARDS: QuickActionCard[] = [
+  { text: '查看购物车', label: '购物车', iconSvg: ICONS.cart },
+  { text: '查看订单', label: '我的订单', iconSvg: ICONS.order },
+  { text: '查看秒杀', label: '秒杀活动', iconSvg: ICONS.flash },
+  { text: '猜你喜欢', label: '猜你喜欢', iconSvg: ICONS.recommend },
+  { text: '商品列表', label: '浏览商品', iconSvg: ICONS.package },
+]
+
+// 管理端（admin_agent）快捷操作卡片
+const ADMIN_CARDS: QuickActionCard[] = [
+  { text: '运营日报', label: '运营日报', iconSvg: ICONS.report },
+  { text: '查看订单', label: '查询订单', iconSvg: ICONS.order },
+  { text: '商品列表', label: '商品管理', iconSvg: ICONS.package },
+  { text: '秒杀活动', label: '秒杀活动', iconSvg: ICONS.flash },
+  { text: '用户列表', label: '用户列表', iconSvg: ICONS.users },
+]
+
+// 根据 agentType 自动选择卡片
+const actionCards = computed<QuickActionCard[]>(() => {
+  // 优先使用外部传入的 shortcuts，兼容旧 API
+  if (props.shortcuts.length > 0) {
+    return props.shortcuts.map(s => {
+      // 尝试匹配内置图标
+      let iconSvg = ICONS.package
+      if (s.includes('购物车')) iconSvg = ICONS.cart
+      else if (s.includes('订单')) iconSvg = ICONS.order
+      else if (s.includes('秒杀')) iconSvg = ICONS.flash
+      else if (s.includes('推荐') || s.includes('猜')) iconSvg = ICONS.recommend
+      else if (s.includes('日报')) iconSvg = ICONS.report
+      else if (s.includes('用户')) iconSvg = ICONS.users
+      else if (s.includes('商品') || s.includes('列表')) iconSvg = ICONS.package
+      return { text: s, label: s, iconSvg }
+    })
+  }
+  return props.agentType === 'customer' ? CUSTOMER_CARDS : ADMIN_CARDS
+})
+
+// ==================== 状态与核心逻辑 ====================
 
 const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
@@ -277,6 +364,15 @@ async function handleSend() {
   if (!text || isLoading.value || interruptData.value) return
 
   inputText.value = ''
+  await sendMessage(text, {
+    agent_type: props.agentType,
+    user_token: sessionStorage.getItem(props.tokenKey) || '',
+  })
+}
+
+// 快捷卡片点击：直接发送预设文本（L1 正则路由捕获）
+async function handleQuickAction(text: string) {
+  if (isLoading.value || interruptData.value) return
   await sendMessage(text, {
     agent_type: props.agentType,
     user_token: sessionStorage.getItem(props.tokenKey) || '',
@@ -368,7 +464,21 @@ watch(
 </script>
 
 <style scoped>
-:deep(.chat-input .el-textarea__inner) {
+/* 水平滚动条隐藏（输入区上方卡片 row） */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* 快捷操作卡片 hover 增强 */
+.quick-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+::deep(.chat-input .el-textarea__inner) {
   border: 1px solid #e5e7eb;
   box-shadow: none;
   background: #f9fafb;
@@ -379,7 +489,7 @@ watch(
   line-height: 1.6;
 }
 
-:deep(.chat-input .el-textarea__inner:focus) {
+::deep(.chat-input .el-textarea__inner:focus) {
   border-color: #d1d5db;
   box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.04);
 }

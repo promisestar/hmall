@@ -4,7 +4,8 @@
       assistant-id="customer_agent"
       title="枫叶客服"
       welcome-text="我可以帮您浏览商品、秒杀下单、管理购物车和订单"
-      input-placeholder="输入消息..."
+      input-placeholder="输入消息，或点击下方快捷卡片..."
+      :shortcuts="shortcuts"
       token-key="token"
       agent-type="customer"
       show-back
@@ -18,6 +19,15 @@ import { useRouter } from 'vue-router'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 
 const router = useRouter()
+
+// C 端快捷操作（文本会被 L1 正则路由捕获，<5ms 响应）
+const shortcuts = [
+  '查看购物车',
+  '查看订单',
+  '查看秒杀',
+  '猜你喜欢',
+  '商品列表',
+]
 
 function goBack() {
   router.back()
