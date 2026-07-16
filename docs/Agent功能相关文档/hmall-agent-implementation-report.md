@@ -1,8 +1,10 @@
 # hmall Agent 智能助手实现说明文档
 
-> 版本：v1.0  
-> 日期：2026-07-15  
+> 版本：v1.1  
+> 日期：2026-07-16  
 > 设计文档：`docs/Agent功能相关文档/hmall-agent-design.md`
+>
+> v1.1 变更：SDK 升级至 1.x、前端重构为独立页面 + Markdown 渲染、修复 Vue 响应式断链和文字溢出 bug、移除 configurable 改用 context-only
 
 ---
 
@@ -21,10 +23,11 @@
 | Agent 后端测试新增 | 2 | 正则路由测试 + 格式化函数测试 |
 | Agent 后端文档新增 | 1 | `README.md` |
 | **Agent 后端合计** | **45** | — |
-| 前端 Composable 新增 | 1 | `src/composables/useLangGraph.ts` |
-| 前端组件新增 | 4 | `MessageBubble.vue` + `InterruptActions.vue` + `ChatWidget.vue` + `AdminChat.vue` |
-| 前端修改 | 3 | `package.json`（+`@langchain/langgraph-sdk`）+ `PortalLayout.vue`（+ChatWidget）+ `AdminLayout.vue`（+AdminChat） |
-| **前端合计** | **8** | — |
+| 前端 Composable 修改 | 1 | `src/composables/useLangGraph.ts`（SDK 1.x 原生 API + context-only + 响应式修复） |
+| 前端组件新增 | 3 | `ChatPanel.vue`（可复用全页对话） + `portal/ChatPage.vue` + `admin/ChatPage.vue` |
+| 前端组件修改 | 3 | `MessageBubble.vue`（Markdown 渲染 + 溢出修复） + `ChatWidget.vue`（简化为路由入口） + `AdminChat.vue`（简化为路由入口） |
+| 前端修改 | 4 | `package.json`（SDK ^1.0.3 + marked） + `router/index.ts`（+2 路由） + `PortalLayout.vue`（+AI客服链接） + `AdminLayout.vue`（+面包屑） |
+| **前端合计** | **11** | — |
 | **总计改动** | **53** | — |
 
 ---
@@ -678,27 +681,49 @@ def _status_text(status, mapping) -> str:
 
 ### 4.1 文件变更清单
 
-#### 新增文件（5 个）
+#### 新增文件（4 个）
 
 | 文件 | 说明 |
 |------|------|
-| `src/composables/useLangGraph.ts` | LangGraph SDK 封装 Composable |
-| `src/components/chat/MessageBubble.vue` | 消息气泡组件 |
-| `src/components/chat/InterruptActions.vue` | interrupt 确认卡片组件 |
-| `src/components/chat/ChatWidget.vue` | C 端浮动对话组件 |
-| `src/components/chat/AdminChat.vue` | 管理端对话面板组件 |
+| `src/components/chat/ChatPanel.vue` | 可复用全页对话组件（props 配置主题/标题/快捷操作/token） |
+| `src/views/portal/ChatPage.vue` | C 端独立聊天页（全屏，带返回按钮） |
+| `src/views/admin/ChatPage.vue` | 管理端聊天页（嵌入 AdminLayout，含快捷操作） |
+| `src/components/chat/MessageBubble.vue` | 消息气泡组件（重写：Markdown 渲染 + 溢出修复） |
 
-#### 修改文件（3 个）
+> `InterruptActions.vue` 保持不变。
+
+#### 修改文件（5 个）
 
 | 文件 | 改动 |
 |------|------|
-| `package.json` | 新增 `@langchain/langgraph-sdk` 依赖 |
-| `src/views/portal/PortalLayout.vue` | 底部引入 `ChatWidget` 组件 |
-| `src/views/admin/AdminLayout.vue` | header 区域引入 `AdminChat` 组件 |
+| `src/composables/useLangGraph.ts` | SDK 1.x 原生 API；移除 fetch 绕过；context-only（移除 configurable）；处理 messages/complete；error 事件展示错误消息；Vue 响应式修复 |
+| `src/components/chat/ChatWidget.vue` | 简化为浮动按钮 `router-link` → `/portal/chat` |
+| `src/components/chat/AdminChat.vue` | 简化为 header 按钮 `router-link` → `/admin/chat` |
+| `src/views/portal/PortalLayout.vue` | 导航栏增加 "AI 客服" 链接 |
+| `src/views/admin/AdminLayout.vue` | 面包屑标题映射增加 `/admin/chat` |
+| `src/router/index.ts` | 添加 `/portal/chat` 和 `/admin/chat` 路由 |
+| `package.json` | `@langchain/langgraph-sdk` ^0.0.10 → ^1.0.3；新增 `marked` |
 
-### 4.2 useLangGraph Composable（`src/composables/useLangGraph.ts`）
+### 4.2 前端架构
 
-封装 `@langchain/langgraph-sdk` 的 `Client` 类，管理对话状态：
+```
+/portal/chat  →  ChatPage.vue (portal)  →  ChatPanel (customer_agent)
+                                          ├── MessageBubble (Markdown)
+                                          └── InterruptActions
+
+/admin/chat   →  ChatPage.vue (admin)   →  ChatPanel (admin_agent)
+                                          ├── MessageBubble (Markdown)
+                                          ├── InterruptActions
+                                          └── 快捷操作按钮
+
+浮动入口：
+  ChatWidget.vue (右下角浮动按钮) → router-link → /portal/chat
+  AdminChat.vue (header 按钮)     → router-link → /admin/chat
+```
+
+### 4.3 useLangGraph Composable（`src/composables/useLangGraph.ts`）
+
+封装 `@langchain/langgraph-sdk` 1.x 的 `Client` 类，管理对话状态：
 
 | 响应式状态 | 类型 | 说明 |
 |-----------|------|------|
@@ -715,88 +740,150 @@ def _status_text(status, mapping) -> str:
 | `rejectInterrupt()` | 拒绝中断（`command: {goto: "__end__"}`） |
 | `clearHistory()` | 清除对话（删除 Thread + 清空消息） |
 
-**SSE 流处理**：
+**SSE 事件处理**：
 
 | 事件 | 处理逻辑 |
 |------|---------|
-| `messages/partial` | AI 消息增量更新（流式追加效果） |
+| `messages/partial` | AI 消息增量更新（流式 token 追加效果） |
+| `messages/complete` | AI 消息最终完整内容（非流式或流式结束后的完整消息） |
 | `values` | 检测 `__interrupt__`，解析为 `InterruptData` |
-| `error` | 设置 error 状态，中断流 |
+| `error` | 在 UI 中展示错误消息气泡（`❌ {message}`），中断流 |
+| `messages/metadata` | 忽略（消息元数据，不影响显示） |
+
+**SDK 1.x 关键改进**：
+
+| 改进点 | 说明 |
+|--------|------|
+| `context` 转发 | SDK 1.x `runs.stream()` 正确转发 `context` 字段到请求体 |
+| `command` 转发 | SDK 1.x `runs.stream()` 正确转发 `command` 字段（interrupt 恢复） |
+| context-only | 移除 `config.configurable`（LangGraph 0.6.0+ 禁止 configurable 和 context 共存） |
+| `messages/complete` | 同时处理 `messages/partial` 和 `messages/complete`，避免非流式消息丢失 |
+
+**Vue 响应式修复**：
+
+增量更新通过响应式数组索引修改，而非直接修改局部变量：
+
+```typescript
+// ❌ 错误：直接修改局部变量，绕过 Vue Proxy，UI 不更新
+aiMessage.content = content
+
+// ✅ 正确：通过响应式数组索引修改，经过 Vue Proxy
+const idx = messages.value.findIndex(m => m.id === msgId)
+if (idx !== -1) {
+  messages.value[idx].content = content
+}
+```
 
 **Agent 选择**：通过 `options.assistantId` 指定 `customer_agent` 或 `admin_agent`。
 
-### 4.3 MessageBubble 组件（`src/components/chat/MessageBubble.vue`）
+### 4.4 MessageBubble 组件（`src/components/chat/MessageBubble.vue`）
 
 | 特性 | 说明 |
 |------|------|
-| 消息对齐 | human 右对齐，AI 左对齐 |
-| 样式 | human：红色渐变背景（`#E4393C`→`#C81623`）；AI：白色背景 + AI 头像 |
-| 流式效果 | `messages/partial` 增量更新 content，实时渲染 |
-| 加载动画 | AI 消息加载时显示三点跳动动画 |
-| HTML 转义 | 转义 `&<>` 防止 XSS，`\n` → `<br>` 保留换行 |
-| 动画 | 消息出现时 `messageAppear` 过渡（0.3s） |
+| AI 消息渲染 | 使用 `marked` 库渲染 Markdown（GFM + breaks），支持标题/列表/表格/代码块/引用/链接 |
+| 人类消息 | 纯文本（`whitespace-pre-wrap`） |
+| 溢出修复 | `min-w-0 overflow-hidden overflow-wrap:anywhere`（三层修复） |
+| Markdown 样式 | 暗色代码块（`#1e1e2e`）、表格边框、引用竖线、链接蓝色 |
+| 流式效果 | 最后一条 AI 消息 + `isLoading` 时显示三点跳动动画 |
+| 消息动画 | `messageAppear` 过渡（0.3s） |
 
-### 4.4 InterruptActions 组件（`src/components/chat/InterruptActions.vue`）
+**溢出 bug 修复说明**：
+
+| 层级 | CSS | 作用 |
+|------|-----|------|
+| 气泡容器 | `overflow-hidden; overflow-wrap: break-word` | 防止内容超出气泡边界 |
+| AI 内容区 | `flex-1 min-w-0 overflow-hidden` | flex 子项必须 `min-w-0` 否则不会收缩 |
+| Markdown body | `word-wrap: break-word; overflow-wrap: anywhere` | 处理长 URL/商品 ID 等无空格长文本 |
+
+### 4.5 ChatPanel 组件（`src/components/chat/ChatPanel.vue`）
+
+可复用全页对话组件，通过 props 配置不同 Agent：
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `assistantId` | `'customer_agent' \| 'admin_agent'` | Agent ID |
+| `title` | `string` | 对话标题 |
+| `welcomeText` | `string` | 欢迎引导文字 |
+| `inputPlaceholder` | `string` | 输入框占位文字 |
+| `shortcuts` | `string[]` | 快捷操作按钮文本列表 |
+| `tokenKey` | `string` | sessionStorage 中的 token key |
+| `agentType` | `'customer' \| 'admin'` | Agent 类型（影响主题色） |
+| `showBack` | `boolean` | 是否显示返回按钮 |
 
 | 特性 | 说明 |
 |------|------|
-| 类型支持 | `confirmation` / `field_selection` / `value_input` / `address_input` |
-| 按钮文本 | 根据 `type` 自动切换（确认/输入） |
-| 样式 | 琥珀色渐变背景 + 脉冲动画（`pulse-soft`） |
-| 事件 | `@confirm` / `@cancel` |
-| 提示 | 显示 `expected_response` 引导用户回复 |
+| 布局 | 全屏 flex-col（header + 消息区 + 输入区） |
+| 主题色 | customer：红色 `#E4393C`；admin：深蓝 `#304156` |
+| 消息区 | `max-w-4xl mx-auto` 居中，`overflow-y-auto` 滚动 |
+| 自动滚动 | `watch` messages 长度和最后一条消息 content 变化 |
+| 清空确认 | `ElMessageBox.confirm` 二次确认 |
+| 快捷操作 | 空对话时展示快捷按钮，点击自动发送 |
 
-### 4.5 ChatWidget 组件（C 端，`src/components/chat/ChatWidget.vue`）
+### 4.6 ChatWidget 组件（C 端入口，`src/components/chat/ChatWidget.vue`）
 
 | 特性 | 说明 |
 |------|------|
 | 触发方式 | 右下角浮动按钮（玻璃拟态 + 在线指示器） |
-| 对话窗口 | `el-drawer` 右侧滑出，400px 宽 |
-| 主题色 | 红色 `#E4393C`（匹配 PortalLayout） |
-| 欢迎消息 | 空对话时展示 AI 头像 + 功能引导 |
-| Token 来源 | `sessionStorage.getItem('token')`（C 端 JWT） |
-| Agent | `customer_agent` |
-| 清空确认 | `ElMessageBox.confirm` 二次确认 |
-| 自动滚动 | `watch` messages 长度和最后一条消息 content 变化 |
+| 行为 | `router-link` 跳转 `/portal/chat`（不再展开抽屉） |
 
-### 4.6 AdminChat 组件（管理端，`src/components/chat/AdminChat.vue`）
+### 4.7 AdminChat 组件（管理端入口，`src/components/chat/AdminChat.vue`）
 
 | 特性 | 说明 |
 |------|------|
 | 触发方式 | header 区域 "AI助手" 按钮 |
-| 对话窗口 | `el-drawer` 右侧滑出，420px 宽 |
-| 主题色 | 深蓝 `#304156`（匹配 AdminLayout） |
-| 快捷操作 | 空对话时展示 5 个快捷按钮（运营日报/查看订单/商品列表/秒杀活动/用户列表） |
-| Token 来源 | `sessionStorage.getItem('admin-token')`（管理端 JWT） |
-| Agent | `admin_agent` |
-| 状态提示 | "只读模式 · 在线" |
+| 行为 | `router-link` 跳转 `/admin/chat`（不再展开抽屉） |
 
-### 4.7 布局集成
+### 4.8 路由配置
+
+```typescript
+// src/router/index.ts
+// C 端聊天页（独立全屏，不嵌套在 PortalLayout 中）
+{
+  path: '/portal/chat',
+  name: 'Chat',
+  component: () => import('@/views/portal/ChatPage.vue'),
+},
+
+// 管理端聊天页（嵌套在 AdminLayout 中）
+{
+  path: '/admin',
+  component: () => import('@/views/admin/AdminLayout.vue'),
+  children: [
+    {
+      path: 'chat',
+      name: 'AdminChat',
+      component: () => import('@/views/admin/ChatPage.vue'),
+    },
+    // ... 其他 admin 子路由
+  ],
+}
+```
+
+### 4.9 布局集成
 
 #### PortalLayout.vue
 
-```vue
-<!-- 在 </footer> 后、</div> 前引入 -->
-<ChatWidget />
+导航栏增加 "AI 客服" 链接，底部保留浮动按钮入口：
 
-<script setup lang="ts">
-import ChatWidget from '@/components/chat/ChatWidget.vue'
-</script>
+```vue
+<router-link to="/portal/chat" class="hover:text-white transition-colors text-[#FF6B35] font-medium">
+  AI 客服
+</router-link>
+
+<!-- 底部浮动按钮 -->
+<ChatWidget />
 ```
 
 #### AdminLayout.vue
 
+header 区域保留 "AI助手" 按钮入口，面包屑增加 `/admin/chat` 标题：
+
 ```vue
-<!-- 在 header 的用户信息区域引入 -->
 <div class="flex items-center gap-3">
   <AdminChat />
   <el-tag size="small" type="success">在线</el-tag>
   ...
 </div>
-
-<script setup lang="ts">
-import AdminChat from '@/components/chat/AdminChat.vue'
-</script>
 ```
 
 ---
@@ -856,8 +943,11 @@ RAG_SPACE_ID=hmall_space
 ### 5.3 前端依赖
 
 ```json
-"@langchain/langgraph-sdk": "^0.0.10"
+"@langchain/langgraph-sdk": "^1.0.3",
+"marked": "^15.0.0"
 ```
+
+> **SDK 升级说明**：v1.0 使用 SDK 0.0.10，其 `runs.stream()` 不转发 `context`/`command` 字段，曾用 `fetch` 绕过。v1.1 升级至 SDK 1.x（实际安装 1.9.27），原生 `runs.stream()` 正确转发所有字段，移除了 fetch 绕过代码。同时移除了 `config.configurable`（LangGraph 0.6.0+ 禁止 configurable 和 context 共存），`user_token` 统一通过 `context` 传递。
 
 ### 5.4 关键配置说明
 
@@ -986,8 +1076,10 @@ npm run dev                          # Vite dev server
 - [ ] 访问 `http://localhost:8090/ui` → LangGraph Studio 可加载
 - [ ] `GET /assistants/search` → 返回 customer_agent 和 admin_agent
 - [ ] 前端 `npm run dev` 启动无错误
-- [ ] 前端页面右下角出现 AI 客服浮动按钮
-- [ ] 管理后台 header 出现 "AI助手" 按钮
+- [ ] 前端页面右下角出现 AI 客服浮动按钮，点击跳转 `/portal/chat` 全屏对话页
+- [ ] 管理后台 header 出现 "AI助手" 按钮，点击跳转 `/admin/chat` 对话页
+- [ ] AI 消息以 Markdown 格式渲染（标题/列表/表格/代码块正常显示）
+- [ ] 长文本/商品 ID 不超出消息气泡边界
 
 ---
 
@@ -1041,6 +1133,19 @@ npm run dev                          # Vite dev server
 
 **后续优化**：工具内实现轮询逻辑（类似前端 `pollSeckillResult`），或前端收到 pending 后自动轮询 `GET /seckill/result/{relationId}`。
 
+### 8.7 前端历史版本问题已修复（v1.1）
+
+以下问题在 v1.1 中已修复，记录于此供参考：
+
+| 问题 | 根因 | 修复方案 |
+|------|------|---------|
+| Agent 消息无法显示 | SDK 0.0.10 的 `runs.stream()` 不转发 `context`/`command` 字段 | 升级至 SDK 1.x，原生 API 正确转发 |
+| 流式增量内容不更新 | Vue 响应式断链：`aiMessage.content = content` 绕过 Proxy | 通过 `messages.value[idx].content` 修改，经过 Vue Proxy |
+| 文字超出消息气泡 | flex 子项缺少 `min-w-0`，长文本无 `overflow-wrap: anywhere` | 三层 CSS 修复（容器 + flex 子项 + markdown body） |
+| `configurable` 与 `context` 冲突 | LangGraph 0.6.0+ 禁止同时传递 | 移除 `config.configurable`，`user_token` 统一走 `context` |
+| 非流式消息丢失 | 只处理 `messages/partial`，不处理 `messages/complete` | 同时处理两种事件 |
+| error 事件无 UI 反馈 | error 事件仅设置 `error.value`，不推送消息 | 在 `messages` 中展示 `❌ {错误信息}` 气泡 |
+
 ---
 
 ## 九、与本仓库其他文档的关联
@@ -1055,10 +1160,14 @@ npm run dev                          # Vite dev server
 | `hmall-agent/src/agents/customer/tools.py` | **工具实现**：CustomerAgent 18 个 @tool 工具 |
 | `hmall-agent/src/agents/admin/tools.py` | **工具实现**：AdminAgent 10 个只读工具 + 运营日报编排 |
 | `hmall-agent/src/middleware/regex_shortcut.py` | **中间件**：L1 正则快捷路由 |
-| `hmall-frontend/src/composables/useLangGraph.ts` | **前端封装**：LangGraph SDK Composable |
-| `hmall-frontend/src/components/chat/ChatWidget.vue` | **前端组件**：C 端浮动对话 |
-| `hmall-frontend/src/components/chat/AdminChat.vue` | **前端组件**：管理端对话面板 |
+| `hmall-frontend/src/composables/useLangGraph.ts` | **前端封装**：LangGraph SDK 1.x Composable（context-only + 响应式修复） |
+| `hmall-frontend/src/components/chat/ChatPanel.vue` | **前端组件**：可复用全页对话面板 |
+| `hmall-frontend/src/components/chat/MessageBubble.vue` | **前端组件**：消息气泡（Markdown 渲染 + 溢出修复） |
+| `hmall-frontend/src/components/chat/ChatWidget.vue` | **前端组件**：C 端浮动入口（路由跳转） |
+| `hmall-frontend/src/components/chat/AdminChat.vue` | **前端组件**：管理端入口（路由跳转） |
+| `hmall-frontend/src/views/portal/ChatPage.vue` | **前端页面**：C 端独立聊天页 |
+| `hmall-frontend/src/views/admin/ChatPage.vue` | **前端页面**：管理端聊天页 |
 
 ---
 
-> **实现完成度**：三级路由架构（正则→interrupt→LLM）全部实现，包含 CustomerAgent（18 工具）、AdminAgent（10 只读工具 + 日报编排）、双 JWT 认证、Redis Checkpoint 对话记忆、Vue 3 前端集成（4 组件 + 1 Composable）等完整链路。RAG 知识库、JWT 本地验证、LLM 降级文案为后续优化项。
+> **实现完成度**：三级路由架构（正则→interrupt→LLM）全部实现，包含 CustomerAgent（18 工具）、AdminAgent（10 只读工具 + 日报编排）、双 JWT 认证、Redis Checkpoint 对话记忆、Vue 3 前端集成（独立全页对话 + Markdown 渲染 + SDK 1.x 原生 API）等完整链路。RAG 知识库、JWT 本地验证、LLM 降级文案为后续优化项。

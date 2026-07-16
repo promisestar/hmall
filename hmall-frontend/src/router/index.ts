@@ -83,6 +83,11 @@ const router = createRouter({
       component: () => import('@/views/portal/PaySuccess.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/portal/chat',
+      name: 'Chat',
+      component: () => import('@/views/portal/ChatPage.vue'),
+    },
     // 管理后台登录页（不进入 AdminLayout）
     {
       path: '/admin/login',
@@ -96,6 +101,11 @@ const router = createRouter({
       redirect: '/admin/dashboard',
       meta: { requiresAdmin: true },
       children: [
+        {
+          path: 'chat',
+          name: 'AdminChat',
+          component: () => import('@/views/admin/ChatPage.vue'),
+        },
         {
           path: 'dashboard',
           name: 'Dashboard',

@@ -1,7 +1,9 @@
 # hmall Agent 智能助手设计文档
 
-> 版本：v2.0  
-> 日期：2026-07-15  
+> 版本：v2.1  
+> 日期：2026-07-16  
+> 
+> v2.1 变更：SDK 升级至 1.x、前端重构为独立页面 + Markdown 渲染、移除 configurable 改用 context-only
 
 ---
 
@@ -1085,6 +1087,8 @@ class Context:
 
 ### 8.2 submit() 请求体结构
 
+> **注意**：LangGraph 0.6.0+ 禁止同时传递 `configurable` 和 `context`，统一使用 `context` 传递认证信息。`user_token` 仅放在 `context` 中，后端工具通过 `config.runtime.context.user_token` 获取。
+
 ```json
 {
   "input": {
@@ -1116,6 +1120,8 @@ class Context:
 | `context.enable_rag` | `boolean` | RAG 开关 |
 | `command.resume` | `any` | 中断恢复时传入的确认值 |
 | `command.goto` | `"__end__"` | 强制跳转到图结束 |
+
+> **Token 传递链**（context-only 模式）：前端 `context.user_token` → LangGraph Runtime 创建 `Context(user_token=...)` → `AuthMiddleware` 从 `request.runtime.context` 读取 → 工具内通过 `config.runtime.context.user_token` 获取（`extract_token_from_config` 三层 fallback 的路径 3）。
 
 ### 8.3 自定义路由
 
@@ -1551,14 +1557,40 @@ if __name__ == "__main__":
 
 ### 12.1 技术方案
 
-hmall 前端基于 Vue 3 + Element Plus + Vite，通过 `@langchain/langgraph-sdk` JavaScript 客户端与 LangGraph Server 通信。基于 `Client` 类封装 Vue Composable。
+hmall 前端基于 Vue 3 + Element Plus + Vite，通过 `@langchain/langgraph-sdk` 1.x JavaScript 客户端与 LangGraph Server 通信。基于 `Client` 类封装 Vue Composable。
 
-### 12.2 前端组件
+> **SDK 版本**：`@langchain/langgraph-sdk@^1.0.3`（实际安装 1.9.27）。SDK 1.x 的 `client.runs.stream()` 正确转发 `context` 和 `command` 字段，无需 fetch 绕过。SDK 0.0.10 的 `runs.stream()` 会丢弃这两个字段。
+
+### 12.2 前端组件架构
+
+```
+前端 (Vue 3 + Element Plus)
+│
+├── 路由
+│   ├── /portal/chat  → ChatPage.vue (portal) → ChatPanel (customer_agent)
+│   └── /admin/chat   → ChatPage.vue (admin)  → ChatPanel (admin_agent)
+│
+├── 导航入口
+│   ├── ChatWidget.vue    → C 端浮动按钮 → router-link → /portal/chat
+│   └── AdminChat.vue     → 管理端 header 按钮 → router-link → /admin/chat
+│
+├── 核心组件
+│   ├── ChatPanel.vue     → 可复用全页对话组件（props 配置主题/标题/快捷操作/token）
+│   ├── MessageBubble.vue → 消息气泡（AI 消息 Markdown 渲染 + 人类消息纯文本）
+│   └── InterruptActions.vue → interrupt 确认卡片
+│
+└── Composable
+    └── useLangGraph.ts   → SDK 1.x Client 封装（线程管理 + SSE 流式 + interrupt 恢复）
+```
 
 | 位置 | 组件 | 说明 |
 |------|------|------|
-| C 端右下角 | `ChatWidget.vue` | 浮动按钮 → 展开对话窗口（SSE 流式） |
-| 管理后台 | `AdminChat.vue` | 独立页面或侧边栏（SSE 流式） |
+| C 端独立页面 | `portal/ChatPage.vue` | 全屏对话页，`/portal/chat` 路由，带返回按钮 |
+| 管理端独立页面 | `admin/ChatPage.vue` | 嵌入 AdminLayout 的对话页，`/admin/chat` 路由，含快捷操作 |
+| C 端浮动入口 | `ChatWidget.vue` | 右下角浮动按钮 → `router-link` 跳转 `/portal/chat` |
+| 管理端入口 | `AdminChat.vue` | header "AI助手" 按钮 → `router-link` 跳转 `/admin/chat` |
+| 可复用对话面板 | `ChatPanel.vue` | 全页对话组件，通过 props 配置 agent 类型/主题色/标题/快捷操作 |
+| 消息气泡 | `MessageBubble.vue` | AI 消息用 `marked` 渲染 Markdown；人类消息纯文本；修复溢出 bug |
 
 ### 12.3 Vue Composable 封装
 
@@ -1567,150 +1599,92 @@ hmall 前端基于 Vue 3 + Element Plus + Vite，通过 `@langchain/langgraph-sd
 import { Client } from '@langchain/langgraph-sdk'
 import { ref, type Ref } from 'vue'
 
-export function useLangGraph(deploymentUrl: string, apiKey?: string) {
-  const client = new Client({
-    apiUrl: deploymentUrl,           // http://localhost:8090
-    defaultHeaders: apiKey ? { 'X-Api-Key': apiKey } : {},
-  })
+export function useLangGraph(options: UseLangGraphOptions) {
+  const client = new Client({ apiUrl: options.apiUrl || 'http://localhost:8090' })
 
-  const messages = ref<any[]>([])
+  const messages: Ref<ChatMessage[]> = ref([])
   const isLoading = ref(false)
-  const interruptData = ref<any>(null)
-  const threadId = ref<string | null>(null)
+  const interruptData: Ref<InterruptData | null> = ref(null)
 
-  // 发送消息（流式）
-  async function sendMessage(
-    text: string,
-    context: { agent_type: string; user_token: string; enable_rag?: boolean }
-  ) {
-    isLoading.value = true
-
+  // 发送消息（流式）—— SDK 1.x 正确转发 context 字段
+  async function sendMessage(text: string, context: AgentContext) {
     // 创建或复用 Thread
-    if (!threadId.value) {
-      const thread = await client.threads.create()
-      threadId.value = thread.thread_id
-    }
-
     // 添加用户消息到 UI
-    messages.value.push({ type: 'human', content: text })
+    const streamResponse = client.runs.stream(threadId.value, assistantId, {
+      input: { messages: [{ type: 'human', content: text }] },
+      config: { recursion_limit: 100 },  // 不含 configurable（LangGraph 0.6.0+ 禁止）
+      context,                            // user_token 统一走 context
+      streamMode: ['messages', 'values'],
+    })
+    await _processStream(streamResponse)
+  }
 
-    // 流式调用
-    const streamResponse = client.runs.stream(
-      threadId.value,
-      'customer_agent',  // assistant_id
-      {
-        input: {
-          messages: [{ type: 'human', content: text }],
-        },
-        config: { recursion_limit: 100 },
-        context,
-        streamMode: ['messages', 'values'],
-      }
-    )
-
-    // 处理 SSE 流
+  // 处理 SSE 流
+  async function _processStream(streamResponse: AsyncGenerator<any>) {
     for await (const chunk of streamResponse) {
-      // 处理消息块
-      if (chunk.event === 'messages/partial') {
-        // 更新 AI 消息
-      }
-      // 处理 interrupt
-      if (chunk.event === 'values') {
-        if (chunk.data.__interrupt__) {
-          interruptData.value = chunk.data.__interrupt__
+      // messages/partial + messages/complete → 创建/更新 AI 消息
+      if (chunk.event === 'messages/partial' || chunk.event === 'messages/complete') {
+        for (const msg of chunk.data || []) {
+          if (msg.type !== 'ai') continue
+          const content = _extractContent(msg)
+          if (!content) continue
+          // 通过响应式数组索引更新，确保 Vue 检测到变化
+          const idx = messages.value.findIndex(m => m.id === msg.id)
+          if (idx !== -1) {
+            messages.value[idx].content = content  // 经过 Proxy，Vue 检测到
+          } else {
+            messages.value.push({ id: msg.id, type: 'ai', content, timestamp: Date.now() })
+          }
         }
       }
-    }
-
-    isLoading.value = false
-  }
-
-  // 恢复中断（二次确认）
-  async function resume(value: string) {
-    const streamResponse = client.runs.stream(
-      threadId.value!,
-      'customer_agent',
-      {
-        command: { resume: value },
-        config: { recursion_limit: 100 },
+      // values → 检测 __interrupt__
+      if (chunk.event === 'values' && chunk.data?.__interrupt__) {
+        interruptData.value = parseInterrupt(chunk.data.__interrupt__)
       }
-    )
-    // 处理流...
-    interruptData.value = null
-  }
-
-  // 清除对话
-  async function clearHistory() {
-    if (threadId.value) {
-      await client.threads.delete(threadId.value)
-      threadId.value = null
-      messages.value = []
+      // error → 在 UI 中展示错误消息
+      if (chunk.event === 'error') {
+        messages.value.push({ type: 'ai', content: `❌ ${chunk.data?.message}`, ... })
+        break
+      }
     }
   }
 
-  return { messages, isLoading, interruptData, threadId, sendMessage, resume, clearHistory }
+  // 恢复中断 —— SDK 1.x 正确转发 command + context 字段
+  async function resume(value: string) {
+    client.runs.stream(threadId.value, assistantId, {
+      command: { resume: value },
+      config: { recursion_limit: 100 },
+      context: _currentContext,
+      streamMode: ['messages', 'values'],
+    })
+  }
+
+  return { messages, isLoading, interruptData, threadId, error, sendMessage, resume, rejectInterrupt, clearHistory }
 }
 ```
 
-### 12.4 ChatWidget.vue（C 端浮动对话组件）
+**SSE 事件处理**：
 
-```vue
-<template>
-  <div class="chat-widget">
-    <el-button circle @click="visible = !visible">
-      <el-icon><ChatDotRound /></el-icon>
-    </el-button>
+| 事件 | 处理逻辑 |
+|------|---------|
+| `messages/partial` | AI 消息增量更新（流式 token 追加） |
+| `messages/complete` | AI 消息最终完整内容（非流式或流式结束） |
+| `values` | 检测 `__interrupt__`，解析为 `InterruptData` |
+| `error` | 在 UI 中展示错误消息气泡，中断流 |
+| `messages/metadata` | 忽略（消息元数据，不影响显示） |
 
-    <el-drawer v-model="visible" title="枫叶客服" size="400px">
-      <div class="messages">
-        <div v-for="msg in messages" :key="msg.id" :class="['msg', msg.type]">
-          {{ msg.content }}
-        </div>
-      </div>
+**Vue 响应式注意事项**：增量更新必须通过 `messages.value[idx].content = content` 修改（经过 Vue Proxy），而非直接修改局部变量 `aiMessage.content`（绕过 Proxy，Vue 检测不到变化）。
 
-      <!-- Interrupt 确认卡片 -->
-      <InterruptActions
-        v-if="interruptData"
-        :data="interruptData"
-        @confirm="resume"
-        @cancel="resume"
-      />
+### 12.4 MessageBubble.vue（Markdown 渲染 + 溢出修复）
 
-      <el-input
-        v-model="input"
-        placeholder="输入消息..."
-        @keyup.enter="handleSend"
-      >
-        <template #append>
-          <el-button @click="handleSend" :loading="isLoading">发送</el-button>
-        </template>
-      </el-input>
-    </el-drawer>
-  </div>
-</template>
-
-<script setup lang="ts">
-import { ref } from 'vue'
-import { useLangGraph } from '@/composables/useLangGraph'
-
-const visible = ref(false)
-const input = ref('')
-
-const { messages, isLoading, interruptData, sendMessage, resume } = useLangGraph(
-  'http://localhost:8090'
-)
-
-const handleSend = async () => {
-  if (!input.value.trim()) return
-  const text = input.value
-  input.value = ''
-  await sendMessage(text, {
-    agent_type: 'customer',
-    user_token: localStorage.getItem('hmall_token') || '',
-  })
-}
-</script>
-```
+| 特性 | 说明 |
+|------|------|
+| AI 消息渲染 | 使用 `marked` 库渲染 Markdown（GFM + breaks） |
+| 人类消息 | 纯文本（`whitespace-pre-wrap`） |
+| 溢出修复 | `min-w-0 overflow-hidden overflow-wrap:anywhere`（flex 子项 + 长文本） |
+| Markdown 样式 | 标题/列表/表格/代码块/引用/链接/粗体/斜体/删除线/分割线 |
+| 流式效果 | 最后一条 AI 消息 + `isLoading` 时显示三点跳动动画 |
+| 消息动画 | `messageAppear` 过渡（0.3s） |
 
 ---
 

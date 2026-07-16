@@ -82,6 +82,7 @@ const activeMenu = computed(() => route.path)
 const currentTitle = computed(() => {
   const map: Record<string, string> = {
     '/admin/dashboard': '数据概览',
+    '/admin/chat': 'AI 助手',
     '/admin/items': '商品管理',
     '/admin/orders': '订单管理',
     '/admin/users': '用户管理',

@@ -21,6 +21,9 @@
         </div>
         <div class="flex items-center gap-4">
           <router-link to="/portal/orders" class="hover:text-white transition-colors">我的订单</router-link>
+          <router-link to="/portal/chat" class="hover:text-white transition-colors text-[#FF6B35] font-medium">
+            AI 客服
+          </router-link>
           <a href="#" class="hover:text-white transition-colors">客户服务</a>
           <router-link to="/admin/dashboard" class="text-[#E4393C] hover:text-red-400 transition-colors font-medium">
             管理后台
