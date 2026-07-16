@@ -99,7 +99,12 @@ export function useLangGraph(options: UseLangGraphOptions) {
             }
             messages.value.push(aiMessage)
           } else {
-            aiMessage.content = content
+            // 通过响应式数组索引更新，确保 Vue 检测到变化
+            // 直接修改 aiMessage.content 会绕过 Proxy，导致 UI 不刷新
+            const idx = messages.value.findIndex(m => m.id === msgId)
+            if (idx !== -1) {
+              messages.value[idx].content = content
+            }
           }
         }
       }
