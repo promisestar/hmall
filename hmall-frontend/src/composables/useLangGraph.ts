@@ -18,6 +18,13 @@ export interface ChatMessage {
   timestamp: number
 }
 
+export interface ThreadSummary {
+  thread_id: string
+  title: string
+  updated_at: string
+  preview: string
+}
+
 export interface InterruptData {
   type: string
   message: string
@@ -49,6 +56,8 @@ export function useLangGraph(options: UseLangGraphOptions) {
   const interruptData: Ref<InterruptData | null> = ref(null)
   const threadId: Ref<string | null> = ref(null)
   const error: Ref<string | null> = ref(null)
+  const threads: Ref<ThreadSummary[]> = ref([])
+  const isThreadsLoading = ref(false)
   let _currentContext: AgentContext | null = null  // 缓存当前 context，供 resume 复用
 
   // ==================== 内部方法 ====================
@@ -190,8 +199,9 @@ export function useLangGraph(options: UseLangGraphOptions) {
       })
 
       await _processStream(streamResponse)
+      // 发送后异步刷新会话列表（不阻塞 UI）
+      fetchThreads()
     } catch (e: any) {
-      error.value = e.message || '发送消息失败'
       // 添加错误提示消息
       messages.value.push({
         id: _genId(),
@@ -286,6 +296,128 @@ export function useLangGraph(options: UseLangGraphOptions) {
     interruptData.value = null
     error.value = null
     _currentContext = null
+    await fetchThreads()
+  }
+
+  // ==================== 会话管理 ====================
+
+  /** 从线程状态中提取消息列表 */
+  function _parseMessagesFromState(state: any): ChatMessage[] {
+    const msgs = state?.values?.messages || state?.messages || []
+    if (!Array.isArray(msgs)) return []
+    return msgs
+      .filter((m: any) => m.type === 'human' || m.type === 'ai')
+      .map((m: any) => ({
+        id: m.id || _genId(),
+        type: m.type as 'human' | 'ai',
+        content: _extractContent(m),
+        timestamp: Date.now(),
+      }))
+      .filter((m: ChatMessage) => m.content)
+  }
+
+  /** 从消息列表生成预览文本 */
+  function _getPreview(msgs: ChatMessage[]): string {
+    const first = msgs.find(m => m.type === 'human' || m.type === 'ai')
+    return first ? first.content.slice(0, 40) : '新对话'
+  }
+
+  /** 获取会话列表 */
+  async function fetchThreads() {
+    isThreadsLoading.value = true
+    try {
+      const list = await client.threads.search({
+        limit: 50,
+        offset: 0,
+      })
+      const summaries: ThreadSummary[] = []
+      for (const t of list) {
+        let preview = '新对话'
+        try {
+          const state = await client.threads.getState(t.thread_id)
+          const msgs = _parseMessagesFromState(state)
+          preview = _getPreview(msgs)
+        } catch {
+          // 状态获取失败时使用默认预览
+        }
+        summaries.push({
+          thread_id: t.thread_id,
+          title: preview,
+          updated_at: t.updated_at,
+          preview,
+        })
+      }
+      threads.value = summaries
+    } catch {
+      // 忽略列表获取错误
+    } finally {
+      isThreadsLoading.value = false
+    }
+  }
+
+  /** 切换到已有会话 */
+  async function switchThread(targetThreadId: string) {
+    if (targetThreadId === threadId.value) return
+    if (isLoading.value) return
+
+    threadId.value = targetThreadId
+    messages.value = []
+    interruptData.value = null
+    error.value = null
+
+    try {
+      isLoading.value = true
+      const state = await client.threads.getState(targetThreadId)
+      const msgs = _parseMessagesFromState(state)
+      messages.value = msgs
+
+      // 检查是否有未完成的 interrupt
+      const interrupts = (state as any)?.interrupts
+      if (interrupts && typeof interrupts === 'object') {
+        for (const key of Object.keys(interrupts)) {
+          const arr = interrupts[key]
+          if (Array.isArray(arr) && arr.length > 0) {
+            const value = arr[0]?.value || arr[0]
+            if (typeof value === 'object' && value?.message) {
+              interruptData.value = value as InterruptData
+            } else if (typeof value === 'string') {
+              interruptData.value = { type: 'confirmation', message: value }
+            }
+            break
+          }
+        }
+      }
+    } catch (e: any) {
+      error.value = e.message || '加载会话失败'
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /** 新建会话（清空当前状态，不删除旧会话） */
+  function newConversation() {
+    if (isLoading.value) return
+    threadId.value = null
+    messages.value = []
+    interruptData.value = null
+    error.value = null
+    _currentContext = null
+  }
+
+  /** 删除指定会话 */
+  async function deleteThread(targetThreadId: string) {
+    try {
+      await client.threads.delete(targetThreadId)
+      if (targetThreadId === threadId.value) {
+        threadId.value = null
+        messages.value = []
+        interruptData.value = null
+        _currentContext = null
+      }
+      await fetchThreads()
+    } catch {
+      // 忽略删除错误
+    }
   }
 
   return {
@@ -295,10 +427,16 @@ export function useLangGraph(options: UseLangGraphOptions) {
     interruptData,
     threadId,
     error,
+    threads,
+    isThreadsLoading,
     // 方法
     sendMessage,
     resume,
     rejectInterrupt,
     clearHistory,
+    fetchThreads,
+    switchThread,
+    newConversation,
+    deleteThread,
   }
 }

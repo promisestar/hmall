@@ -1024,7 +1024,87 @@ Agent 图入口 → model_call 被中间件链包裹
 如无 tool_calls → 图结束 → 返回最终消息
 ```
 
-### 7.3 Context Schema 机制
+#### 7.2.1 中间件触发机制
+
+**触发时机**：所有中间件钩在同一个入口点 `awrap_model_call(request, handler)`，由 LangGraph Agent 执行循环统一调度。当图执行到 `model_call` 节点时（即 Agent 准备调用 LLM 推理），中间件链按 `middleware` 列表的顺序依次执行。
+
+```
+Agent 图执行 → model_call 节点 → 中间件链（洋葱模型）→ LLM
+```
+
+**洋葱模型**：中间件像洋葱层一样包裹 LLM 调用。每一层通过调用 `handler(request)` 把控制权传给内层，最内层是 LLM 本身。如果一个中间件**不调用** `handler(request)` 而直接返回，就会"短路"——内层中间件和 LLM 都不会被调用。
+
+```
+        ┌────────────────────────────────┐
+        │  1. AuthMiddleware             │ — 认证 token，注入 user_id
+        │  ┌──────────────────────────┐  │
+        │  │ 2. PermissionMiddleware  │  │ — admin 过滤写工具（9→1）
+        │  │ ┌──────────────────────┐ │  │
+        │  │ │ 3. RegexShortcutMid  │ │  │ — 命中正则 → 直接 return（跳过 LLM）
+        │  │ │  ┌────────────────┐  │ │  │
+        │  │ │  │ 4. SkillsMid   │  │ │  │ — 追加 SKILL.md 到 prompt
+        │  │ │  │  ┌──────────┐  │  │ │  │
+        │  │ │  │  │ LLM 推理  │  │  │ │  │ — 仅当前 4 层都 handler() 后到达
+        │  │ │  │  └──────────┘  │  │  │ │
+        │  │ │  └────────────────┘  │  │  │
+        │  │ └──────────────────────┘  │  │
+        │  └──────────────────────────┘  │
+        └────────────────────────────────┘
+```
+
+**核心代码**：每个中间件通过重写 `AgentMiddleware.awrap_model_call` 控制行为：
+
+```python
+class XxxMiddleware(AgentMiddleware):
+    async def awrap_model_call(self, request: ModelRequest, handler):
+        # 1. 前置处理：修改 request（认证/过滤工具/匹配正则）
+        modified_request = self._do_preprocessing(request)
+
+        # 2. 传给下一层中间件（或 LLM）
+        return await handler(modified_request)
+
+        # 或者短路：不调 handler，直接返回 AIMessage（Regex 命中时）
+        # return AIMessage(content="...结果...")
+```
+
+**各层详细行为**：
+
+| 层序 | 中间件 | 触发条件 | 是否可能跳过 LLM | 行为 |
+|:---:|--------|----------|:---:|------|
+| 1 | **AuthMiddleware** | 始终执行 | ❌ | 从 `request.runtime.context` 读取 `user_token`；验证 JWT（`JWT_VERIFY_LOCAL=false` 时透传）；注入 `user_id` 到 context |
+| 2 | **PermissionMiddleware** | 始终执行 | ❌ | 读取 `context.agent_type`；若为 `admin`，从工具列表中移除 9 个写操作工具（`add_to_cart_api`/`do_seckill_api` 等）；若为 `customer`，透传全部工具 |
+| 3 | **RegexShortcutMiddleware** | 始终执行 | ✅ | 检查最后一条 human 消息内容；匹配 L1 正则规则（如 `查看秒杀`/`运营日报`）→ 直接 `ainvoke` 对应工具 → 返回 `AIMessage`；**不匹配时** → `handler(request)` 传给下一层 |
+| 4 | **SkillsMiddleware** | 仅 Regex 未命中时到达 | ❌ | 从虚拟文件系统读取 SKILL.md（如 `shopping-guide`/`daily-report`）；追加到 `system_message` |
+| — | **LLM (qwen-turbo)** | 仅前 4 层都 `handler()` 后到达 | — | 接收 messages + tools + system_prompt；自主选择工具调用（L3 兜底）；返回 AIMessage（可能含 `tool_calls`） |
+
+**关键区别**：
+- Auth / Permission / Skills：**始终透传**，只做修改不拦截，LLM 一定会被调用
+- RegexShortcut：**可能短路**，正则命中时直接返回结果，LLM 不会被调用（省去 ~2s 推理时间 + API 成本）
+- 执行顺序由 `middleware` 列表位置决定，顺序不能随意调换（如 Regex 必须在 Skills 之前，否则 Skills 加载工作白做）
+
+**触发时机与 Agent 图执行的关系**：
+
+```
+Agent 图执行循环（每次迭代）:
+  │
+  ├─ 1. 进入 model_call 节点
+  │     └── 中间件链 awrap_model_call(request, handler)
+  │          ├── Auth → 认证
+  │          ├── Permission → 过滤工具
+  │          ├── Regex → 匹配？（Y: 返回结果 / N: handler(request)）
+  │          ├── Skills → 追加规范
+  │          └── LLM → 推理 → 返回 AIMessage（可能含 tool_calls）
+  │
+  ├─ 2. 如果有 tool_calls:
+  │     ├── 执行工具（httpx → Gateway → 微服务）
+  │     ├── 工具内可能触发 interrupt() → 图暂停 → 等待用户回复
+  │     └── 结果作为 ToolMessage 加入 messages → 回到步骤 1
+  │
+  └─ 3. 如果无 tool_calls:
+        └── 图结束 → SSE 返回最终 AIMessage 给前端
+```
+
+> **总结**：中间件的触发时机不由各自独立决定，而是被 LangGraph Agent 执行循环中的 `model_call` 节点统一触发。`middleware` 列表的顺序就是执行顺序，`handler(request)` 是否被调用决定了请求是否继续流向内层（或 LLM）。
 
 `context_schema=Context` 定义了 Agent 运行时的不可变上下文，通过 LangGraph SDK 的 `context` 参数传入：
 
