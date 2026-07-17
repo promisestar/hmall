@@ -1,6 +1,6 @@
 # hmall 项目修改记录
 
-> 本文档记录了 2026-07-07 至 2026-07-15 期间对 hmall（枫叶商城）前后端项目的全部修改，涵盖搜索、下单、支付、类型对齐、精度保护、工程化、Redis 基础设施、验证码登录、Token 续期、前端新页面、秒杀系统、管理后台、项目重命名等模块。
+> 本文档记录了 2026-07-07 至 2026-07-17 期间对 hmall（枫叶商城）前后端项目的全部修改，涵盖搜索、下单、支付、类型对齐、精度保护、工程化、Redis 基础设施、验证码登录、Token 续期、前端新页面、秒杀系统、管理后台、AI Agent 助手、项目重命名等模块。
 
 ---
 
@@ -8,10 +8,10 @@
 
 | 项目 | 数据 |
 |------|------|
-| 时间跨度 | 2026-07-07 ~ 2026-07-15 |
+| 时间跨度 | 2026-07-07 ~ 2026-07-17 |
 | 修改文件 | 150+ 文件（前后端） |
-| 涉及模块 | search-service, trade-service, pay-service, item-service, cart-service, user-service, admin-service, hm-common, hm-api, hm-gateway, hmall-frontend |
-| 核心领域 | ES 搜索修复、雪花 ID 精度保护、前后端 DTO 对齐、下单/支付链路、购物车状态管理、工程稳定性、Redis 基础设施、Token 续期与黑名单、验证码登录、前端 P0/P1 新页面、**高并发秒杀系统**、**RBAC 管理后台**、项目重命名 |
+| 涉及模块 | search-service, trade-service, pay-service, item-service, cart-service, user-service, admin-service, hm-common, hm-api, hm-gateway, hmall-frontend, hmall-agent |
+| 核心领域 | ES 搜索修复、雪花 ID 精度保护、前后端 DTO 对齐、下单/支付链路、购物车状态管理、工程稳定性、Redis 基础设施、Token 续期与黑名单、验证码登录、前端 P0/P1 新页面、**高并发秒杀系统**、**RBAC 管理后台**、**AI Agent 助手**、项目重命名 |
 
 ### 演进阶段总览
 
@@ -39,9 +39,15 @@ flowchart LR
         P13["Phase 13<br/>前端新页面"]
     end
 
+    subgraph Day4 ["07-15 ~ 07-17"]
+        P14["Phase 14<br/>秒杀+后台"]
+        P15["Phase 15<br/>AI Agent助手"]
+    end
+
     P1 --> P2 --> P3 --> P4 --> P5 --> P6
     P6 --> P7 --> P8 --> P9 --> P10
     P10 --> P11 --> P12 --> P13
+    P13 --> P14 --> P15
 
     style P1 fill:#e3f2fd,stroke:#1976d2
     style P2 fill:#fff3e0,stroke:#f57c00
@@ -56,6 +62,8 @@ flowchart LR
     style P11 fill:#e8eaf6,stroke:#283593
     style P12 fill:#fce4ec,stroke:#ad1457
     style P13 fill:#e8f5e9,stroke:#2e7d32
+    style P14 fill:#fff3e0,stroke:#e65100
+    style P15 fill:#e1bee7,stroke:#6a1b9a
 ```
 
 ---
@@ -601,6 +609,7 @@ if (userStore.isLogin && cartStore.cartList.length === 0) {
 | `docs/redis-application-analysis.md` | Redis 在 hmall 中的应用分析（购物车/缓存/锁/验证码/秒杀/限流） |
 | `docs/redis-integration-report.md` | Redis 集成实施报告（详细记录每一步的实现细节和踩坑记录） |
 | `docs/session-changes.md` | 本文档 — 项目历史修改记录 |
+| `docs/前端实现相关文档/frontend-implementation-report.md` | 前端实现说明文档（技术栈/项目结构/C端/管理后台/Agent） |
 
 ---
 
@@ -787,4 +796,95 @@ AdminLayout 侧边栏折叠缩写同步更新：`HM` → `FY`。
 
 ---
 
-*文档更新时间：2026-07-15*
+## 20. Phase 15: AI Agent 助手 + Bug 修复（2026-07-15 ~ 07-17）
+
+> **目标**：实现商场 AI Agent 助手（C 端 + 管理端），修复 Agent 链路 Bug、管理后台远程调用 Bug、跨表查询 Bug。
+
+### 20.1 Agent 助手实现
+
+**提交**：`11e3ed5` → `37afd6b`（13 个提交）
+
+基于 LangGraph SDK 1.x 实现流式对话 AI 助手，支持 SSE 流式传输、中断交互（二次确认）和多会话管理。
+
+**前端新增**：
+
+| 文件 | 说明 |
+|------|------|
+| `hmall-frontend/src/composables/useLangGraph.ts` | Agent 核心 Composable（442 行）：消息/中断/会话/流式处理 |
+| `hmall-frontend/src/components/chat/ChatPanel.vue` | 聊天面板（508 行）：消息列表 + 输入框 + 猜你想做快捷入口 |
+| `hmall-frontend/src/components/chat/MessageBubble.vue` | 消息气泡（184 行）：Markdown 渲染 + human/ai 样式 |
+| `hmall-frontend/src/components/chat/InterruptActions.vue` | 中断确认按钮（81 行）：确认/取消操作 |
+| `hmall-frontend/src/components/chat/ChatWidget.vue` | 聊天悬浮小部件（18 行） |
+| `hmall-frontend/src/views/portal/ChatPage.vue` | C 端 AI 助手页面（35 行） |
+| `hmall-frontend/src/views/admin/ChatPage.vue` | 管理端 AI 助手页面（23 行） |
+| `hmall-frontend/src/components/chat/AdminChat.vue` | 管理端聊天容器（13 行） |
+
+**前端修改**：
+
+| 文件 | 变更 |
+|------|------|
+| `hmall-frontend/package.json` | 新增 `@langchain/langgraph-sdk`、`marked`、`lucide-vue-next` 依赖 |
+| `hmall-frontend/src/router/index.ts` | 新增 `/portal/chat`、`/admin/chat` 路由 |
+| `hmall-frontend/src/views/admin/AdminLayout.vue` | 侧边栏新增 AI 助手入口 |
+| `hmall-frontend/src/views/portal/PortalLayout.vue` | 顶栏新增 AI 助手入口 |
+
+**后端新增（hmall-agent）**：
+
+| 文件 | 说明 |
+|------|------|
+| `hmall-agent/` | 49 个文件（Python LangGraph 项目）：customer_agent + admin_agent 双 Agent |
+
+### 20.2 Agent 前端 Bug 修复
+
+| 提交 | Bug | 修复 |
+|------|-----|------|
+| `6b22f9e` | 前端硬编码端口导致无法访问 Agent | 改用 `VITE_AGENT_URL` 环境变量 |
+| `fc50c7a` | 跨域请求 Bug | 修复 CORS 配置 |
+| `0b5b13b` | token 无法传递到 Agent 工具中 | 确保 SDK 1.x 正确转发 `context` 字段 |
+| `a9e1055` | LangGraph SDK 版本兼容问题 | 提高 `langgraph-sdk` 等级 |
+| `ce5fdc3` | 前端界面不显示 Agent 消息 | 修复 `messages/partial` 响应式更新（数组索引触发） |
+| `8634abf` | 同时传 `configurable` 和 `context` 报错 | LangGraph 0.6.0+ 统一用 `context` |
+| `d67745d` | Agent 前端界面优化 | 第一版界面改进 |
+| `5c99e78` | Agent 前端界面更新 | 最终版界面 + Markdown 消息渲染 |
+| `3374966` | Agent 缺乏快捷交互 | 增加"猜你想做"功能（预定义快捷问题） |
+| `7281fe4` | Agent 缺乏推荐能力 | 扩展 Agent 推荐能力 |
+
+### 20.3 Agent 后端改进
+
+| 提交 | 变更 | 说明 |
+|------|------|------|
+| `7caf3ce` | 使用 Redis 持久化会话历史 | 尝试用 Redis 持久化 LangGraph 会话 |
+| `6aed24e` | 回退 Redis 持久化 | 改回 LangGraph 运行时原生持久化方式 |
+| `4e91eae` | Markdown 消息格式 | Agent 后端返回消息改为 Markdown 格式 |
+
+### 20.4 其他 Bug 修复
+
+| 提交 | Bug | 修复 |
+|------|-----|------|
+| `633473f` | 管理后台远程调用返回类型不匹配 | 修复 admin-service Feign 调用下游服务的返回类型 |
+| `69c5930` | 支付成功不更新秒杀订单状态 | `markOrderPaySuccess` 同步更新 `seckill_order.status` |
+| `37afd6b` | 错误的跨表查询逻辑 | 各微服务数据库相互独立，移除跨微服务直接查表的错误代码 |
+
+### 20.5 Phase 15 文件变更分布
+
+| 文件 | 变更主题 |
+|------|---------|
+| `hmall-frontend/src/composables/useLangGraph.ts` | Agent Composable（新建 442 行） |
+| `hmall-frontend/src/components/chat/ChatPanel.vue` | 聊天面板（新建 508 行） |
+| `hmall-frontend/src/components/chat/MessageBubble.vue` | 消息气泡（新建 184 行） |
+| `hmall-frontend/src/components/chat/InterruptActions.vue` | 中断确认（新建 81 行） |
+| `hmall-frontend/src/components/chat/ChatWidget.vue` | 悬浮部件（新建 18 行） |
+| `hmall-frontend/src/components/chat/AdminChat.vue` | 管理端聊天容器（新建 13 行） |
+| `hmall-frontend/src/views/portal/ChatPage.vue` | C 端 AI 助手页（新建 35 行） |
+| `hmall-frontend/src/views/admin/ChatPage.vue` | 管理端 AI 助手页（新建 23 行） |
+| `hmall-frontend/package.json` | 新增 3 个依赖 |
+| `hmall-frontend/src/router/index.ts` | 新增 2 条聊天路由 |
+| `hmall-frontend/src/views/admin/AdminLayout.vue` | 侧边栏增加 AI 助手入口 |
+| `hmall-frontend/src/views/portal/PortalLayout.vue` | 顶栏增加 AI 助手入口 |
+| `hmall-frontend/.gitignore` | 排除 vite log 文件 |
+| `hmall-agent/` (49 个文件) | Python LangGraph Agent 项目 |
+| `docs/前端实现相关文档/frontend-implementation-report.md` | 前端实现说明文档 |
+
+---
+
+*文档更新时间：2026-07-17*
