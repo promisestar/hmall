@@ -1,33 +1,42 @@
 # 微服务架构电商平台（枫叶商城）
 
-基于微服务架构实现的电商商城项目，整合服务注册发现、远程调用、网关路由、服务保护、分布式事务、异步通信、搜索引擎、**高并发秒杀**、**RBAC 管理后台**等核心技术，构建高可用、易扩展的分布式电商系统。
+基于微服务架构实现的电商商城项目，整合服务注册发现、远程调用、网关路由、服务保护、分布式事务、异步通信、搜索引擎、**高并发秒杀**、**RBAC 管理后台**、**AI Agent 智能助手（DeepAgent + LangGraph）**等核心技术，构建高可用、易扩展的分布式电商系统。
 
 ## 项目架构
 
-项目采用**微服务架构**，后端拆分为 9 个独立微服务模块 + 1 个公共模块 + 1 个 API 定义模块，前端基于 Vue 3 + Vite SPA 开发，实现业务解耦与模块化开发：
+项目采用**微服务架构**，后端拆分为 9 个独立微服务模块 + 1 个公共模块 + 1 个 API 定义模块 + 1 个 AI Agent 服务，前端基于 Vue 3 + Vite + TypeScript + Element Plus + TailwindCSS SPA 开发，实现业务解耦与模块化开发：
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                        前端                                       │
-│  hmall-frontend (Vue 3 + Vite)  :5173  dev 模式                  │
-└──────────────────┬───────────────────────────────────────────────┘
-                   │ /api → proxy_pass
-                   ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                    hm-gateway (:8080)                              │
-│                    JWT 认证 + 滑动窗口限流 + 动态路由                │
-└──┬──────┬────────┬────────┬────────┬────────┬─────────┬──────────┘
-   │      │        │        │        │        │         │
-   ▼      ▼        ▼        ▼        ▼        ▼         ▼         ▼
-┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐
-│ item ││ cart ││ user ││trade ││ pay  ││search││admin ││ hm-  │
-│-svc ││-svc  ││-svc  ││-svc  ││-svc  ││-svc  ││-svc  ││service│
-│:8081 ││:8082 ││:8084 ││:8085 ││:8083 ││:8089 ││:8090 ││:8080 │
-└──────┘└──────┘└──────┘└──────┘└──────┘└──────┘└──────┘└──────┘
-   │        │        │        │        │        │         │
-   └────────┴────────┴────────┴────────┴────────┴─────────┘
-                 ↕ Nacos / Sentinel / Seata
-                 ↕ MySQL / Redis / ES / RabbitMQ
+│                        前端 (Vue 3 + Vite)                        │
+│  hmall-frontend (:5173)  C端商城 + 管理后台 + AI助手聊天           │
+│  TailwindCSS + Element Plus + LangGraph SDK                       │
+└────────────┬─────────────────────────────┬───────────────────────┘
+             │ /api → proxy_pass           │ @langchain/langgraph-sdk
+             ▼                             ▼ (SSE 流式)
+┌────────────────────────┐    ┌────────────────────────────────────┐
+│   hm-gateway (:8080)   │    │  hmall-agent (:8090)               │
+│   JWT 认证 + 限流      │    │  LangGraph Server (Python)          │
+│   动态路由              │    │  CustomerAgent + AdminAgent         │
+└──┬──┬──┬──┬──┬──┬──┬──┘    │  三级路由: 正则→interrupt→LLM      │
+   │  │  │  │  │  │  │       │  通义千问 qwen-turbo                │
+   │  │  │  │  │  │  │       └──────────┬─────────────────────────┘
+   ▼  ▼  ▼  ▼  ▼  ▼  ▼                  │ httpx → Gateway
+┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐   │
+│item││cart││user││trade││pay ││search│  │
+│svc ││svc ││svc ││-svc ││-svc││-svc │  │
+│:8081│:8082│:8084│:8085││:8083│:8089│  │
+└────┘└────┘└────┘└────┘└────┘└────┘   │
+   │    │     │     │     │     │       │
+   └────┴─────┴─────┴─────┴─────┘       │
+          ↕ Nacos / Sentinel / Seata    │
+          ↕ MySQL / Redis / ES / RabbitMQ
+                                         │
+┌────────┐                               │
+│ admin  │◄──────────────────────────────┘
+│ -svc   │
+│ :8090  │
+└────────┘
 ```
 
 ### 模块职责
@@ -36,13 +45,14 @@
 |------|------|------|
 | **hm-gateway** | 8080 | API 网关，统一入口、JWT 认证、滑动窗口限流、动态路由 |
 | **admin-service** | 8090 | 管理后台微服务，RBAC 权限控制、管理员认证、秒杀活动管理 |
+| **hmall-agent** | 8090 | AI Agent 智能助手（Python LangGraph Server），CustomerAgent + AdminAgent，三级路由架构 |
 | **hm-service** | 8080 | 单体聚合服务（BFF），直接面向 C 端 |
-| **item-service** | 8081 | 商品微服务，商品 CRUD、库存管理 |
+| **item-service** | 8081 | 商品微服务，商品 CRUD、库存管理、个性化推荐接口 |
 | **cart-service** | 8082 | 购物车微服务 |
 | **user-service** | 8084 | 用户微服务，注册登录、余额管理 |
-| **trade-service** | 8085 | 交易微服务，订单创建与管理、**秒杀核心引擎** |
+| **trade-service** | 8085 | 交易微服务，订单创建与管理、**秒杀核心引擎**、已购商品聚合 |
 | **pay-service** | 8083 | 支付微服务，支付订单处理 |
-| **search-service** | 8089 | 搜索微服务，基于 ES 的商品搜索 |
+| **search-service** | 8089 | 搜索微服务，基于 ES 的商品搜索、推荐召回 |
 | **hm-common** | — | 公共模块（异常、工具类、拦截器、MyBatis 配置、Redis 封装、Lua 脚本） |
 | **hm-api** | — | Feign 接口定义模块（跨服务 DTO + Client 接口） |
 
@@ -76,11 +86,29 @@
 |------|------|------|
 | 框架 | Vue 3 + Composition API | TypeScript |
 | 构建工具 | Vite 5 | 开发服务器 + HMR 热更新 |
-| UI 组件库 | Element Plus | Vue 3 版本 |
-| HTTP 客户端 | Axios | 请求/响应拦截器，自动解包 R\<T\> |
-| 路由 | Vue Router 4 | Hash 模式 |
+| UI 组件库 | Element Plus | Vue 3 版本，管理后台核心 UI |
+| CSS 框架 | TailwindCSS 3 | 原子化 CSS，C 端商城样式 |
+| HTTP 客户端 | Axios | 请求/响应拦截器，双端实例隔离（C 端/管理端） |
+| 路由 | Vue Router 4 | Hash 模式，双端权限守卫 |
 | 状态管理 | Pinia | Composition API 风格 |
+| 图表 | ECharts 6 | 管理后台 Dashboard 数据看板 |
 | 图标 | @element-plus/icons-vue + lucide-vue-next | — |
+| AI 通信 | @langchain/langgraph-sdk ^1.x | Agent 流式对话（SSE） |
+| Markdown | marked | Agent 消息 Markdown 渲染 |
+| 二维码 | qrcode | 二维码生成 |
+
+### AI Agent 技术
+
+| 类别 | 技术 | 版本/说明 |
+|------|------|-----------|
+| 语言 | Python | ≥ 3.12 |
+| 包管理 | uv | pip 替代，快速依赖解析 |
+| Agent 框架 | DeepAgents (`create_agent`) | ≥ 0.5.9，声明式 Agent 定义 |
+| 图执行引擎 | LangGraph (`langgraph-cli[inmem]`) | ≥ 0.4.26，图执行 + API Server + Checkpoint |
+| LLM | 通义千问 qwen-turbo | DashScope OpenAI 兼容接口 |
+| Checkpoint 后端 | Redis (db=1 隔离) | LangGraph 对话持久化 + interrupt 恢复 |
+| HTTP 客户端 | httpx | 异步调用 Java 后端 API |
+| 前端通信 | LangGraph SDK (SSE 流式) | context-only 模式 |
 
 
 
@@ -104,8 +132,6 @@
 - **活动预热**：定时任务每分钟扫描即将开始的场次，提前将库存写入 Redis（SETNX 防覆盖）
 - **管理后台**：活动/场次/商品关联完整 CRUD、手动预热、秒杀订单查询、每日库存快照
 
-> 详见 `docs/秒杀功能实现/seckill-design.md` 和 `seckill-implementation-report.md`
-
 ### 2. RBAC 管理后台
 
 独立的 B 端管理微服务（`admin-service`），与 C 端认证体系隔离：
@@ -116,8 +142,6 @@
 - **Feign 代理模式**：admin-service 通过 Feign 调用下游微服务管理接口，获取业务数据
 - **管理功能**：商品管理、订单管理、用户管理、秒杀管理（活动/场次/商品 CRUD + 订单查询 + 库存状态）
 - **前端**：Vue 3 SPA（`/admin/**` 路由），复用 Element Plus 组件库
-
-> 详见 `docs/管理后台相关文档/admin-service-design.md` 和 `docs/秒杀功能实现/seckill-admin-design.md`
 
 ### 3. 微服务远程调用
 
@@ -180,14 +204,66 @@
 - 自定义算分函数，广告商品权重加权
 - 商品数据变更通过 RabbitMQ 异步同步至 ES
 
+### 10. AI Agent 智能助手
+
+基于 **DeepAgent + LangGraph** 构建的双端 AI 助手，支持自然语言交互完成购物全流程和运营管理：
+
+```
+用户消息（C端 / 管理后台）
+  │
+  ├─ L1: RegexShortcutMiddleware (<5ms)
+  │   ├── 拦截 "查看订单" / "秒杀活动" / "运营日报" 等高频指令
+  │   ├── 直接调用对应工具 + 格式化输出
+  │   └── 零 LLM 成本，拦截 80%+ 请求
+  │
+  ├─ L2: LangGraph interrupt() (多轮交互 / 二次确认)
+  │   ├── 秒杀下单 → interrupt 商品确认 → 用户"确认" → 下单
+  │   ├── 地址修改 → interrupt 选字段 → 输新值 → 执行
+  │   └── 危险操作：取消订单/清空购物车/确认收货 需二次确认
+  │
+  └─ L3: LLM 兜底 (~2s，qwen-turbo)
+      ├── 闲聊 / 复杂问题 / L1/L2 未命中
+      └── LLM 自主选择工具调用
+```
+
+**CustomerAgent（C 端客服助手，20 个工具）**：
+
+| 能力域 | 核心功能 |
+|--------|---------|
+| 商品浏览 | ES 搜索、商品详情、分页浏览 |
+| 秒杀 | 活动列表、商品详情、秒杀下单（二次确认） |
+| 购物车 | 查看、加购、改量、删除（确认）、清空（确认） |
+| 订单 | 列表、详情、取消（确认）、确认收货（确认） |
+| 地址 | 列表、新增（多轮收集）、修改（多轮交互） |
+| **个性化推荐** | 猜你喜欢、看了又看、购物车凑单、偏好分析 |
+
+**AdminAgent（管理助手，10 个只读工具 + 运营日报）**：
+
+| 能力域 | 核心功能 |
+|--------|---------|
+| 商品管理 | 分页查询、商品详情 |
+| 订单管理 | 分页查询（状态/时间筛选）、订单详情 |
+| 秒杀管理 | 活动/场次/商品关联/订单查询、库存快照 |
+| 用户管理 | C 端用户列表、用户详情 |
+| 运营日报 | 多工具并发编排，格式化日报输出 |
+
+**个性化推荐能力（Phase 1 已实现）**：
+
+- **三种触发模式**：用户主动请求（L1 正则 <5ms）/ Agent 主动 Upsell / 偏好驱动推荐
+- **后端管线**：Feign 聚合已购商品偏好 → search-service ES 召回 → 按销量排序
+- **降级保障**：trade-service 不可用 → ES 全局热销 / search-service 不可用 → MySQL 热销兜底 / Agent 降级搜索提示
+- **推荐闭环**：推荐 → 查看详情 → 加购 → 凑单推荐 → 用户反馈 → 再推荐
+
 ## 项目亮点
 
 1. **三层防超卖秒杀系统**：Gateway 限流 + Redis Lua 原子预减 + MySQL 行锁兜底，完整高并发解决方案
 2. **完整微服务技术栈落地**，覆盖服务治理全流程（注册发现、配置管理、网关路由、限流熔断、分布式事务）
 3. **RBAC 管理后台**：独立微服务 + 动态菜单 + URL 权限控制，管理员与 C 端用户认证隔离
-4. **同步 + 异步结合**的服务调用方案，平衡业务一致性与系统性能
-5. **动态配置、动态路由**，适配生产环境灵活变更需求
-6. **多层服务保护机制**（Sentinel 限流熔断 + Redis 库存原子操作 + MySQL 行锁），保障系统高可用
+4. **AI Agent 智能助手**：基于 DeepAgent + LangGraph 的三级路由架构（正则→interrupt→LLM），双端对话式交互，支持个性化推荐
+5. **对话式推荐**：Agent 理解用户偏好、生成推荐理由、形成推荐闭环，降级链路完整
+6. **同步 + 异步结合**的服务调用方案，平衡业务一致性与系统性能
+7. **动态配置、动态路由**，适配生产环境灵活变更需求
+8. **多层服务保护机制**（Sentinel 限流熔断 + Redis 库存原子操作 + MySQL 行锁），保障系统高可用
 
 ---
 
@@ -304,7 +380,7 @@ CREATE DATABASE IF NOT EXISTS `hm-admin` DEFAULT CHARACTER SET utf8mb4 COLLATE u
 
 | Data ID | 用途 |
 |---------|------|
-| `gateway-routes.json` | Gateway 动态路由规则（含 `/seckill/**` → trade-service 路由） |
+| `gateway-routes.json` | Gateway 动态路由规则（含 `/seckill/**` → trade-service、`/recommend/**` → item-service 路由） |
 
 示例 `shared-jdbc.yaml`：
 ```yaml
@@ -332,7 +408,7 @@ spring:
 1. **Nacos 地址**：编辑每个服务的 `bootstrap.yml`，将 `spring.cloud.nacos.server-addr` 改为实际 Nacos 地址
 2. **MySQL / Redis / ES / RabbitMQ**：修改 Nacos 共享配置或各服务的 `application-*.yaml` 中的连接地址
 3. **JWT 证书**：`hmall.jks` 密钥文件已放在 `hm-gateway` 的资源目录中，密码为 `hmall123`
-4. **Gateway 路由**：确保 Nacos `gateway-routes.json` 包含所有必要路由（特别是 `/seckill/**` → `trade-service` 和 `/admin/**` → `admin-service`）
+4. **Gateway 路由**：确保 Nacos `gateway-routes.json` 包含所有必要路由（特别是 `/seckill/**` → `trade-service`、`/recommend/**` → `item-service` 和 `/admin/**` → `admin-service`）
 
 ### 5. 构建项目
 
@@ -386,6 +462,8 @@ pay-service   ──▶  user-service   (扣减余额)
 admin-service ──▶  item-service   (商品管理)
 admin-service ──▶  trade-service  (订单管理、秒杀管理)
 admin-service ──▶  user-service   (用户管理)
+item-service  ──▶  trade-service  (推荐：获取已购商品)
+item-service  ──▶  search-service (推荐：ES 召回)
 ```
 
 **异步通信（RabbitMQ）**：
@@ -413,30 +491,71 @@ item-service   ──▶ search.exchange ──▶ search-service (商品变更 
 
 ```
 hmall-frontend/                     # Vue 3 + Vite SPA（推荐开发模式）
+├── index.html                      # HTML 入口
 ├── vite.config.ts                  # Vite 配置 + /api 代理到 :8080
+├── tailwind.config.js              # TailwindCSS 配置
 ├── src/
-│   ├── api/                        # Axios 请求模块
-│   │   ├── index.ts                #   C 端 axios 实例（/api baseURL）
-│   │   ├── admin.ts                #   管理后台 axios 实例（admin-token）
+│   ├── api/                        # Axios 请求模块（双端实例隔离）
+│   │   ├── index.ts                #   C 端 axios 实例（token 管理 + 续期 + 401 跳转）
+│   │   ├── admin.ts                #   管理后台 axios 实例（admin-token + 解包 R<T>）
 │   │   ├── seckill.ts              #   秒杀 API + 轮询工具
-│   │   └── admin/                  #   管理后台 API 模块
-│   │       ├── product.ts、order.ts、member.ts、seckill.ts
+│   │   ├── item.ts / cart.ts / order.ts / pay.ts / address.ts / user.ts
+│   │   └── admin/                  #   管理后台 API 模块（product/order/member/seckill/auth/...）
 │   ├── views/
-│   │   ├── portal/                 # C 端页面
-│   │   │   ├── HomePage、ProductDetail、CartPage、OrderConfirm、
-│   │   │   ├── SeckillList、SeckillDetail、LoginPage 等
-│   │   └── admin/                  # 管理后台页面
-│   │       ├── Dashboard、ItemManage、OrderManage、UserManage、
-│   │       ├── SeckillManage、AdminLayout 等
-│   ├── router/index.ts             # 路由配置（portal + admin）
-│   ├── stores/                     # Pinia 状态管理
-│   ├── types/                      # TypeScript 类型定义
-│   └── utils/                      # 工具函数
+│   │   ├── portal/                 # C 端页面（15 个）
+│   │   │   ├── HomePage、SearchPage、ProductDetail、LoginPage
+│   │   │   ├── CartPage、OrderConfirm、OrderList、PayPage、PaySuccess
+│   │   │   ├── AddressList、UserProfile、ChatPage（AI助手）
+│   │   │   └── SeckillList、SeckillDetail
+│   │   └── admin/                  # 管理后台页面（12 个）
+│   │       ├── Dashboard、ItemManage、OrderManage、OrderDetail
+│   │       ├── UserManage、SeckillManage、ChatPage（AI助手）
+│   │       └── system/（AdminUserManage/RoleManage/MenuManage/ResourceManage）
+│   ├── components/chat/            # Agent 聊天组件
+│   │   ├── ChatPanel.vue           #   可复用全页对话组件
+│   │   ├── ChatWidget.vue          #   C 端浮动入口（路由跳转）
+│   │   ├── AdminChat.vue           #   管理端 header 入口
+│   │   ├── MessageBubble.vue       #   消息气泡（Markdown 渲染）
+│   │   └── InterruptActions.vue    #   interrupt 确认卡片
+│   ├── composables/
+│   │   └── useLangGraph.ts         # LangGraph SDK 封装（对话/中断/会话管理）
+│   ├── router/index.ts             # 路由配置（22 条，双端权限守卫）
+│   ├── stores/                     # Pinia 状态管理（user/cart/admin）
+│   ├── types/                      # TypeScript 类型定义（39+ 接口）
+│   ├── directives/
+│   │   └── permission.ts           # v-permission 按钮级权限指令
+│   └── utils/
+│       └── format.ts               # 工具函数（价格/日期格式化）
+```
 
+### hmall-agent 目录结构
+
+```
+hmall-agent/                        # AI Agent 服务（Python）
+├── start_server.py                 # 启动入口（LangGraph Server :8090）
+├── graph.json                      # Agent 图注册（customer_agent / admin_agent）
+├── pyproject.toml                  # uv 依赖声明
+├── .env.example                    # 环境变量模板
+├── src/
+│   ├── agents/                     # Agent 定义
+│   │   ├── customer/               #   CustomerAgent（20 工具 + 6 Skills）
+│   │   └── admin/                  #   AdminAgent（10 只读工具 + 3 Skills）
+│   ├── middleware/                  # 中间件层（Auth/Permission/Regex/RAG）
+│   ├── tools/formatters.py         # 格式化函数（17 个）
+│   ├── gateway/                    # HTTP 客户端（httpx → Gateway）
+│   ├── core/                       # 配置 + LLM 实例 + Redis Checkpoint
+│   └── workspace/                  # Skills 规范文件（9 个 SKILL.md）
+└── knowledge_base/                 # RAG 知识库（预留）
 ```
 
 
-### 2. Vue 3 SPA 开发（推荐）
+### 2. 环境变量配置
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `VITE_AGENT_URL` | LangGraph Agent 服务地址 | `http://localhost:8090` |
+
+### 3. Vue 3 SPA 开发（推荐）
 
 ```bash
 cd hmall-frontend
@@ -453,13 +572,15 @@ npm run build
 
 Vite 自动代理 `/api` 请求到 `http://localhost:8080`（hm-gateway）。
 
-### 3. 访问前端页面
+### 4. 访问前端页面
 
 | 入口 | 地址 | 说明 |
 |------|------|------|
 | **C 端商城** | `http://localhost:5173/#/portal/home` | 商品浏览、购物车、下单、秒杀 |
 | **秒杀专场** | `http://localhost:5173/#/portal/seckill` | 秒杀活动列表和秒杀详情 |
+| **C 端 AI 助手** | `http://localhost:5173/#/portal/chat` | 客服对话，支持自然语言完成购物全流程 |
 | **管理后台** | `http://localhost:5173/#/admin/dashboard` | 数据概览、商品/订单/用户/秒杀管理 |
+| **管理端 AI 助手** | `http://localhost:5173/#/admin/chat` | 运营助手，订单查询、秒杀管理、运营日报 |
 
 ---
 
@@ -467,12 +588,35 @@ Vite 自动代理 `/api` 请求到 `http://localhost:8080`（hm-gateway）。
 
 1. **启动基础设施**：MySQL、Nacos、Redis、Elasticsearch、RabbitMQ
 2. **初始化数据库**：创建 7 个数据库，执行 schema SQL，插入秒杀管理菜单
-3. **配置 Nacos**：导入共享配置（JDBC、日志、Swagger、Seata、RabbitMQ）+ `gateway-routes.json`
+3. **配置 Nacos**：导入共享配置（JDBC、日志、Swagger、Seata、RabbitMQ）+ `gateway-routes.json`（含 `/recommend/**` 路由）
 4. **构建后端**：`mvn clean install -DskipTests`
 5. **启动微服务**：`item → user → cart → trade → pay → search → admin → gateway`
-6. **启动前端**：`cd hmall-frontend && npm run dev`
-7. **初始化数据**：插入秒杀活动/场次/商品关联数据（或通过管理后台创建）
-8. **访问页面**：浏览器打开 `http://localhost:5173`
+6. **启动 Agent 服务**：
+   ```bash
+   cd hmall-agent
+   cp .env.example .env
+   # 编辑 .env，填入 DASHSCOPE_API_KEY 和 Redis 连接信息
+   uv sync
+   uv run python start_server.py    # LangGraph Server (:8090)
+   ```
+7. **启动前端**：`cd hmall-frontend && npm run dev`
+8. **初始化数据**：插入秒杀活动/场次/商品关联数据（或通过管理后台创建）
+9. **访问页面**：浏览器打开 `http://localhost:5173`
+
+### 服务端口总览
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| hm-gateway | 8080 | API 网关（路由 + 认证 + 限流） |
+| hm-service | 8080 | 聚合 BFF（与网关共用端口，需错开启动） |
+| item-service | 8081 | 商品微服务 |
+| cart-service | 8082 | 购物车微服务 |
+| pay-service | 8083 | 支付微服务 |
+| user-service | 8084 | 用户微服务 |
+| trade-service | 8085 | 交易微服务 |
+| search-service | 8089 | 搜索微服务 |
+| admin-service | 8090 | 管理后台微服务 |
+| hmall-agent | 8090 | AI Agent 服务（与 admin-service 共用端口，需错开启动） |
 
 ---
 
@@ -522,6 +666,32 @@ Vite 自动代理 `/api` 请求到 `http://localhost:8080`（hm-gateway）。
 在 `bootstrap.yml` 中修改 `spring.profiles.active` 的值（`local` 或 `dev`）。`local` 使用 `application-local.yaml`，`dev` 使用 `application-dev.yaml`（同时从 Nacos 拉取共享配置）。
 </details>
 
+<details>
+<summary><b>Q: AI 助手聊天页面无响应 / 消息发不出去？</b></summary>
+
+1. 确认 Agent 服务已启动：`http://localhost:8090/ok` → `{"ok": true}`
+2. 确认前端环境变量 `VITE_AGENT_URL` 指向正确的 Agent 地址（默认 `http://localhost:8090`）
+3. 确认 `.env` 中的 `DASHSCOPE_API_KEY` 已填入有效密钥
+4. Agent 服务与 admin-service 共用 8090 端口，需错开启动
+</details>
+
+<details>
+<summary><b>Q: Agent 个性化推荐不可用？</b></summary>
+
+1. 确认 Nacos `gateway-routes.json` 已配置 `/recommend/**` → `lb://item-service` 路由
+2. 确认 `/recommend/**` **未加入** `hm.auth.excludePaths`（推荐需要用户认证）
+3. 确认 trade-service 和 search-service 均已启动（偏好聚合和 ES 召回依赖）
+4. 确认 ES 索引 `items` 中有商品数据
+</details>
+
+<details>
+<summary><b>Q: admin-service 和 hmall-agent 端口冲突？</b></summary>
+
+两个服务默认都使用 8090 端口。建议错开启动，或将其中一个的端口改为其他值：
+- Agent：在 `.env` 中修改 `AGENT_PORT`
+- admin-service：在 `application.yaml` 中修改 `server.port`
+</details>
+
 ---
 
-本项目完整实现了微服务架构电商商城，涵盖高并发秒杀系统、RBAC 管理后台、服务发现与治理、分布式事务、异步通信、高性能搜索等核心技术，是企业级微服务电商项目的典型实践。
+本项目完整实现了微服务架构电商商城，涵盖高并发秒杀系统、RBAC 管理后台、AI Agent 智能助手、对话式个性化推荐、服务发现与治理、分布式事务、异步通信、高性能搜索等核心技术，是企业级微服务电商项目的典型实践。
