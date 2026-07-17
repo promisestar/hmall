@@ -348,6 +348,112 @@ def format_address_list(addresses: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ==================== 个性化推荐 ====================
+
+
+def format_recommendations(page_dto: dict, scene: str = "home") -> str:
+    """格式化推荐商品列表 → Markdown 表格 + 推荐依据引用块。
+
+    Args:
+        page_dto: 后端 /recommend 返回的数据
+        scene: 推荐场景（home/detail/cart）
+    """
+    if not page_dto:
+        return "暂无推荐商品，您可以尝试搜索看看"
+
+    items = page_dto.get("list", [])
+    total = page_dto.get("total", len(items))
+
+    if not items:
+        return "暂无推荐商品，您可以尝试搜索看看"
+
+    scene_titles = {
+        "home": "猜你喜欢",
+        "detail": "看了又看",
+        "cart": "凑单推荐",
+    }
+    title = scene_titles.get(scene, "为你推荐")
+
+    lines = [f"## 🎯 {title}（共 {total} 件）", ""]
+    lines.append(_table_row("#", "商品", "价格", "库存", "标签", "ID"))
+    lines.append(_table_sep(6))
+    for i, item in enumerate(items, 1):
+        name = item.get("name", "未知商品")
+        price = _yuan(item.get("price"))
+        stock = item.get("stock", 0)
+        item_id = item.get("id", "")
+        tags = item.get("recommendTags", [])
+        tag_str = ", ".join(tags) if tags else "-"
+        lines.append(_table_row(
+            i, name, f"¥{price}", f"{stock} 件", tag_str, f"`{item_id}`",
+        ))
+
+    # 推荐依据摘要
+    based_on = page_dto.get("basedOn")
+    if based_on:
+        cats = based_on.get("topCategories", [])
+        brands = based_on.get("topBrands", [])
+        if cats or brands:
+            lines.append("")
+            parts = []
+            if cats:
+                parts.append(f"偏好类目: {', '.join(cats[:3])}")
+            if brands:
+                parts.append(f"偏好品牌: {', '.join(brands[:3])}")
+            lines.append(f"> **推荐依据**: {' | '.join(parts)}")
+
+    return "\n".join(lines)
+
+
+def format_preferences(
+    cat_scores: dict,
+    brand_scores: dict,
+    prices: list,
+    orders: list,
+    cart: list,
+) -> str:
+    """格式化用户偏好分析结果 → Markdown 列表。"""
+    order_count = len(orders)
+    cart_count = len(cart)
+
+    if order_count == 0 and cart_count == 0:
+        return "暂无足够的购买/购物车数据来分析偏好，推荐时将使用热门商品兜底"
+
+    lines = [
+        "## 📊 您的购物偏好分析",
+        "",
+        f"基于 {order_count} 笔订单 + {cart_count} 件购物车商品",
+    ]
+
+    # 类目 Top 3
+    if cat_scores:
+        sorted_cats = sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)
+        lines.append("")
+        lines.append("**偏好类目 Top 3:**")
+        for i, (cat, score) in enumerate(sorted_cats[:3], 1):
+            lines.append(f"{i}. {cat}（得分 {score}）")
+
+    # 品牌 Top 3
+    if brand_scores:
+        sorted_brands = sorted(brand_scores.items(), key=lambda x: x[1], reverse=True)
+        lines.append("")
+        lines.append("**偏好品牌 Top 3:**")
+        for i, (brand, score) in enumerate(sorted_brands[:3], 1):
+            lines.append(f"{i}. {brand}（得分 {score}）")
+
+    # 价格区间
+    if prices:
+        min_price = _yuan(min(prices))
+        max_price = _yuan(max(prices))
+        avg_price = _yuan(sum(prices) / len(prices))
+        lines.append("")
+        lines.append("**价格区间:**")
+        lines.append(f"- 常购价格：¥{min_price} ~ ¥{max_price}")
+        lines.append(f"- 平均客单价：¥{avg_price}")
+
+    return "\n".join(lines)
+
+
 # ==================== 管理端 ====================
 
 

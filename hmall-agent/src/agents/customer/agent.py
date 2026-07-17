@@ -54,6 +54,7 @@ skills_middleware = SkillsMiddleware(
         "/skills/cart-management/",
         "/skills/order-management/",
         "/skills/address-management/",
+        "/skills/personalized-recommendation/",
     ],
 )
 

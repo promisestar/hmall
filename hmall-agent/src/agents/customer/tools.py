@@ -13,6 +13,7 @@
 需要认证的工具通过 RunnableConfig 自动注入 token（不展示给 LLM）。
 """
 
+import asyncio
 import re
 
 from langchain_core.runnables import RunnableConfig
@@ -27,6 +28,8 @@ from src.tools.formatters import (
     format_item_page,
     format_order_detail,
     format_order_list,
+    format_preferences,
+    format_recommendations,
     format_search_results,
     format_seckill_activities,
     format_seckill_product,
@@ -566,8 +569,150 @@ async def update_address_api(address_id: int, config: RunnableConfig) -> str:
 
 
 # ============================================================================
-# 工具注册
+# 个性化推荐（2 个）— 需要登录
 # ============================================================================
+
+
+def _accumulate_preference(cat_scores, brand_scores, prices, item, weight):
+    """累加单个商品的偏好分数到聚合字典。
+
+    Args:
+        cat_scores:  类目得分字典（category -> 累计分）
+        brand_scores: 品牌得分字典（brand -> 累计分）
+        prices:      价格列表（收集所有购买价格）
+        item:        商品数据（需含 category/brand/price/num 字段）
+        weight:      权重（购买=5，购物车=3）
+    """
+    category = item.get("category", "")
+    brand = item.get("brand", "")
+    price = item.get("price")
+    num = item.get("num", 1)
+
+    if category:
+        cat_scores[category] = cat_scores.get(category, 0) + weight * num
+    if brand:
+        brand_scores[brand] = brand_scores.get(brand, 0) + weight * num
+    if price:
+        prices.append(price)
+
+
+@tool
+async def get_recommendations_api(
+    config: RunnableConfig,
+    scene: str = "home",
+    size: int = 10,
+    item_id: int = 0,
+) -> str:
+    """基于用户浏览/购买历史获取个性化商品推荐。
+
+    Args:
+        scene: 推荐场景
+            - home: 猜你喜欢（首页推荐，基于用户整体偏好）
+            - detail: 看了又看（基于指定商品找相似）
+            - cart: 购物车凑单推荐
+        size: 返回数量，默认 10
+        item_id: 当前商品 ID（scene=detail 时必填）
+    """
+    token = extract_token_from_config(config)
+    if not token:
+        return "❌ 个性化推荐需要先登录，登录后我可以根据您的偏好推荐商品"
+
+    params = {"scene": scene, "size": size}
+    if item_id:
+        params["itemId"] = item_id
+
+    try:
+        result = await gateway_client.get("/recommend", token=token, params=params)
+        return format_recommendations(result, scene)
+    except GatewayError as e:
+        if e.status_code == 401:
+            return "❌ 登录已过期，请重新登录后获取推荐"
+        # 降级：推荐接口失败时提示用户可手动搜索
+        return f"推荐服务暂时不可用，您可以尝试搜索商品。错误: {e}"
+
+
+@tool
+async def analyze_user_preferences(config: RunnableConfig) -> str:
+    """分析当前用户的购物偏好（基于购买历史和购物车）。
+
+    返回偏好的类目、品牌、价格区间，供推荐和搜索参考。
+    需要登录。
+    """
+    token = extract_token_from_config(config)
+    if not token:
+        return "❌ 偏好分析需要先登录"
+
+    try:
+        # 并发获取购买历史和购物车
+        orders_page, cart_items = await asyncio.gather(
+            gateway_client.get(
+                "/orders/page", token=token, params={"pageNo": 1, "pageSize": 50}
+            ),
+            gateway_client.get("/carts", token=token),
+        )
+    except GatewayError as e:
+        return f"❌ 获取用户数据失败: {e}"
+
+    orders = orders_page.get("list", []) or orders_page.get("records", []) if orders_page else []
+    cart = cart_items if cart_items else []
+
+    # 收集所有 itemId（OrderDetail 无 category/brand，需额外批量查询）
+    item_ids = set()
+    for order in orders:
+        details = order.get("orderDetails", []) or order.get("details", [])
+        for d in details:
+            iid = d.get("itemId", d.get("id"))
+            if iid:
+                item_ids.add(iid)
+    for item in cart:
+        iid = item.get("itemId", item.get("id"))
+        if iid:
+            item_ids.add(iid)
+
+    # 批量查询商品详情获取 category/brand
+    item_map = {}
+    if item_ids:
+        try:
+            ids_str = ",".join(str(i) for i in item_ids)
+            items_detail = await gateway_client.get("/items", params={"ids": ids_str})
+            if items_detail:
+                for item in items_detail:
+                    item_map[item.get("id")] = item
+        except GatewayError:
+            pass  # 查询失败时降级，仅用已有数据聚合
+
+    # 聚合分析
+    category_scores = {}
+    brand_scores = {}
+    price_points = []
+
+    # 购买历史（权重 5）
+    for order in orders:
+        details = order.get("orderDetails", []) or order.get("details", [])
+        for d in details:
+            iid = d.get("itemId", d.get("id"))
+            full_item = item_map.get(iid, {})
+            merged = {
+                "price": d.get("price"),
+                "num": d.get("num", 1),
+                "category": full_item.get("category", ""),
+                "brand": full_item.get("brand", ""),
+            }
+            _accumulate_preference(category_scores, brand_scores, price_points, merged, weight=5)
+
+    # 购物车（权重 3）
+    for item in cart:
+        iid = item.get("itemId", item.get("id"))
+        full_item = item_map.get(iid, {})
+        merged = {
+            "price": item.get("price"),
+            "num": item.get("num", 1),
+            "category": full_item.get("category", ""),
+            "brand": full_item.get("brand", ""),
+        }
+        _accumulate_preference(category_scores, brand_scores, price_points, merged, weight=3)
+
+    return format_preferences(category_scores, brand_scores, price_points, orders, cart)
 
 
 def get_all_tools():
@@ -596,4 +741,7 @@ def get_all_tools():
         get_address_list_api,
         add_address_api,
         update_address_api,
+        # 个性化推荐
+        get_recommendations_api,
+        analyze_user_preferences,
     ]

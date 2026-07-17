@@ -63,4 +63,14 @@ public class SearchController {
     public void empty() {
         return;
     }
+
+    @ApiOperation("推荐商品召回")
+    @GetMapping("/recommend")
+    public List<ItemDTO> recommend(
+            @RequestParam(value = "categories", required = false) List<String> categories,
+            @RequestParam(value = "excludeIds", required = false) List<Long> excludeIds,
+            @RequestParam("size") Integer size
+    ) throws IOException {
+        return searchService.recommendSearch(categories, excludeIds, size);
+    }
 }

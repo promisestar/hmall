@@ -15,6 +15,14 @@ def _extract_order_id(m: re.Match) -> dict:
     return {"order_id": int(m.group(1))}
 
 
+def _extract_recommend_scene(m: re.Match) -> dict:
+    """从正则匹配中提取推荐场景。"""
+    keyword = m.group(1) if m.groups() else ""
+    if "凑单" in keyword or "购物车" in keyword:
+        return {"scene": "cart"}
+    return {"scene": "home"}
+
+
 REGEX_RULES = [
     # === 秒杀（只读） ===
     (
@@ -44,6 +52,19 @@ REGEX_RULES = [
         r"(?:查询|查看|我的).{0,5}地址",
         "get_address_list_api",
         None,
+    ),
+    # === 个性化推荐（只读） ===
+    # 首页推荐 / 猜你喜欢
+    (
+        r"(?:推荐|猜你喜欢|有什么好|帮我选|随便看看|给我推荐)",
+        "get_recommendations_api",
+        _extract_recommend_scene,
+    ),
+    # 购物车凑单推荐
+    (
+        r"(?:购物车|凑单).{0,5}(?:推荐|加|添|凑)",
+        "get_recommendations_api",
+        lambda m: {"scene": "cart"},
     ),
     # === 商品搜索（只读） ===
     (

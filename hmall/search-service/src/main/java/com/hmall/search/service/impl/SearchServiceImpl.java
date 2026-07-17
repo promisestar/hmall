@@ -279,4 +279,42 @@ public class SearchServiceImpl extends ServiceImpl<SearchMapper, Item> implement
         }
         return categoryBrandVO;
     }
+
+    @Override
+    public List<ItemDTO> recommendSearch(List<String> categories, List<Long> excludeIds, Integer size) throws IOException {
+        SearchRequest searchRequest = new SearchRequest("items");
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+
+        BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
+
+        // 按偏好类目过滤（多类目 terms 查询）
+        if (categories != null && !categories.isEmpty()) {
+            boolQueryBuilder.filter(QueryBuilders.termsQuery("category", categories));
+        }
+
+        // 排除已购商品（ES _id 字段存储为字符串，termsQuery 自动转换）
+        if (excludeIds != null && !excludeIds.isEmpty()) {
+            boolQueryBuilder.mustNot(QueryBuilders.termsQuery("_id", excludeIds));
+        }
+
+        searchSourceBuilder.query(boolQueryBuilder);
+        searchSourceBuilder.size(size);
+        searchSourceBuilder.sort(new FieldSortBuilder("sold").order(SortOrder.DESC));
+        searchSourceBuilder.timeout(new TimeValue(10, TimeUnit.SECONDS));
+        searchRequest.source(searchSourceBuilder);
+
+        SearchResponse response = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+        SearchHits searchHits = response.getHits();
+        SearchHit[] hits = searchHits.getHits();
+
+        List<ItemDTO> itemList = new ArrayList<>();
+        for (SearchHit hit : hits) {
+            String json = hit.getSourceAsString();
+            ItemDoc itemDoc = JSONUtil.toBean(json, ItemDoc.class);
+            ItemDTO itemDTO = BeanUtils.copyProperties(itemDoc, ItemDTO.class);
+            itemList.add(itemDTO);
+        }
+
+        return itemList;
+    }
 }
