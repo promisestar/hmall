@@ -1,11 +1,14 @@
 package com.hmall.trade.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.hmall.api.dto.OrderDetailDTO;
 import com.hmall.common.domain.PageDTO;
 import com.hmall.common.domain.PageQuery;
 import com.hmall.trade.domain.dto.OrderFormDTO;
 import com.hmall.trade.domain.po.Order;
 import com.hmall.trade.domain.vo.OrderVO;
+
+import java.util.List;
 
 /**
  * <p>
@@ -35,4 +38,11 @@ public interface IOrderService extends IService<Order> {
      */
     PageDTO<OrderVO> queryOrderAdminPage(PageQuery pageQuery, Integer status, Long orderId,
                                           String startTime, String endTime);
+
+    /**
+     * 获取当前用户已购商品 ID 及数量（有效订单聚合，推荐服务调用）
+     *
+     * @return 按 itemId 聚合购买数量后的列表，无购买记录时返回空列表
+     */
+    List<OrderDetailDTO> queryPurchasedItems();
 }

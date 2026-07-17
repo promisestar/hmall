@@ -311,6 +311,39 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         return PageDTO.of(page, voList);
     }
 
+    @Override
+    public List<OrderDetailDTO> queryPurchasedItems() {
+        Long userId = UserContext.getUser();
+        if (userId == null) {
+            return CollUtils.emptyList();
+        }
+        // 1. 查询当前用户有效订单（已付款/已发货/已收货/已评价）
+        List<Order> orders = lambdaQuery()
+                .eq(Order::getUserId, userId)
+                .in(Order::getStatus, 2, 3, 4, 6)
+                .list();
+        if (CollUtils.isEmpty(orders)) {
+            return CollUtils.emptyList();
+        }
+        // 2. 查询这些订单的商品详情
+        List<Long> orderIds = orders.stream().map(Order::getId).collect(Collectors.toList());
+        List<OrderDetail> details = detailService.lambdaQuery()
+                .in(OrderDetail::getOrderId, orderIds)
+                .list();
+        if (CollUtils.isEmpty(details)) {
+            return CollUtils.emptyList();
+        }
+        // 3. 按 itemId 聚合购买数量
+        Map<Long, Integer> itemNumMap = new HashMap<>();
+        for (OrderDetail detail : details) {
+            itemNumMap.merge(detail.getItemId(), detail.getNum(), Integer::sum);
+        }
+        // 4. 转换为 DTO 列表
+        return itemNumMap.entrySet().stream()
+                .map(e -> new OrderDetailDTO().setItemId(e.getKey()).setNum(e.getValue()))
+                .collect(Collectors.toList());
+    }
+
     private List<OrderDetail> buildDetails(Long orderId, List<ItemDTO> items, Map<Long, Integer> numMap) {
         List<OrderDetail> details = new ArrayList<>(items.size());
         for (ItemDTO item : items) {

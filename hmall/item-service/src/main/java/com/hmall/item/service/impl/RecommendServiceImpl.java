@@ -1,12 +1,13 @@
 package com.hmall.item.service.impl;
 
 import com.hmall.api.client.SearchClient;
+import com.hmall.api.client.TradeClient;
 import com.hmall.api.dto.ItemDTO;
+import com.hmall.api.dto.OrderDetailDTO;
 import com.hmall.common.utils.BeanUtils;
 import com.hmall.item.domain.dto.RecommendItemDTO;
 import com.hmall.item.domain.dto.RecommendVO;
 import com.hmall.item.domain.po.Item;
-import com.hmall.item.mapper.RecommendMapper;
 import com.hmall.item.service.IItemService;
 import com.hmall.item.service.IRecommendService;
 import lombok.RequiredArgsConstructor;
@@ -22,14 +23,17 @@ import java.util.stream.Collectors;
 /**
  * 个性化推荐服务实现
  * <p>
- * 三步管线：SQL 聚合偏好 → Feign 调用 search-service ES 召回 → MySQL 补充库存/状态
+ * 三步管线：Feign 获取已购商品 → 聚合偏好 → Feign 调用 search-service ES 召回 → MySQL 补充库存/状态
+ * <p>
+ * 偏好聚合在 item-service 侧完成：trade-service 返回已购 itemId+num，
+ * item-service 查 item 表补充 category/brand 后按购买数量加权聚合 Top3。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class RecommendServiceImpl implements IRecommendService {
 
-    private final RecommendMapper recommendMapper;
+    private final TradeClient tradeClient;
     private final SearchClient searchClient;
     private final IItemService itemService;
 
@@ -52,23 +56,42 @@ public class RecommendServiceImpl implements IRecommendService {
             }
             excludeIds.add(itemId);
         } else if (userId != null) {
-            // scene=home/cart: SQL 聚合用户偏好
-            List<Map<String, Object>> catPrefs = recommendMapper.queryUserCategoryPreferences(userId);
-            if (catPrefs != null) {
-                for (Map<String, Object> pref : catPrefs) {
-                    Object cat = pref.get("category");
-                    if (cat != null) categories.add(cat.toString());
+            // scene=home/cart: Feign 调用 trade-service 获取已购商品
+            List<OrderDetailDTO> purchasedItems = safeQueryPurchasedItems();
+            if (purchasedItems != null && !purchasedItems.isEmpty()) {
+                // 收集已购商品 ID（用于排除已购）
+                List<Long> itemIds = purchasedItems.stream()
+                        .map(OrderDetailDTO::getItemId)
+                        .collect(Collectors.toList());
+                excludeIds = new ArrayList<>(itemIds);
+
+                // 批量查询商品获取 category/brand
+                List<Item> purchasedItemList = itemService.listByIds(itemIds);
+                if (purchasedItemList != null && !purchasedItemList.isEmpty()) {
+                    // 构建 itemId -> num 映射
+                    Map<Long, Integer> numMap = purchasedItems.stream()
+                            .collect(Collectors.toMap(
+                                    OrderDetailDTO::getItemId,
+                                    OrderDetailDTO::getNum,
+                                    Integer::sum));
+
+                    // 聚合类目/品牌偏好（按购买数量加权）
+                    Map<String, Integer> catScores = new HashMap<>();
+                    Map<String, Integer> brandScores = new HashMap<>();
+                    for (Item item : purchasedItemList) {
+                        Integer num = numMap.getOrDefault(item.getId(), 1);
+                        if (item.getCategory() != null && !item.getCategory().isEmpty()) {
+                            catScores.merge(item.getCategory(), num, Integer::sum);
+                        }
+                        if (item.getBrand() != null && !item.getBrand().isEmpty()) {
+                            brandScores.merge(item.getBrand(), num, Integer::sum);
+                        }
+                    }
+                    // 取 Top3
+                    categories = topN(catScores, 3);
+                    topBrands = topN(brandScores, 3);
                 }
             }
-            List<Map<String, Object>> brandPrefs = recommendMapper.queryUserBrandPreferences(userId);
-            if (brandPrefs != null) {
-                for (Map<String, Object> pref : brandPrefs) {
-                    Object brand = pref.get("brand");
-                    if (brand != null) topBrands.add(brand.toString());
-                }
-            }
-            List<Long> purchasedIds = recommendMapper.queryPurchasedItemIds(userId);
-            if (purchasedIds != null) excludeIds = purchasedIds;
         }
 
         // 2. Feign 调用 search-service ES 召回
@@ -135,6 +158,18 @@ public class RecommendServiceImpl implements IRecommendService {
     }
 
     /**
+     * Feign 调用 trade-service 获取已购商品，异常时降级返回空列表
+     */
+    private List<OrderDetailDTO> safeQueryPurchasedItems() {
+        try {
+            return tradeClient.queryPurchasedItems();
+        } catch (Exception e) {
+            log.error("Feign 调用 trade-service 获取已购商品失败，降级为空列表", e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
      * MySQL 热销兜底：ES 不可用或无结果时，直接查 item 表按销量排序
      */
     private List<ItemDTO> mysqlHotFallback(List<Long> excludeIds, int size) {
@@ -146,6 +181,17 @@ public class RecommendServiceImpl implements IRecommendService {
                 .last("LIMIT " + size)
                 .list();
         return BeanUtils.copyList(items, ItemDTO.class);
+    }
+
+    /**
+     * 从得分 Map 中取 Top N
+     */
+    private List<String> topN(Map<String, Integer> scores, int n) {
+        return scores.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .limit(n)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
     }
 
     /**

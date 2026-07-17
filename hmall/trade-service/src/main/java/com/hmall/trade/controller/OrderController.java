@@ -4,6 +4,7 @@ import com.hmall.common.domain.PageDTO;
 import com.hmall.common.domain.PageQuery;
 import com.hmall.common.utils.BeanUtils;
 
+import com.hmall.api.dto.OrderDetailDTO;
 import com.hmall.trade.domain.dto.OrderFormDTO;
 import com.hmall.trade.domain.po.Order;
 import com.hmall.trade.domain.vo.OrderVO;
@@ -49,6 +50,12 @@ public class OrderController {
     @GetMapping("/page")
     public PageDTO<OrderVO> queryOrderPage(PageQuery pageQuery) {
         return orderService.queryOrderPage(pageQuery);
+    }
+
+    @ApiOperation("获取当前用户已购商品ID及数量（推荐服务调用）")
+    @GetMapping("/purchased-items")
+    public List<OrderDetailDTO> queryPurchasedItems() {
+        return orderService.queryPurchasedItems();
     }
 
     // ==================== 管理后台接口（admin-service 调用） ====================
