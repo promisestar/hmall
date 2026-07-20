@@ -84,6 +84,10 @@ npm run dev
 | `JAVA_GATEWAY_URL` | hmall Gateway 地址 | http://localhost:8080 |
 | `AGENT_PORT` | Agent 服务端口 | 8090 |
 | `JWT_VERIFY_LOCAL` | 是否本地验证 JWT | false（依赖 Gateway） |
+| `RAG_BASE_URL` | LightRAG Server 地址 | http://localhost:9621 |
+| `RAG_USERNAME` / `RAG_PASSWORD` | LightRAG 登录凭证 | admin / admin123 |
+| `RAG_API_KEY` | LightRAG API Key（可选，优先于账号密码） | — |
+| `RAG_MCP_PORT` | RAG MCP Server 端口 | 8008 |
 
 ## API 端点
 
@@ -139,3 +143,25 @@ hmall-agent/
 2. 启动 Java 微服务：item → user → cart → trade → pay → search → admin → gateway
 3. 启动 Agent 服务：`uv run python start_server.py`
 4. 启动前端：`npm run dev`
+
+### RAG 知识库（可选）
+
+如需启用 RAG 知识库检索能力，需额外启动 LightRAG Server 和 RAG MCP Server：
+
+```bash
+# 1. 启动 LightRAG Server（端口 9621）
+cd LightRAG && lightrag-server
+
+# 2. 启动 RAG MCP Server（端口 8008）
+cd hmall-agent && uv run python start_rag_server.py
+
+# 3. 启动 Agent Server（端口 8090）
+uv run python start_server.py
+
+# 4. 启动前端
+cd hmall-frontend && npm run dev
+```
+
+启动后在前端对话面板头部点击「知识库」开关按钮启用 RAG 检索。
+
+详细部署和使用说明见 `docs/Agent功能相关文档/hmall-agent-rag-integration.md`。

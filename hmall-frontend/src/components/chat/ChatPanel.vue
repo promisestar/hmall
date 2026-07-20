@@ -106,6 +106,22 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
           </button>
+          <!-- RAG 知识库检索开关 -->
+          <button
+            @click="toggleRag"
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors"
+            :class="ragEnabled ? 'bg-white/25' : 'hover:bg-white/20'"
+            :title="ragEnabled ? '知识库检索：已开启（点击关闭）' : '知识库检索：已关闭（点击开启）'"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+            <span class="text-[12px]">知识库</span>
+            <span
+              class="w-1.5 h-1.5 rounded-full"
+              :class="ragEnabled ? 'bg-green-400' : 'bg-gray-400/60'"
+            ></span>
+          </button>
           <button @click="handleClear" class="p-2 hover:bg-white/20 rounded-lg transition-colors" title="清空当前对话">
             <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
@@ -339,6 +355,13 @@ const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 const sidebarOpen = ref(true)
 
+// RAG 知识库检索开关（sessionStorage 持久化，刷新不丢失）
+const ragEnabled = ref(sessionStorage.getItem('rag_enabled') === 'true')
+function toggleRag() {
+  ragEnabled.value = !ragEnabled.value
+  sessionStorage.setItem('rag_enabled', String(ragEnabled.value))
+}
+
 const {
   messages,
   isLoading,
@@ -369,6 +392,7 @@ async function handleSend() {
   await sendMessage(text, {
     agent_type: props.agentType,
     user_token: sessionStorage.getItem(props.tokenKey) || '',
+    enable_rag: ragEnabled.value,
   })
 }
 
@@ -378,6 +402,7 @@ async function handleQuickAction(text: string) {
   await sendMessage(text, {
     agent_type: props.agentType,
     user_token: sessionStorage.getItem(props.tokenKey) || '',
+    enable_rag: ragEnabled.value,
   })
 }
 

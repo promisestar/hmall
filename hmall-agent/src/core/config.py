@@ -41,11 +41,14 @@ class Settings(BaseSettings):
     CUSTOMER_JKS_PATH: str = "keys/hmall.jks"
     ADMIN_JKS_PATH: str = "keys/admin.jks"
 
-    # ==================== RAG（预留） ====================
-    RAG_BASE_URL: str = "http://localhost:9621"
-    RAG_USERNAME: str = "admin"
-    RAG_PASSWORD: str = "admin123"
-    RAG_SPACE_ID: str = "hmall_space"
+    # ==================== RAG（LightRAG + MCP） ====================
+    RAG_BASE_URL: str = "http://localhost:9621"      # LightRAG Server 地址
+    RAG_USERNAME: str = "admin"                      # LightRAG 登录用户名
+    RAG_PASSWORD: str = "admin123"                   # LightRAG 登录密码
+    RAG_SPACE_ID: str = "hmall_space"                # LightRAG 工作空间隔离标识
+    RAG_API_KEY: str = ""                            # LightRAG API Key（可选，优先于账号密码）
+    RAG_AUTH_ENABLED: bool = True                    # 是否启用 LightRAG 认证
+    RAG_MCP_PORT: int = 8008                         # RAG MCP Server 监听端口
 
     @property
     def redis_url(self) -> str:

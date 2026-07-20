@@ -57,7 +57,7 @@
 │  │  ├── PermissionMiddleware（AdminAgent 纯只读过滤）             │   │
 │  │  ├── RegexShortcutMiddleware（L1 正则快捷路由 <5ms）          │   │
 │  │  ├── SkillsMiddleware（SKILL.md 规范加载）                    │   │
-│  │  └── RAGMiddleware（预留桩）                                  │   │
+│  │  └── RAGMiddleware（RAG 动态工具注入，已实现）                │   │
 │  └───────────────────────┬────────────────────────────────────┘   │
 │                          │                                         │
 │  ┌───────────────────────▼────────────────────────────────────┐   │
@@ -167,7 +167,7 @@ hmall-agent/
 │   │   ├── auth.py                    # AuthMiddleware 双 JWT 透传
 │   │   ├── permission.py              # PermissionMiddleware 工具权限
 │   │   ├── regex_shortcut.py          # RegexShortcutMiddleware L1 路由
-│   │   └── rag_context.py             # RAGMiddleware 预留桩
+│   │   └── rag_context.py             # RAGMiddleware（已实现：动态注入 RAG 工具）
 │   │
 │   ├── agents/
 │   │   ├── customer/
@@ -189,7 +189,7 @@ hmall-agent/
 │   │   └── batch_report.py            # 自定义 FastAPI 路由
 │   │
 │   ├── mcp_servers/
-│   │   └── rag_server.py              # RAG MCP Server 预留桩
+│   │   └── rag_server.py              # RAG MCP Server（已实现：LightRAGClient + 3 工具）
 │   │
 │   └── workspace/                     # Skills 文件
 │       ├── customer/skills/           # 5 个 C 端 SKILL.md
@@ -331,7 +331,11 @@ WRITE_TOOLS = {
 
 #### 3.4.4 RAGMiddleware（`src/middleware/rag_context.py`）
 
-预留桩，根据 `context.enable_rag` 动态注入 RAG 工具。当前不做任何操作，后续集成 LightRAG + MCP 桥接后启用。
+**已实现**。根据 `context.enable_rag` 动态注入 RAG 工具：
+- `enable_rag=true` → 通过 `rag_loader.py` 加载 MCP RAG 工具（rag_query / rag_query_data / rag_graph_search）并追加到 request.tools
+- `enable_rag=false` → 不注入 RAG 工具
+- MCP Server 不可达时降级为不注入（log warning，不阻塞 Agent 核心功能）
+- 工具加载器模块级缓存，避免每次 model_call 重复连接 MCP Server
 
 ### 3.5 CustomerAgent 实现
 
@@ -633,7 +637,10 @@ def _status_text(status, mapping) -> str:
 
 #### 3.8.4 RAG MCP Server（`src/mcp_servers/rag_server.py`）
 
-预留桩，后续集成 LightRAG + MCP 桥接后提供 `rag_query` / `rag_query_data` / `rag_graph_search` 三个工具。
+**已实现**。独立的 FastMCP HTTP 服务（端口 8008），桥接 LightRAG REST API：
+- `LightRAGClient`：封装 OAuth2 登录、JWT token 缓存、401 自动重登录、httpx 单例
+- 3 个 MCP 工具：`rag_query`（POST /query 语义检索）、`rag_query_data`（POST /query/data 结构化查询）、`rag_graph_search`（图谱搜索）
+- 独立启动入口 `start_rag_server.py`，与 Agent Server 解耦
 
 ### 3.9 Skills 规范文件
 
@@ -653,7 +660,7 @@ def _status_text(status, mapping) -> str:
 |-------|------|------|
 | `daily-report` | `/skills/daily-report/SKILL.md` | 运营日报生成流程 |
 | `data-query` | `/skills/data-query/SKILL.md` | 数据查询规范（商品/订单/秒杀/用户） |
-| `rag-query` | `/skills/rag-query/SKILL.md` | RAG 知识查询（预留） |
+| `rag-query` | `/skills/rag-query/SKILL.md` | RAG 知识库检索（已实现） |
 
 ### 3.10 测试
 
@@ -919,11 +926,14 @@ JWT_VERIFY_LOCAL=false              # false 时依赖 Gateway 验证
 CUSTOMER_JKS_PATH=keys/hmall.jks   # C 端 RSA 密钥
 ADMIN_JKS_PATH=keys/admin.jks      # 管理端 RSA 密钥（独立）
 
-# RAG（预留）
+# RAG（LightRAG + MCP）
 RAG_BASE_URL=http://localhost:9621
 RAG_USERNAME=admin
 RAG_PASSWORD=admin123
 RAG_SPACE_ID=hmall_space
+RAG_API_KEY=
+RAG_AUTH_ENABLED=true
+RAG_MCP_PORT=8008
 ```
 
 ### 5.2 依赖声明（`pyproject.toml`）
@@ -1093,13 +1103,13 @@ npm run dev                          # Vite dev server
 
 **后续优化**：实现 `src/gateway/auth.py` 中的双 keystore JWT 本地验证（使用 `cryptography` 库解析 `hmall.jks` / `admin.jks`），`JWT_VERIFY_LOCAL=true` 时在 Agent 层验证并提取 `user_id`。
 
-### 8.2 RAG 知识库未集成
+### 8.2 RAG 知识库集成（已实现）
 
-**现状**：`RAGMiddleware` 为预留桩，`rag_server.py` 为注释桩代码，Skills 中 `rag-query` 为预留规范。
+**现状**：RAG 知识库集成已完成。`RAGMiddleware` 根据 `context.enable_rag` 动态注入 RAG 工具，`rag_server.py` 作为 FastMCP HTTP 服务桥接 LightRAG REST API，Skills 中 `rag-query` 规范已完善，前端 ChatPanel.vue 新增「知识库」开关按钮。
 
-**影响**：AdminAgent 无法回答专业知识问题（如"秒杀库存怎么设置合理？"）。
+**影响**：AdminAgent 可回答专业知识问题（如"秒杀库存怎么设置合理？"），CustomerAgent 可回答退换货政策等商城知识。RAG 功能默认关闭，需用户在前端点击「知识库」开关开启。
 
-**后续优化**：集成 LightRAG + MCP 桥接，构建运营知识库（秒杀策略/库存管理/订单分析等），通过 `RAGMiddleware` 动态注入 RAG 工具。
+**依赖**：需独立启动 LightRAG Server（:9621）和 RAG MCP Server（:8008），详见 `hmall-agent-rag-integration.md`。
 
 ### 8.3 正则路由仅支持精确匹配
 
@@ -1170,4 +1180,4 @@ npm run dev                          # Vite dev server
 
 ---
 
-> **实现完成度**：三级路由架构（正则→interrupt→LLM）全部实现，包含 CustomerAgent（18 工具）、AdminAgent（10 只读工具 + 日报编排）、双 JWT 认证、Redis Checkpoint 对话记忆、Vue 3 前端集成（独立全页对话 + Markdown 渲染 + SDK 1.x 原生 API）等完整链路。RAG 知识库、JWT 本地验证、LLM 降级文案为后续优化项。
+> **实现完成度**：三级路由架构（正则→interrupt→LLM）全部实现，包含 CustomerAgent（18 工具）、AdminAgent（10 只读工具 + 日报编排）、双 JWT 认证、Redis Checkpoint 对话记忆、Vue 3 前端集成（独立全页对话 + Markdown 渲染 + SDK 1.x 原生 API）、RAG 知识库集成（LightRAG + MCP 桥接 + 前端开关）等完整链路。JWT 本地验证、LLM 降级文案为后续优化项。

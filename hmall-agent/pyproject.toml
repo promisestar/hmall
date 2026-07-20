@@ -19,6 +19,8 @@ dependencies = [
     "redis>=5.0.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
+    # RAG MCP Server 依赖（LightRAG 通过 HTTP API 调用，无需 pip 安装 lightrag-hku）
+    # fastmcp 和 langchain-mcp-adapters 已在上方声明
 ]
 
 [dependency-groups]

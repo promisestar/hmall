@@ -18,6 +18,7 @@ from deepagents.middleware import SkillsMiddleware
 from src.core.llms import qwen_model
 from src.middleware.auth import AuthMiddleware
 from src.middleware.permission import PermissionMiddleware
+from src.middleware.rag_context import RAGMiddleware
 from src.middleware.regex_shortcut import RegexShortcutMiddleware
 
 from src.agents.admin.prompts import SYSTEM_PROMPT
@@ -73,6 +74,7 @@ agent = create_agent(
         AuthMiddleware(),
         PermissionMiddleware(),        # AdminAgent 纯只读，拦截所有写操作
         regex_middleware,              # L1 正则快捷路由（运营日报等）
+        RAGMiddleware(),               # RAG 动态工具注入（enable_rag=True 时生效）
         skills_middleware,
     ],
     system_prompt=SYSTEM_PROMPT,

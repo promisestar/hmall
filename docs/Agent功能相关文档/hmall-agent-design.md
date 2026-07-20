@@ -80,7 +80,7 @@ hmall（枫叶商城）已完成微服务架构搭建，包含商品、购物车
 │  │  ├── PermissionMiddleware（工具权限拦截：AdminAgent 纯只读）  │   │
 │  │  ├── RegexShortcutMiddleware（L1 正则快捷路由：<5ms）        │   │
 │  │  ├── SkillsMiddleware（SKILL.md 规范加载）                   │   │
-│  │  └── RAGMiddleware（RAG 动态控制，预留）                     │   │
+│  │  └── RAGMiddleware（RAG 动态工具注入：enable_rag=true 时生效）│   │
 │  └───────────────────────┬────────────────────────────────────┘   │
 │                          │                                         │
 │  ┌───────────────────────▼────────────────────────────────────┐   │
@@ -159,7 +159,8 @@ hmall（枫叶商城）已完成微服务架构搭建，包含商品、购物车
 | **LLM 框架** | LangChain 1.x | 消息管理 + 工具调用 |
 | **Checkpoint 后端** | Redis（复用 hmall Redis，db=1） | `langgraph-checkpoint-redis` |
 | **HTTP 客户端** | httpx | 异步调用 Java 后端 API |
-| **MCP 协议** | FastMCP + `langchain-mcp-adapters` | RAG 桥接（预留） |
+| **MCP 协议** | FastMCP + `langchain-mcp-adapters` | RAG 桥接（LightRAG → MCP Server → Agent） |
+| **RAG 引擎** | LightRAG（git submodule） | 知识图谱 + 向量检索，REST API 调用 |
 | **可观测性** | LangGraph Studio + LangSmith（可选） | 图可视化 + 追踪 |
 | **日志** | logging（uvicorn 内置） | 结构化日志 |
 
@@ -230,7 +231,7 @@ class Context:
     agent_type: str = "customer"     # "customer" or "admin"
     user_id: str = ""                # 当前 C 端用户 ID
     user_token: str = ""             # C 端用户 JWT Token
-    enable_rag: bool = False         # RAG 开关（预留）
+    enable_rag: bool = False         # RAG 开关（前端控制，True 时注入 RAG 工具）
 
 
 # ============================================================================
@@ -1419,11 +1420,14 @@ JWT_VERIFY_LOCAL=false              # false 时依赖 Gateway 验证
 CUSTOMER_JKS_PATH=keys/hmall.jks   # C 端 RSA 密钥
 ADMIN_JKS_PATH=keys/admin.jks      # 管理端 RSA 密钥（独立）
 
-# ==================== RAG（预留） ====================
-RAG_BASE_URL=http://localhost:9621
-RAG_USERNAME=admin
-RAG_PASSWORD=admin123
-RAG_SPACE_ID=hmall_space
+# ==================== RAG（LightRAG + MCP） ====================
+RAG_BASE_URL=http://localhost:9621       # LightRAG Server 地址
+RAG_USERNAME=admin                       # LightRAG 登录用户名
+RAG_PASSWORD=admin123                    # LightRAG 登录密码
+RAG_SPACE_ID=hmall_space                 # LightRAG 工作空间隔离标识
+RAG_API_KEY=                             # LightRAG API Key（可选，优先于账号密码）
+RAG_AUTH_ENABLED=true                    # 是否启用 LightRAG 认证
+RAG_MCP_PORT=8008                        # RAG MCP Server 监听端口
 ```
 
 ### 10.4 关键配置说明
@@ -1846,7 +1850,7 @@ npm run dev                          # Vite dev server
 
 | 方向 | 说明 | 优先级 |
 |------|------|--------|
-| RAG 知识库 | 运营/商品/秒杀策略知识库，AdminAgent 专业知识问答，通过 MCP 桥接 LightRAG | P1 |
+| ~~RAG 知识库~~ | ~~运营/商品/秒杀策略知识库，通过 MCP 桥接 LightRAG~~ **已实现（见第 16 章）** | ~~P1~~ |
 | 商品推荐 | 基于用户浏览/购买历史的个性化推荐 | P2 |
 | 优惠券系统 | hmall 实现优惠券后，新增 5 个工具 | P2 |
 | 售后系统 | hmall 实现售后后，新增 4 个工具 | P2 |
@@ -1854,3 +1858,125 @@ npm run dev                          # Vite dev server
 | LangSmith 可观测性 | 接入 LangSmith 追踪，监控 LLM 调用链和工具命中率 | P3 |
 | 正则规则动态加载 | 从 Nacos 配置中心加载正则路由规则，无需重启 | P3 |
 | 对话分析 | 对话日志分析，挖掘用户高频问题和痛点，优化 L1 正则规则 | P3 |
+
+---
+
+## 16. RAG 知识库集成（LightRAG + MCP）
+
+> 版本：v2.2 补充  
+> 日期：2026-07-20  
+> LightRAG 作为 git submodule 集成，通过 MCP 协议桥接到 Agent
+
+### 16.1 架构概览
+
+```
+前端 ChatPanel.vue
+  │ 用户点击「知识库」开关 → ragEnabled → sessionStorage 持久化
+  │ sendMessage(text, {agent_type, user_token, enable_rag})
+  ▼
+LangGraph Agent（context 透传 enable_rag）
+  │
+  ├─ RAGMiddleware.awrap_model_call()
+  │    │ context.enable_rag = true
+  │    │ → rag_loader.get_rag_tools()  [模块级缓存]
+  │    │ → request.override(tools=[...业务工具, ...RAG 工具])
+  │    │ context.enable_rag = false → 直接放行
+  │    ▼
+  │  LLM 选择 RAG 工具 → MCP Protocol → MCP Server (:8008)
+  │                                       → LightRAGClient → LightRAG API (:9621)
+  │
+  └─ 业务工具（Gateway → Java 微服务）
+```
+
+**三层架构**：
+1. **LightRAG（:9621）**：知识图谱 + 向量检索引擎，作为 git submodule 独立部署
+2. **MCP Server（:8008）**：FastMCP HTTP 服务，封装 LightRAG REST API 为 3 个 MCP 工具
+3. **RAGMiddleware**：Agent 中间件，根据 `enable_rag` 动态注入 MCP 工具
+
+### 16.2 MCP Server 设计（`src/mcp_servers/rag_server.py`）
+
+独立的 FastMCP HTTP 进程，通过 `langchain-mcp-adapters` 的 `MultiServerMCPClient` 连接。
+
+**LightRAGClient**：封装 LightRAG REST API，特性：
+- OAuth2 登录获取 JWT（POST /login），token 缓存 + 401 自动重登录
+- 支持可选 API Key 认证（`RAG_API_KEY`，优先于账号密码）
+- `httpx.AsyncClient` 单例复用连接
+
+**3 个 MCP 工具**：
+
+| 工具 | LightRAG 端点 | 用途 |
+|------|--------------|------|
+| `rag_query(query, mode)` | POST /query | 语义检索，返回答案 + 参考来源 |
+| `rag_query_data(query, mode)` | POST /query/data | 结构化查询，返回 entities/relationships/chunks |
+| `rag_graph_search(query)` | POST /query/data | 图谱搜索，聚合实体关系 |
+
+查询模式（mode）：`mix`（默认，图谱+向量融合）、`hybrid`、`local`、`global`、`naive`、`bypass`
+
+### 16.3 RAGMiddleware 动态工具注入（`src/middleware/rag_context.py`）
+
+```python
+class RAGMiddleware(AgentMiddleware):
+    async def awrap_model_call(self, request, handler):
+        # 1. 检查 context.enable_rag
+        # 2. enable_rag=true → rag_loader.get_rag_tools() 获取 MCP 工具
+        # 3. 追加到 request.tools（避免重复注入同名工具）
+        # 4. MCP Server 不可达 → log warning，不阻塞（降级为无 RAG）
+```
+
+**工具加载器**（`src/tools/rag_loader.py`）：
+- `MultiServerMCPClient` 连接 `http://localhost:8008/mcp`（streamable_http 传输）
+- 模块级缓存工具列表，首次加载后复用，避免每次 model_call 都连接
+- `is_available()` 健康检查，`refresh()` 强制刷新
+
+**降级策略**：MCP Server 不可达时只 log warning 不阻塞，Agent 仍可使用业务工具。与现有降级模式一致（如推荐接口失败时降级提示）。
+
+### 16.4 前端 RAG 开关（`ChatPanel.vue`）
+
+头部右侧新增「知识库」开关按钮：
+- 书本图标 + 状态指示灯（绿色=开启，灰色=关闭）
+- 状态持久化到 `sessionStorage`（key: `rag_enabled`），刷新不丢失
+- `handleSend` / `handleQuickAction` 调用 `sendMessage` 时传入 `enable_rag: ragEnabled.value`
+- 利用 `useLangGraph.ts` 已预留的 `AgentContext.enable_rag` 字段，无需改 composable
+
+### 16.5 Skills 规范
+
+- `src/workspace/admin/skills/rag-query/SKILL.md`：管理端 RAG 技能（运营策略、库存管理指南等）
+- `src/workspace/customer/skills/rag-query/SKILL.md`：C 端 RAG 技能（退换货政策、支付方式等）
+
+两个 Agent 的 SkillsMiddleware sources 均配置 `/skills/rag-query/`。
+
+### 16.6 启动顺序
+
+```bash
+# 1. 启动 LightRAG Server（端口 9621）
+cd LightRAG && lightrag-server
+
+# 2. 启动 RAG MCP Server（端口 8008）
+cd hmall-agent && uv run python start_rag_server.py
+
+# 3. 启动 Agent Server（端口 8090）
+uv run python start_server.py
+
+# 4. 启动前端
+cd hmall-frontend && npm run dev
+```
+
+### 16.7 配置项
+
+| 环境变量 | 默认值 | 说明 |
+|---------|--------|------|
+| `RAG_BASE_URL` | `http://localhost:9621` | LightRAG Server 地址 |
+| `RAG_USERNAME` | `admin` | LightRAG 登录用户名 |
+| `RAG_PASSWORD` | `admin123` | LightRAG 登录密码 |
+| `RAG_API_KEY` | （空） | LightRAG API Key（可选，优先于账号密码） |
+| `RAG_AUTH_ENABLED` | `true` | 是否启用 LightRAG 认证 |
+| `RAG_MCP_PORT` | `8008` | RAG MCP Server 监听端口 |
+
+### 16.8 知识库管理
+
+知识库文档由运营人员通过 LightRAG WebUI（`http://localhost:9621/webui`）上传维护：
+- 支持 PDF / DOCX / TXT / Markdown 等格式
+- LightRAG 自动构建知识图谱 + 向量索引
+- Agent 不负责文档管理，只负责检索
+
+详细部署和使用说明见 `hmall-agent-rag-integration.md`。

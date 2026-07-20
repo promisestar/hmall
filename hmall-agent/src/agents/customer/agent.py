@@ -18,6 +18,7 @@ from deepagents.middleware import SkillsMiddleware
 from src.core.llms import qwen_model
 from src.middleware.auth import AuthMiddleware
 from src.middleware.permission import PermissionMiddleware
+from src.middleware.rag_context import RAGMiddleware
 from src.middleware.regex_shortcut import RegexShortcutMiddleware
 
 from src.agents.customer.prompts import SYSTEM_PROMPT
@@ -55,6 +56,7 @@ skills_middleware = SkillsMiddleware(
         "/skills/order-management/",
         "/skills/address-management/",
         "/skills/personalized-recommendation/",
+        "/skills/rag-query/",
     ],
 )
 
@@ -79,6 +81,7 @@ agent = create_agent(
         AuthMiddleware(),                  # 双 JWT 认证
         PermissionMiddleware(),            # 工具权限拦截
         regex_middleware,                  # L1 正则快捷路由
+        RAGMiddleware(),                   # RAG 动态工具注入（enable_rag=True 时生效）
         skills_middleware,                 # Skills 规范加载
     ],
     system_prompt=SYSTEM_PROMPT,
