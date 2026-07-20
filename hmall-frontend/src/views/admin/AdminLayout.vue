@@ -53,7 +53,7 @@
         </div>
         <div class="flex items-center gap-3">
           <AdminChat />
-          <el-tag size="small" type="success">在线</el-tag>
+          <el-tag size="small" :type="llmStatusType">{{ llmStatusText }}</el-tag>
           <span class="text-sm text-gray-600">{{ adminStore.username }}</span>
           <el-button text type="danger" size="small" @click="handleLogout">退出登录</el-button>
         </div>
@@ -71,12 +71,16 @@ import { ref, computed, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Fold, Expand, DataAnalysis, Goods, UserFilled, Tickets, AlarmClock, User, Menu as MenuIcon, Setting } from '@element-plus/icons-vue'
 import { useAdminStore } from '@/stores/admin'
+import { useLlmHealth } from '@/composables/useLlmHealth'
 import AdminChat from '@/components/chat/AdminChat.vue'
 
 const route = useRoute()
 const router = useRouter()
 const adminStore = useAdminStore()
 const collapsed = ref(false)
+
+// LLM API 健康状态（30 秒轮询，动态显示在线/离线）
+const { statusText: llmStatusText, statusType: llmStatusType } = useLlmHealth()
 
 const activeMenu = computed(() => route.path)
 const currentTitle = computed(() => {

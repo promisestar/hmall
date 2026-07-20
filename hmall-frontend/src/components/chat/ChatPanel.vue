@@ -91,7 +91,7 @@
           </div>
           <div>
             <h3 class="text-[17px] font-semibold leading-tight">{{ title }}</h3>
-            <p class="text-[12px] opacity-80 mt-0.5">{{ isLoading ? '正在回复...' : '在线' }}</p>
+            <p class="text-[12px] opacity-80 mt-0.5" :class="agentStatusClass">{{ agentStatusText }}</p>
           </div>
         </div>
         <div class="flex items-center gap-2">
@@ -230,6 +230,7 @@
 import { ref, nextTick, watch, computed, onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { useLangGraph } from '@/composables/useLangGraph'
+import { useLlmHealth } from '@/composables/useLlmHealth'
 import MessageBubble from './MessageBubble.vue'
 import InterruptActions from './InterruptActions.vue'
 
@@ -361,6 +362,25 @@ function toggleRag() {
   ragEnabled.value = !ragEnabled.value
   sessionStorage.setItem('rag_enabled', String(ragEnabled.value))
 }
+
+// LLM API 健康状态（30 秒轮询后端 /api/v1/llm/health）
+const { statusText: llmStatusText, llmStatus } = useLlmHealth()
+const agentStatusText = computed(() => {
+  if (isLoading.value) return '正在回复...'
+  return llmStatusText.value
+})
+const agentStatusClass = computed(() => {
+  if (isLoading.value) return ''
+  switch (llmStatus.value) {
+    case 'online':
+      return ''
+    case 'offline':
+      return 'text-red-200'
+    case 'checking':
+      return 'text-yellow-200'
+  }
+  return ''
+})
 
 const {
   messages,

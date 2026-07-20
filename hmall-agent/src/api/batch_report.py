@@ -1,4 +1,4 @@
-"""自定义 FastAPI 路由 — 批量运营报告。
+"""自定义 FastAPI 路由 — 批量运营报告 + LLM 健康检查。
 
 通过 LANGGRAPH_HTTP 环境变量挂载到 LangGraph Server。
 """
@@ -7,7 +7,10 @@ import httpx
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from src.api.health import router as health_router
+
 app = FastAPI()
+app.include_router(health_router)
 
 
 class BatchReportRequest(BaseModel):
