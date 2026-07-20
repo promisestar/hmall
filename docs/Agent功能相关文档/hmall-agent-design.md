@@ -71,7 +71,8 @@ hmall（枫叶商城）已完成微服务架构搭建，包含商品、购物车
 │  │  ├── POST /threads/search（线程列表）                        │   │
 │  │  ├── POST /threads/{id}/state（线程状态/文件同步）           │   │
 │  │  ├── DELETE /threads/{id}（删除线程）                        │   │
-│  │  └── POST /api/v1/batch-report（自定义路由：批量运营报告）    │   │
+│  │  ├── POST /api/v1/batch-report（自定义路由：批量运营报告）    │   │
+│  │  └── GET  /api/v1/llm/health（自定义路由：LLM 连通性检查）     │   │
 │  └────────────────────────────────────────────────────────────┘   │
 │                          │                                         │
 │  ┌───────────────────────▼────────────────────────────────────┐   │
@@ -1275,7 +1276,8 @@ hmall-agent/
 │   │       └── regex_rules.py         #   L1 正则路由规则
 │   │
 │   ├── api/
-│   │   └── batch_report.py            # POST /api/v1/batch-report 自定义路由
+│   │   ├── batch_report.py            # POST /api/v1/batch-report 自定义路由
+│   │   └── health.py                  # GET /api/v1/llm/health LLM 连通性检查
 │   │
 │   ├── middleware/
 │   │   ├── auth.py                    # AuthMiddleware：双 JWT 认证
@@ -1980,3 +1982,114 @@ cd hmall-frontend && npm run dev
 - Agent 不负责文档管理，只负责检索
 
 详细部署和使用说明见 `hmall-agent-rag-integration.md`。
+
+---
+
+## 17. LLM 健康检查（前端动态在线状态）
+
+> 版本：v2.3 补充
+> 日期：2026-07-20
+> 前端"Agent 在线"状态从写死改为根据 LLM API 远程调用连通性动态显示
+
+### 17.1 问题背景
+
+此前 `ChatPanel.vue` 头部的 `{{ isLoading ? '正在回复...' : '在线' }}` 和
+`AdminLayout.vue` 的 `<el-tag type="success">在线</el-tag>` 均为写死值，
+无论 LLM API（DashScope）是否可达都显示"在线"，无法反映真实服务状态。
+
+### 17.2 架构设计
+
+```
+前端组件（ChatPanel / AdminLayout）
+  │ onMounted → useLlmHealth.start()
+  │ 每 30s 轮询 GET /api/v1/llm/health
+  ▼
+LangGraph Server (:8090)
+  │ 自定义路由层（LANGGRAPH_HTTP 注入）
+  │ src/api/health.py → _ping_llm()
+  ▼
+DashScope API (dashscope.aliyuncs.com)
+  │ POST /compatible-mode/v1/chat/completions
+  │ {model: "qwen-turbo", messages:[{role:"user",content:"ping"}], max_tokens:1}
+  ▼
+返回 {llm_reachable, latency_ms, detail}
+  → 前端 llmStatus = 'online' | 'offline' | 'checking'
+```
+
+### 17.3 后端实现（`src/api/health.py`）
+
+**端点**：`GET /api/v1/llm/health`
+
+**探测方式**：向 DashScope OpenAI 兼容接口发送 `max_tokens=1` 的最小 chat completions 请求，
+验证三项：
+1. API Key 有效性（`DASHSCOPE_API_KEY`）
+2. LLM 服务可达性（网络连通）
+3. 模型可用性（`LLM_MODEL_NAME` 配置正确）
+
+**缓存策略**：模块级缓存 10 秒（`_CACHE_TTL = 10`），避免高频轮询消耗 token。
+缓存命中时返回 `cached: true`。
+
+**响应结构**：
+```json
+{
+  "status": "ok",
+  "llm_reachable": true,
+  "latency_ms": 342,
+  "model": "qwen-turbo",
+  "detail": null,
+  "cached": false,
+  "checked_at": 1721472000.0
+}
+```
+
+**异常兜底**：超时（8s）、连接错误、HTTP 错误码（401/429/5xx）、未配置 API Key 均返回
+`llm_reachable: false` + `detail` 错误说明，不抛异常。
+
+**路由挂载**：在 `src/api/batch_report.py` 中 `app.include_router(health_router)`，
+随 `LANGGRAPH_HTTP` 一起注入 LangGraph Server。
+
+### 17.4 前端实现
+
+#### Composable（`src/composables/useLlmHealth.ts`）
+
+| 特性 | 说明 |
+|------|------|
+| 轮询间隔 | 30 秒（`intervalMs` 可配置） |
+| 状态枚举 | `online` / `offline` / `checking` |
+| 派生属性 | `statusText`（在线/离线/检测中）、`statusType`（success/danger/info） |
+| 生命周期 | `onMounted` 自动开始，`onUnmounted` 自动停止 |
+| 手动刷新 | `refresh()` 方法 |
+| API URL | 取 `VITE_AGENT_URL` 环境变量，默认 `http://localhost:8090` |
+
+#### ChatPanel.vue 状态展示
+
+```vue
+<p class="text-[12px] opacity-80 mt-0.5" :class="agentStatusClass">
+  {{ agentStatusText }}
+</p>
+```
+
+- `isLoading=true` → "正在回复..."（不受 LLM 状态影响）
+- `llmStatus=online` → "在线"（白色）
+- `llmStatus=offline` → "离线"（`text-red-200`）
+- `llmStatus=checking` → "检测中"（`text-yellow-200`）
+
+#### AdminLayout.vue 状态标签
+
+```vue
+<el-tag size="small" :type="llmStatusType">{{ llmStatusText }}</el-tag>
+```
+
+- online → `<el-tag type="success">在线</el-tag>`
+- offline → `<el-tag type="danger">离线</el-tag>`
+- checking → `<el-tag type="info">检测中</el-tag>`
+
+### 17.5 设计考量
+
+| 决策 | 理由 |
+|------|------|
+| 用 `max_tokens=1` 的 chat 请求而非 `/models` | OpenAI 兼容接口的 `/models` 在某些提供商不返回认证错误，chat 请求最稳 |
+| 10 秒模块级缓存 | 前端 30 秒轮询 + 可能多组件同时检查，缓存避免重复消耗 token |
+| 前端 30 秒轮询间隔 | 平衡实时性与请求量；LLM 状态不会频繁变化 |
+| `onUnmounted` 自动停止 | 避免组件卸载后继续轮询造成内存泄漏 |
+| 端点不可达也视为离线 | `fetch` 异常时 `llmStatus='offline'`，覆盖 Agent Server 本身宕机的情况 |

@@ -23,7 +23,7 @@
 | Agent 后端测试新增 | 2 | 正则路由测试 + 格式化函数测试 |
 | Agent 后端文档新增 | 1 | `README.md` |
 | **Agent 后端合计** | **45** | — |
-| 前端 Composable 修改 | 1 | `src/composables/useLangGraph.ts`（SDK 1.x 原生 API + context-only + 响应式修复） |
+| 前端 Composable | 2 | `useLangGraph.ts`（SDK 1.x 原生 API + context-only + 响应式修复）+ `useLlmHealth.ts`（LLM 健康状态 30 秒轮询） |
 | 前端组件新增 | 3 | `ChatPanel.vue`（可复用全页对话） + `portal/ChatPage.vue` + `admin/ChatPage.vue` |
 | 前端组件修改 | 3 | `MessageBubble.vue`（Markdown 渲染 + 溢出修复） + `ChatWidget.vue`（简化为路由入口） + `AdminChat.vue`（简化为路由入口） |
 | 前端修改 | 4 | `package.json`（SDK ^1.0.3 + marked） + `router/index.ts`（+2 路由） + `PortalLayout.vue`（+AI客服链接） + `AdminLayout.vue`（+面包屑） |
@@ -48,7 +48,8 @@
 │  │  ├── /threads/{id}/runs/stream（SSE 流式）                   │   │
 │  │  ├── /assistants/{id}/runs/stream（专用端点）                │   │
 │  │  ├── /threads（线程管理）                                     │   │
-│  │  └── /api/v1/batch-report（自定义路由：批量运营报告）          │   │
+│  │  ├── /api/v1/batch-report（自定义路由：批量运营报告）          │   │
+│  │  └── /api/v1/llm/health（自定义路由：LLM 连通性检查）           │   │
 │  └───────────────────────┬────────────────────────────────────┘   │
 │                          │                                         │
 │  ┌───────────────────────▼────────────────────────────────────┐   │
@@ -186,7 +187,8 @@ hmall-agent/
 │   │   └── formatters.py              # 格式化函数（15 个）
 │   │
 │   ├── api/
-│   │   └── batch_report.py            # 自定义 FastAPI 路由
+│   │   ├── batch_report.py            # 自定义 FastAPI 路由（批量报告 + 健康检查）
+│   │   └── health.py                  # LLM 连通性检查路由（GET /api/v1/llm/health）
 │   │
 │   ├── mcp_servers/
 │   │   └── rag_server.py              # RAG MCP Server（已实现：LightRAGClient + 3 工具）
@@ -624,7 +626,8 @@ def _status_text(status, mapping) -> str:
 - **API**：`http://localhost:8090`
 - **OpenAPI 文档**：`http://localhost:8090/docs`
 - **LangGraph Studio**：`http://localhost:8090/ui`
-- **健康检查**：`http://localhost:8090/ok`
+- **健康检查**：`http://localhost:8090/ok`（LangGraph 内置，服务存活）
+- **LLM 连通性检查**：`http://localhost:8090/api/v1/llm/health`（真实 ping DashScope API）
 
 #### 3.8.3 自定义路由（`src/api/batch_report.py`）
 
@@ -633,7 +636,8 @@ def _status_text(status, mapping) -> str:
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/v1/batch-report` | POST | 批量运营报告（内部调用 AdminAgent） |
-| `/api/v1/health` | GET | 健康检查 |
+| `/api/v1/health` | GET | 服务存活健康检查 |
+| `/api/v1/llm/health` | GET | LLM API 连通性检查（真实 ping DashScope，10 秒缓存） |
 
 #### 3.8.4 RAG MCP Server（`src/mcp_servers/rag_server.py`）
 
@@ -641,6 +645,16 @@ def _status_text(status, mapping) -> str:
 - `LightRAGClient`：封装 OAuth2 登录、JWT token 缓存、401 自动重登录、httpx 单例
 - 3 个 MCP 工具：`rag_query`（POST /query 语义检索）、`rag_query_data`（POST /query/data 结构化查询）、`rag_graph_search`（图谱搜索）
 - 独立启动入口 `start_rag_server.py`，与 Agent Server 解耦
+
+#### 3.8.5 LLM 健康检查（`src/api/health.py`）
+
+**已实现**。通过 `GET /api/v1/llm/health` 端点真实 ping DashScope API 判断 LLM 连通性：
+- 向 `{LLM_API_BASE}/chat/completions` 发送 `max_tokens=1` 的最小请求，验证 API Key + 服务可达 + 模型可用
+- 模块级缓存 10 秒（`_CACHE_TTL`），避免高频轮询消耗 token
+- 完整异常兜底：超时（8s）、连接错误、HTTP 错误码、未配置 API Key
+- 返回 `{status, llm_reachable, latency_ms, model, detail, cached, checked_at}`
+- 在 `batch_report.py` 中通过 `app.include_router(health_router)` 挂载
+- 前端 `useLlmHealth` composable 30 秒轮询此端点，动态显示在线/离线状态
 
 ### 3.9 Skills 规范文件
 
@@ -704,6 +718,9 @@ def _status_text(status, mapping) -> str:
 | 文件 | 改动 |
 |------|------|
 | `src/composables/useLangGraph.ts` | SDK 1.x 原生 API；移除 fetch 绕过；context-only（移除 configurable）；处理 messages/complete；error 事件展示错误消息；Vue 响应式修复 |
+| `src/composables/useLlmHealth.ts` | **新增**：LLM 健康状态轮询 Composable（30 秒轮询 `/api/v1/llm/health`，暴露 llmStatus/statusText/statusType） |
+| `src/components/chat/ChatPanel.vue` | RAG 知识库开关按钮 + 在线状态从写死改为 `useLlmHealth` 动态显示（在线/离线/检测中） |
+| `src/views/admin/AdminLayout.vue` | 在线标签从写死 `<el-tag>在线</el-tag>` 改为 `:type="llmStatusType"` 动态绑定 |
 | `src/components/chat/ChatWidget.vue` | 简化为浮动按钮 `router-link` → `/portal/chat` |
 | `src/components/chat/AdminChat.vue` | 简化为 header 按钮 `router-link` → `/admin/chat` |
 | `src/views/portal/PortalLayout.vue` | 导航栏增加 "AI 客服" 链接 |
@@ -831,6 +848,7 @@ if (idx !== -1) {
 | 特性 | 说明 |
 |------|------|
 | 触发方式 | 右下角浮动按钮（玻璃拟态 + 在线指示器） |
+| 在线状态 | 由 `useLlmHealth` composable 30 秒轮询 `/api/v1/llm/health` 动态更新 |
 | 行为 | `router-link` 跳转 `/portal/chat`（不再展开抽屉） |
 
 ### 4.7 AdminChat 组件（管理端入口，`src/components/chat/AdminChat.vue`）
@@ -888,10 +906,15 @@ header 区域保留 "AI助手" 按钮入口，面包屑增加 `/admin/chat` 标�
 ```vue
 <div class="flex items-center gap-3">
   <AdminChat />
-  <el-tag size="small" type="success">在线</el-tag>
+  <el-tag size="small" :type="llmStatusType">{{ llmStatusText }}</el-tag>
   ...
 </div>
 ```
+
+> **注**：`llmStatusType` 和 `llmStatusText` 由 `useLlmHealth` composable 提供，
+> 30 秒轮询 `/api/v1/llm/health` 动态更新（在线=success / 离线=danger / 检测中=info）。
+> `ChatPanel.vue` 头部状态文字同样改为动态：`isLoading` 时显示"正在回复..."，
+> 否则根据 LLM 健康状态显示"在线"/"离线"/"检测中"。
 
 ---
 
@@ -1082,6 +1105,7 @@ npm run dev                          # Vite dev server
 - [ ] `uv sync` 安装依赖无错误
 - [ ] `start_server.py` 启动日志无异常
 - [ ] 访问 `http://localhost:8090/ok` → 返回 `{"ok": true}`
+- [ ] 访问 `http://localhost:8090/api/v1/llm/health` → 返回 `{"llm_reachable": true, "status": "ok"}`
 - [ ] 访问 `http://localhost:8090/docs` → OpenAPI 文档可加载
 - [ ] 访问 `http://localhost:8090/ui` → LangGraph Studio 可加载
 - [ ] `GET /assistants/search` → 返回 customer_agent 和 admin_agent
@@ -1171,6 +1195,7 @@ npm run dev                          # Vite dev server
 | `hmall-agent/src/agents/admin/tools.py` | **工具实现**：AdminAgent 10 个只读工具 + 运营日报编排 |
 | `hmall-agent/src/middleware/regex_shortcut.py` | **中间件**：L1 正则快捷路由 |
 | `hmall-frontend/src/composables/useLangGraph.ts` | **前端封装**：LangGraph SDK 1.x Composable（context-only + 响应式修复） |
+| `hmall-frontend/src/composables/useLlmHealth.ts` | **前端封装**：LLM 健康状态轮询 Composable（30 秒轮询，动态在线/离线状态） |
 | `hmall-frontend/src/components/chat/ChatPanel.vue` | **前端组件**：可复用全页对话面板 |
 | `hmall-frontend/src/components/chat/MessageBubble.vue` | **前端组件**：消息气泡（Markdown 渲染 + 溢出修复） |
 | `hmall-frontend/src/components/chat/ChatWidget.vue` | **前端组件**：C 端浮动入口（路由跳转） |
@@ -1180,4 +1205,4 @@ npm run dev                          # Vite dev server
 
 ---
 
-> **实现完成度**：三级路由架构（正则→interrupt→LLM）全部实现，包含 CustomerAgent（18 工具）、AdminAgent（10 只读工具 + 日报编排）、双 JWT 认证、Redis Checkpoint 对话记忆、Vue 3 前端集成（独立全页对话 + Markdown 渲染 + SDK 1.x 原生 API）、RAG 知识库集成（LightRAG + MCP 桥接 + 前端开关）等完整链路。JWT 本地验证、LLM 降级文案为后续优化项。
+> **实现完成度**：三级路由架构（正则→interrupt→LLM）全部实现，包含 CustomerAgent（18 工具）、AdminAgent（10 只读工具 + 日报编排）、双 JWT 认证、Redis Checkpoint 对话记忆、Vue 3 前端集成（独立全页对话 + Markdown 渲染 + SDK 1.x 原生 API）、RAG 知识库集成（LightRAG + MCP 桥接 + 前端开关）、LLM 健康检查（真实 ping DashScope API + 前端动态在线状态）等完整链路。JWT 本地验证、LLM 降级文案为后续优化项。
