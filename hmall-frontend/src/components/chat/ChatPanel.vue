@@ -299,6 +299,8 @@ const CUSTOMER_CARDS: QuickActionCard[] = [
   { text: '查看订单', label: '我的订单', iconSvg: ICONS.order },
   { text: '查看秒杀', label: '秒杀活动', iconSvg: ICONS.flash },
   { text: '猜你喜欢', label: '猜你喜欢', iconSvg: ICONS.recommend },
+  { text: '看了又看', label: '看了又看', iconSvg: ICONS.recommend },
+  { text: '购物车凑单', label: '凑单推荐', iconSvg: ICONS.cart },
   { text: '商品列表', label: '浏览商品', iconSvg: ICONS.package },
 ]
 
