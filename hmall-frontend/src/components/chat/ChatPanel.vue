@@ -28,13 +28,13 @@
             </svg>
             <span class="text-[13px] text-gray-400">暂无会话记录</span>
           </div>
-          <div
-            v-else
-            v-for="t in threads"
-            :key="t.thread_id"
+          <template v-else>
+            <div
+              v-for="t in threads"
+              :key="t.thread_id"
             @click="handleSwitchThread(t.thread_id)"
-            class="group relative px-3 py-2.5 rounded-lg cursor-pointer transition-colors duration-150"
-            :class="t.thread_id === threadId ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50'"
+            class="group relative px-3 py-2.5 rounded-lg cursor-pointer transition-colors duration-150 border border-transparent"
+            :class="t.thread_id === threadId ? theme.activeThreadClass : 'hover:bg-gray-50'"
           >
             <div class="flex items-start justify-between gap-2">
               <div class="flex-1 min-w-0">
@@ -54,7 +54,8 @@
             </div>
             <!-- 当前会话指示器 -->
             <div v-if="t.thread_id === threadId" class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full" :class="theme.indicatorClass"></div>
-          </div>
+            </div>
+          </template>
         </div>
       </div>
     </transition>
@@ -138,7 +139,7 @@
             v-for="card in actionCards"
             :key="card.text"
             @click="handleQuickAction(card.text)"
-            class="quick-card flex flex-col items-center gap-2 px-3 py-3.5 rounded-xl border border-gray-150 bg-gray-50/50 text-gray-600 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group"
+            class="quick-card flex flex-col items-center gap-2 px-3 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 text-gray-600 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group"
             :class="theme.cardHoverClass"
           >
             <div class="w-9 h-9 rounded-lg flex items-center justify-center transition-colors duration-200" :class="theme.cardIconBgClass">
@@ -150,10 +151,10 @@
       </div>
 
       <!-- 消息区域 -->
-      <div ref="messagesContainer" class="flex-1 overflow-y-auto px-6 py-4 scroll-smooth">
-        <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center px-4">
+      <div ref="messagesContainer" class="messages-area flex-1 overflow-y-auto px-6 py-4 scroll-smooth">
+        <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center px-4 animate-fade-up">
           <div
-            class="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-bold mb-4 shadow-lg"
+            class="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-bold mb-4 shadow-lg animate-float"
             :class="theme.welcomeBgClass"
           >
             AI
@@ -244,6 +245,7 @@ interface Theme {
   cardHoverClass: string
   cardIconBgClass: string
   indicatorClass: string
+  activeThreadClass: string
 }
 
 interface QuickActionCard {
@@ -281,6 +283,7 @@ const theme = computed<Theme>(() => {
       cardHoverClass: 'hover:border-[#E4393C]/30 hover:text-[#E4393C] hover:bg-red-50/50',
       cardIconBgClass: 'bg-red-50 group-hover:bg-red-100',
       indicatorClass: 'bg-[#E4393C]',
+      activeThreadClass: 'bg-red-50 border border-red-200',
     }
   }
   return {
@@ -293,6 +296,7 @@ const theme = computed<Theme>(() => {
     cardHoverClass: 'hover:border-[#409EFF]/30 hover:text-[#304156] hover:bg-blue-50/50',
     cardIconBgClass: 'bg-blue-50 group-hover:bg-blue-100',
     indicatorClass: 'bg-[#409EFF]',
+    activeThreadClass: 'bg-blue-50 border border-blue-200',
   }
 })
 
@@ -511,6 +515,13 @@ watch(
 </script>
 
 <style scoped>
+/* 消息区：浅色底 + 细点纹理，弱化大面积纯灰的单调感 */
+.messages-area {
+  background-color: #f7f8fa;
+  background-image: radial-gradient(circle, rgba(27, 31, 38, .05) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
 /* 水平滚动条隐藏（输入区上方卡片 row） */
 .scrollbar-hide {
   -ms-overflow-style: none;

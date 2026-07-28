@@ -1,77 +1,86 @@
 <template>
   <PortalLayout :show-search="false">
     <div class="container-main py-6">
-      <h2 class="text-lg font-bold mb-4 border-l-4 border-[#E4393C] pl-3">订单支付</h2>
+      <h2 class="section-title mb-4">订单支付</h2>
 
-      <div class="bg-white rounded-lg shadow-sm p-6 max-w-[600px] mx-auto">
-        <!-- Order Info -->
-        <div class="text-center mb-6">
-          <p class="text-gray-500 text-sm">订单编号：{{ orderId }}</p>
-          <p class="text-3xl font-bold text-[#E4393C] mt-2">¥{{ formatPrice(amount) }}</p>
-          <p class="text-xs text-gray-400 mt-1" v-if="countdown > 0">
-            剩余支付时间：{{ formatCountdown(countdown) }}
+      <div class="page-card p-8 max-w-[620px] mx-auto">
+        <!-- 订单信息 -->
+        <div class="text-center pb-6 border-b border-dashed border-gray-200">
+          <p class="text-xs text-gray-400">订单编号：{{ orderId }}</p>
+          <div class="flex items-baseline justify-center gap-1 mt-3">
+            <span class="price-tag text-base">¥</span>
+            <span class="price-tag text-[36px] leading-none">{{ formatPrice(amount) }}</span>
+          </div>
+          <p v-if="countdown > 0" class="inline-flex items-center gap-1.5 text-xs text-[#FF6B35] bg-orange-50 rounded-full px-3 py-1 mt-3">
+            <Timer class="w-3.5 h-3.5" />
+            剩余支付时间 {{ formatCountdown(countdown) }}
           </p>
         </div>
 
-        <!-- Pay Method Tabs -->
-        <div class="flex border rounded-lg overflow-hidden mb-6">
+        <!-- 支付方式 -->
+        <div class="grid grid-cols-3 gap-3 my-6">
           <div
             v-for="method in payMethods"
             :key="method.value"
-            class="flex-1 py-3 text-center cursor-pointer text-sm transition-colors"
+            class="relative flex flex-col items-center gap-2 py-4 rounded-xl border cursor-pointer transition-all"
             :class="activePayMethod === method.value
-              ? 'bg-[#E4393C] text-white font-medium'
-              : 'hover:bg-gray-50'"
+              ? 'border-[#E4393C] bg-red-50/60 shadow-[0_0_0_3px_rgba(228,57,60,.06)]'
+              : 'border-gray-200 hover:border-[#E4393C]/50'"
             @click="activePayMethod = method.value"
           >
-            {{ method.label }}
+            <component :is="method.icon" class="w-6 h-6" :class="activePayMethod === method.value ? 'text-[#E4393C]' : 'text-gray-400'" />
+            <span class="text-[13px]" :class="activePayMethod === method.value ? 'text-[#E4393C] font-semibold' : 'text-gray-600'">
+              {{ method.label }}
+            </span>
+            <CheckCircle2
+              v-if="activePayMethod === method.value"
+              class="absolute top-2 right-2 w-4 h-4 text-[#E4393C]"
+            />
           </div>
         </div>
 
-        <!-- Balance Payment -->
+        <!-- 余额支付 -->
         <div v-if="activePayMethod === 'balance'" class="text-center">
-          <div class="mb-4">
-            <p class="text-sm text-gray-500 mb-2">
-              账户余额：<span class="text-[#E4393C] font-bold">¥{{ formatPrice(userStore.balance) }}</span>
-            </p>
-          </div>
-          <div class="flex justify-center mb-4">
+          <p class="text-[13px] text-gray-500 mb-5">
+            账户余额：<span class="price-tag text-base">¥{{ formatPrice(userStore.balance) }}</span>
+          </p>
+          <div class="flex justify-center mb-5">
             <input
               v-model="password"
               type="password"
               placeholder="请输入支付密码"
-              class="border rounded-lg px-4 py-3 w-[280px] text-center outline-none focus:border-[#E4393C] focus:ring-1 focus:ring-[#E4393C]"
+              class="border border-gray-200 rounded-xl px-4 py-3 w-[280px] text-center text-sm outline-none focus:border-[#E4393C] focus:shadow-[0_0_0_3px_rgba(228,57,60,.08)] transition-all"
               @keyup.enter="payByBalance"
             />
           </div>
           <button
             @click="payByBalance"
             :disabled="paying || !password"
-            class="btn-primary px-10 py-3 text-lg disabled:opacity-50"
+            class="btn-primary px-12 py-3 text-base disabled:opacity-50"
           >
             {{ paying ? '支付中...' : '确认支付' }}
           </button>
         </div>
 
-        <!-- QR Code Payment -->
+        <!-- 扫码支付 -->
         <div v-else class="text-center">
-          <div class="bg-gray-50 rounded-lg p-8 inline-block mb-4">
-            <img :src="qrDataUrl || '/img/erweima.png'" class="w-48 h-48 mx-auto" />
+          <div class="inline-block bg-white border border-gray-100 rounded-2xl p-5 shadow-card mb-3">
+            <img :src="qrDataUrl || '/img/erweima.png'" class="w-44 h-44 mx-auto" />
           </div>
-          <p class="text-sm text-gray-500">请使用{{ activePayMethod === 'wechat' ? '微信' : '支付宝' }}扫码支付</p>
+          <p class="text-[13px] text-gray-500">请使用{{ activePayMethod === 'wechat' ? '微信' : '支付宝' }}「扫一扫」完成支付</p>
           <div class="mt-4">
-            <el-button @click="refreshQr" size="small" :loading="refreshingQr">刷新二维码</el-button>
+            <el-button @click="refreshQr" size="small" round :loading="refreshingQr">刷新二维码</el-button>
           </div>
         </div>
 
-        <!-- Status Check -->
-        <div class="mt-6 text-center">
-          <router-link to="/portal/home" class="text-sm text-gray-500 hover:text-[#E4393C] transition-colors">
+        <!-- 辅助操作 -->
+        <div class="mt-8 text-center text-xs">
+          <router-link to="/portal/home" class="text-gray-400 hover:text-[#E4393C] transition-colors">
             返回首页
           </router-link>
-          <span class="mx-2 text-gray-300">|</span>
-          <span @click="checkPayStatus" class="text-sm text-[#E4393C] cursor-pointer hover:underline">
-            查询支付状态
+          <span class="mx-2.5 text-gray-200">|</span>
+          <span @click="checkPayStatus" class="text-[#E4393C] cursor-pointer hover:underline">
+            我已完成支付，查询支付状态
           </span>
         </div>
       </div>
@@ -80,9 +89,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import QRCode from 'qrcode'
+import { Wallet, MessageCircle, QrCode as QrCodeIcon, Timer, CheckCircle2 } from 'lucide-vue-next'
 import PortalLayout from './PortalLayout.vue'
 import { useUserStore } from '@/stores/user'
 import { getOrderById } from '@/api/order'
@@ -106,10 +116,17 @@ const countdown = ref(1800)
 let timer: ReturnType<typeof setInterval> | null = null
 
 const payMethods = [
-  { label: '余额支付', value: 'balance' as const },
-  { label: '微信支付', value: 'wechat' as const },
-  { label: '支付宝', value: 'alipay' as const },
+  { label: '余额支付', value: 'balance' as const, icon: markRaw(Wallet) },
+  { label: '微信支付', value: 'wechat' as const, icon: markRaw(MessageCircle) },
+  { label: '支付宝', value: 'alipay' as const, icon: markRaw(QrCodeIcon) },
 ]
+
+// 支付渠道映射：不同支付方式对应后端的 payChannelCode / payType
+const channelMap = {
+  balance: { code: 'balance', type: 5 },
+  wechat: { code: 'wx_pub_qr', type: 4 },
+  alipay: { code: 'alipay_qr', type: 3 },
+}
 
 function formatCountdown(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -163,18 +180,38 @@ async function checkPayStatus() {
   }
 }
 
+/** 按当前选中的支付渠道创建/刷新支付单 */
+async function ensurePayOrder() {
+  const { code, type } = channelMap[activePayMethod.value]
+  payOrderId.value = await applyPayOrder({
+    bizOrderNo: orderId.value,
+    amount: amount.value,
+    payChannelCode: code,
+    payType: type,
+    orderInfo: `订单${orderId.value}`,
+  })
+  // 扫码渠道需要刷新二维码
+  if (activePayMethod.value !== 'balance') {
+    await refreshQr()
+  }
+}
+
+// 切换支付方式时重新创建对应渠道的支付单
+watch(activePayMethod, async () => {
+  if (!amount.value) return // 订单信息尚未加载完成时忽略
+  try {
+    await ensurePayOrder()
+  } catch {
+    ElMessage.error('创建支付单失败')
+  }
+})
+
 onMounted(async () => {
   try {
     const order = await getOrderById(orderId.value)
     amount.value = order.totalFee
-    // 生成支付单（之前创建订单时漏了这一步）
-    payOrderId.value = await applyPayOrder({
-      bizOrderNo: orderId.value,
-      amount: order.totalFee,
-      payChannelCode: 'balance',
-      payType: 5,          // 5 = 余额支付
-      orderInfo: `订单${orderId.value}`,
-    })
+    // 生成支付单（按当前选中的支付渠道创建）
+    await ensurePayOrder()
   } catch {
     ElMessage.error('获取订单信息失败')
   }

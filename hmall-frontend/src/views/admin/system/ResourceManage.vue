@@ -1,7 +1,9 @@
 <template>
   <div>
+    <PageHeader title="资源管理" description="接口与页面资源的访问权限配置" />
+
     <!-- Search -->
-    <el-card class="mb-4">
+    <el-card class="mb-4" shadow="never">
       <div class="flex items-center gap-3">
         <el-input v-model="searchText" placeholder="搜索资源名称" clearable class="w-[200px]" @keyup.enter="fetchData" />
         <el-select v-model="searchCategoryId" placeholder="全部分类" clearable class="w-[150px]">
@@ -91,6 +93,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { getResourcePage, createResource, updateResource, deleteResource, getResourceCategories } from '@/api/admin/resource'
 import { ElMessage } from 'element-plus'
+import PageHeader from '@/components/admin/PageHeader.vue'
 import type { Resource, ResourceCategory } from '@/types/admin'
 import type { PageResult } from '@/types'
 

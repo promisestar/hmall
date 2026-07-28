@@ -1,9 +1,11 @@
 <template>
   <div>
-    <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+    <PageHeader title="秒杀管理" description="秒杀活动与场次商品配置" />
+
+    <el-tabs v-model="activeTab" @tab-change="handleTabChange" class="seckill-tabs">
       <!-- ==================== Tab 1: 活动管理 ==================== -->
       <el-tab-pane label="活动管理" name="promotion">
-        <el-card class="mb-4">
+        <el-card class="mb-4" shadow="never">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
               <el-input v-model="promoSearch.title" placeholder="活动标题" clearable class="w-[200px]" @keyup.enter="promoPageNo = 1; fetchPromotions()" />
@@ -300,6 +302,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
+import PageHeader from '@/components/admin/PageHeader.vue'
 import type { SeckillPromotionAdminVO, SeckillSessionAdminVO, SeckillProductRelationAdminVO, SeckillOrderAdminVO, SeckillStockAdminVO } from '@/types/admin'
 import {
   getPromotionPage, createPromotion, updatePromotion, deletePromotion,

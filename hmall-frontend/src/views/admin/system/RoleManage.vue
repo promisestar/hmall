@@ -1,7 +1,9 @@
 <template>
   <div>
+    <PageHeader title="角色管理" description="角色权限与菜单资源配置" />
+
     <!-- Search -->
-    <el-card class="mb-4">
+    <el-card class="mb-4" shadow="never">
       <div class="flex items-center justify-between">
         <el-input v-model="searchText" placeholder="搜索角色名称" clearable class="w-[240px]" @keyup.enter="fetchData">
           <template #prefix><el-icon><Search /></el-icon></template>
@@ -123,6 +125,7 @@ import {
 import { getMenuTree } from '@/api/admin/menu'
 import { getAllResources } from '@/api/admin/resource'
 import { ElMessage } from 'element-plus'
+import PageHeader from '@/components/admin/PageHeader.vue'
 import type { Role, Resource, AdminMenu } from '@/types/admin'
 import type { PageResult } from '@/types'
 

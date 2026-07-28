@@ -1,7 +1,9 @@
 <template>
   <div>
+    <PageHeader title="管理员管理" description="后台账号与角色分配" />
+
     <!-- Search -->
-    <el-card class="mb-4">
+    <el-card class="mb-4" shadow="never">
       <div class="flex items-center justify-between">
         <el-input v-model="searchText" placeholder="搜索用户名/昵称" clearable class="w-[240px]" @keyup.enter="fetchData">
           <template #prefix><el-icon><Search /></el-icon></template>
@@ -116,6 +118,7 @@ import {
 } from '@/api/admin/adminUser'
 import { getAllRoles } from '@/api/admin/role'
 import { ElMessage } from 'element-plus'
+import PageHeader from '@/components/admin/PageHeader.vue'
 import type { AdminUser, Role } from '@/types/admin'
 import type { PageResult } from '@/types'
 

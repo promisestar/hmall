@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { login as loginApi, loginByCode as loginByCodeApi, logoutApi } from '@/api/user'
-import type { UserInfo, LoginFormDTO, LoginByCodeDTO } from '@/types'
+import type { UserInfo, UserLoginVO, LoginFormDTO, LoginByCodeDTO } from '@/types'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(sessionStorage.getItem('token') || '')

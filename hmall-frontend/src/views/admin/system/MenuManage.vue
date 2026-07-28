@@ -1,6 +1,8 @@
 <template>
   <div>
-    <el-card>
+    <PageHeader title="菜单管理" description="后台导航菜单与权限标识维护" />
+
+    <el-card shadow="never">
       <div class="mb-4">
         <el-button type="primary" @click="openAddDialog(0)">
           <el-icon><Plus /></el-icon> 新增菜单
@@ -76,6 +78,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { getMenuTree, createMenu, updateMenu, deleteMenu } from '@/api/admin/menu'
 import { ElMessage } from 'element-plus'
+import PageHeader from '@/components/admin/PageHeader.vue'
 import type { AdminMenu } from '@/types/admin'
 
 const menuTree = ref<AdminMenu[]>([])

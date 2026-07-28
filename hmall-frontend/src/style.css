@@ -4,16 +4,26 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --primary: 358 85% 52%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;
-    --muted: 210 40% 96%;
-    --accent: 358 85% 52%;
-    --border: 214 32% 91%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    /* 品牌色板 */
+    --brand: #e4393c;
+    --brand-dark: #c81623;
+    --brand-warm: #ff6b35;
+
+    /* 中性色 */
+    --ink-900: #1a1d24;
+    --ink-700: #2b2f36;
+    --ink-500: #5c6470;
+    --ink-300: #9aa1ad;
+    --ink-100: #e8eaee;
+
+    /* 表面与层次 */
+    --surface: #ffffff;
+    --surface-muted: #f6f7f9;
+    --border-soft: #eef0f3;
+
+    /* 阴影 */
+    --shadow-card: 0 1px 2px rgba(27, 31, 38, .04), 0 4px 16px rgba(27, 31, 38, .06);
+    --shadow-lift: 0 8px 28px rgba(27, 31, 38, .12);
   }
 
   * {
@@ -22,10 +32,17 @@
     box-sizing: border-box;
   }
 
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
-    font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
-    color: #333;
-    background: #f5f5f5;
+    font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+    font-feature-settings: 'tnum';
+    color: var(--ink-700);
+    background: var(--surface-muted);
     min-height: 100vh;
   }
 
@@ -42,22 +59,214 @@
     max-width: 100%;
     height: auto;
   }
+
+  ::selection {
+    background: rgba(228, 57, 60, .16);
+    color: var(--brand-dark);
+  }
+
+  /* 细滚动条（Webkit） */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(140, 148, 160, .35);
+    border-radius: 8px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(140, 148, 160, .55);
+  }
 }
 
 @layer components {
+  /* ---------- 通用按钮 ---------- */
   .btn-primary {
-    @apply bg-[#E4393C] text-white px-6 py-2 rounded hover:bg-[#C81623] transition-colors cursor-pointer font-medium;
+    @apply inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-lg text-white font-medium cursor-pointer select-none transition-all duration-200;
+    background: linear-gradient(135deg, #f04548 0%, #e4393c 55%, #d2202a 100%);
+    box-shadow: 0 2px 6px rgba(228, 57, 60, .28);
+  }
+
+  .btn-primary:hover {
+    box-shadow: 0 6px 16px rgba(228, 57, 60, .38);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0) scale(.98);
+    box-shadow: 0 2px 6px rgba(228, 57, 60, .28);
   }
 
   .btn-secondary {
-    @apply bg-white text-[#E4393C] border border-[#E4393C] px-6 py-2 rounded hover:bg-red-50 transition-colors cursor-pointer font-medium;
+    @apply inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-lg bg-white font-medium cursor-pointer select-none transition-all duration-200;
+    color: var(--brand);
+    border: 1px solid rgba(228, 57, 60, .55);
   }
 
+  .btn-secondary:hover {
+    background: #fff5f5;
+    border-color: var(--brand);
+  }
+
+  /* ---------- 布局容器 ---------- */
   .container-main {
     @apply max-w-[1200px] mx-auto px-4;
   }
 
+  /* ---------- 卡片 ---------- */
   .card-shadow {
-    @apply bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow;
+    @apply bg-white rounded-xl transition-all duration-300;
+    box-shadow: var(--shadow-card);
   }
+
+  .card-shadow:hover {
+    box-shadow: var(--shadow-lift);
+  }
+
+  .page-card {
+    @apply bg-white rounded-xl;
+    box-shadow: var(--shadow-card);
+  }
+
+  /* 页面标题：左侧品牌色条 */
+  .section-title {
+    @apply relative pl-3 text-lg font-bold text-gray-800;
+  }
+
+  .section-title::before {
+    content: '';
+    @apply absolute left-0 top-1/2 -translate-y-1/2 w-1 h-[18px] rounded-full;
+    background: linear-gradient(180deg, #ff6b35 0%, #e4393c 100%);
+  }
+
+  /* 商品价格 */
+  .price-tag {
+    @apply font-bold tracking-tight;
+    color: var(--brand);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ============================================================
+   Element Plus 全局精修（圆角 / 阴影 / 表格 / 弹窗 / 分页）
+   管理后台与 C 端共用一套基础皮肤，C 端再通过 .portal-theme
+   将主题色切换为品牌红，管理端保持默认蓝。
+   ============================================================ */
+
+/* 卡片 */
+.el-card {
+  --el-card-border-color: var(--border-soft);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+}
+
+.el-card__header {
+  border-bottom-color: var(--border-soft);
+  padding: 14px 20px;
+}
+
+/* 表格 */
+.el-table {
+  --el-table-border-color: var(--border-soft);
+  --el-table-header-bg-color: #f7f8fa;
+  --el-table-row-hover-bg-color: #fafbfc;
+  border-radius: 8px;
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+  color: #475069;
+}
+
+/* 弹窗 */
+.el-dialog {
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.el-dialog__header {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 16px 20px;
+  margin-right: 0;
+}
+
+.el-dialog__title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.el-dialog__body {
+  padding: 20px;
+}
+
+.el-dialog__footer {
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 20px;
+}
+
+/* 按钮 */
+.el-button {
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all .2s ease;
+}
+
+/* 输入框 */
+.el-input__wrapper {
+  border-radius: 8px;
+}
+
+.el-select__wrapper {
+  border-radius: 8px;
+}
+
+/* 标签 */
+.el-tag {
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* 分页 */
+.el-pagination.is-background .el-pager li {
+  border-radius: 6px;
+}
+
+/* Message 消息提示 */
+.el-message {
+  border-radius: 10px;
+  box-shadow: var(--shadow-lift);
+}
+
+/* ============================================================
+   C 端门户主题：Element Plus 主色 → 品牌红
+   ============================================================ */
+.portal-theme {
+  --el-color-primary: #e4393c;
+  --el-color-primary-light-3: #ec7477;
+  --el-color-primary-light-5: #f19c9d;
+  --el-color-primary-light-7: #f7babb;
+  --el-color-primary-light-8: #fad4d4;
+  --el-color-primary-light-9: #fdf0f0;
+  --el-color-primary-dark-2: #b62e30;
+}
+
+/* 轮播指示器（C 端首页 Banner） */
+.portal-theme .el-carousel__indicator--horizontal .el-carousel__button {
+  width: 20px;
+  height: 4px;
+  border-radius: 4px;
+  opacity: .45;
+  transition: all .3s ease;
+}
+
+.portal-theme .el-carousel__indicator--horizontal.is-active .el-carousel__button {
+  width: 32px;
+  opacity: 1;
+  background: #fff;
 }

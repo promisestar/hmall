@@ -8,7 +8,7 @@
     >
       <!-- AI 消息：头像 + Markdown 内容 -->
       <div v-if="msg.type === 'ai'" class="flex items-start gap-2.5">
-        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[#FF6B35] to-[#E4393C] flex items-center justify-center text-white text-xs font-bold mt-0.5 shadow-sm">
+        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[#FF6B35] to-[#E4393C] flex items-center justify-center text-white text-xs font-bold mt-0.5 shadow-md shadow-red-200/60 ring-2 ring-red-50">
           AI
         </div>
         <div class="flex-1 min-w-0 overflow-hidden">

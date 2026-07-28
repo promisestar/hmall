@@ -1,7 +1,9 @@
 <template>
   <div>
+    <PageHeader title="用户管理" description="商城用户查询、启停与密码重置" />
+
     <!-- Search -->
-    <el-card class="mb-4">
+    <el-card class="mb-4" shadow="never">
       <div class="flex items-center gap-3">
         <el-input v-model="searchText" placeholder="用户名/手机号" clearable class="w-[200px]" @keyup.enter="fetchData" />
         <el-select v-model="searchStatus" placeholder="全部状态" clearable class="w-[120px]">
@@ -93,6 +95,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { getMemberPage, updateMemberStatus, updateMemberBalance, type MemberInfo } from '@/api/admin/member'
 import { formatPrice, formatDate } from '@/utils/format'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import PageHeader from '@/components/admin/PageHeader.vue'
 import type { PageResult } from '@/types'
 
 const users = ref<MemberInfo[]>([])

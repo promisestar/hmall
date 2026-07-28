@@ -1,7 +1,9 @@
 <template>
   <div>
+    <PageHeader title="订单管理" description="订单查询、详情查看与状态跟踪" />
+
     <!-- Search -->
-    <el-card class="mb-4">
+    <el-card class="mb-4" shadow="never">
       <div class="flex items-center gap-3 flex-wrap">
         <el-input v-model="searchForm.orderId" placeholder="订单号" clearable class="w-[180px]" />
         <el-select v-model="searchForm.status" placeholder="全部状态" clearable class="w-[120px]">
@@ -166,6 +168,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { getAdminOrderPage, getOrderDetail, batchDelivery, batchCloseOrders } from '@/api/admin/order'
 import { formatPrice } from '@/utils/format'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import PageHeader from '@/components/admin/PageHeader.vue'
 import type { OrderVO, PageResult } from '@/types'
 
 const orders = ref<OrderVO[]>([])
@@ -199,7 +202,7 @@ function statusText(status: number) {
 
 function statusTagType(status: number) {
   const map: Record<number, string> = {
-    1: 'warning', 2: 'primary', 3: 'info',
+    1: 'warning', 2: '', 3: 'info',
     4: 'success', 5: 'danger', 6: 'success',
   }
   return map[status] || 'info'

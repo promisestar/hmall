@@ -2,10 +2,8 @@
   <div class="interrupt-card mx-auto max-w-[90%] bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 shadow-md animate-pulse-soft">
     <!-- 图标 + 消息 -->
     <div class="flex items-start gap-3">
-      <div class="flex-shrink-0 w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center text-white">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
+      <div class="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-md shadow-amber-200">
+        <TriangleAlert class="w-[18px] h-[18px]" />
       </div>
       <div class="flex-1 min-w-0">
         <p class="text-[13px] text-[#666] font-medium leading-relaxed whitespace-pre-wrap">{{ data.message }}</p>
@@ -37,6 +35,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { TriangleAlert } from 'lucide-vue-next'
 import type { InterruptData } from '@/composables/useLangGraph'
 
 const props = defineProps<{

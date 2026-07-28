@@ -1,7 +1,9 @@
 <template>
   <div>
+    <PageHeader title="商品管理" description="商品上下架、编辑与库存维护" />
+
     <!-- Search & Actions -->
-    <el-card class="mb-4">
+    <el-card class="mb-4" shadow="never">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <el-input
@@ -154,6 +156,7 @@ import {
 } from '@/api/admin/product'
 import { formatPrice } from '@/utils/format'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import PageHeader from '@/components/admin/PageHeader.vue'
 import type { Item, PageResult } from '@/types'
 
 const items = ref<Item[]>([])

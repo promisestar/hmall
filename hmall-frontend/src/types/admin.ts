@@ -30,6 +30,8 @@ export interface AdminMenu {
 export interface AdminUser {
   id: number
   username: string
+  /** 仅创建/重置密码时使用，查询不返回 */
+  password?: string
   icon?: string
   email?: string
   nickName?: string
