@@ -81,7 +81,7 @@
                   v-model="form.username"
                   type="text"
                   placeholder="邮箱 / 用户名 / 手机号"
-                  class="login-input pl-10"
+                  class="login-input pl-10 pr-4"
                 />
               </div>
             </div>
@@ -134,7 +134,7 @@
                   type="tel"
                   maxlength="11"
                   placeholder="请输入手机号"
-                  class="login-input pl-10"
+                  class="login-input pl-10 pr-4"
                 />
               </div>
             </div>
@@ -149,7 +149,7 @@
                     type="text"
                     maxlength="6"
                     placeholder="请输入验证码"
-                    class="login-input pl-10"
+                    class="login-input pl-10 pr-4"
                     @keyup.enter="handleCodeLogin"
                   />
                 </div>
@@ -309,7 +309,7 @@ function goHome() {
 
 <style scoped>
 .login-input {
-  @apply w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none text-sm transition-all;
+  @apply w-full py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none text-sm transition-all;
 }
 
 .login-input:focus {
