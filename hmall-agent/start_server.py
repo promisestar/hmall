@@ -37,7 +37,7 @@ def setup_environment():
         "LANGGRAPH_RUNTIME_EDITION": "inmem",
         "LANGSMITH_LANGGRAPH_API_VARIANT": "local_dev",
         "LANGGRAPH_ALLOW_BLOCKING": "true",
-        "LANGGRAPH_API_URL": f"http://localhost:{os.getenv('AGENT_PORT', '8090')}",
+        "LANGGRAPH_API_URL": f"http://localhost:{os.getenv('AGENT_PORT', '8091')}",
         # Agent 图注册
         "LANGSERVE_GRAPHS": json.dumps(graphs) if graphs else "{}",
         # 自定义路由
@@ -55,7 +55,7 @@ def setup_environment():
 def main():
     setup_environment()
 
-    port = int(os.getenv("AGENT_PORT", "8090"))
+    port = int(os.getenv("AGENT_PORT", "8091"))
 
     # 导入 LangGraph Server 的 FastAPI app 并添加 CORS 中间件
     # 必须先 setup_environment()（设置 langgraph 所需环境变量），再导入

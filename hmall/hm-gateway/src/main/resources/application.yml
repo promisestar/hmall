@@ -16,6 +16,8 @@ hm:
       - /items/**
       - /hi
       - /admin/**
+      - /seckill/activites
+      - /seckill/products/**
   ratelimit:
     enabled: true
     rules:
@@ -24,9 +26,9 @@ hm:
         window-ms: 5000
 spring:
   redis:
-    host: ${REDIS_HOST:localhost}
+    host: ${REDIS_HOST:192.168.100.128}
     port: ${REDIS_PORT:6379}
-    password: ${REDIS_PASSWORD:}
+    password: ${REDIS_PASSWORD:123456}
     database: 0
     timeout: 5000ms
     lettuce:
