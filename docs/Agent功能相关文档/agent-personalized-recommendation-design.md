@@ -930,15 +930,19 @@ CREATE TABLE user_behavior (
 ) COMMENT '用户行为记录表';
 ```
 
-### 6.4 Redis 画像结构（Phase 2 使用）
+### 6.4 Redis 画像结构（Phase 2 已实现）
 
-| Key | 结构 | 说明 |
-|-----|------|------|
-| `up:{userId}:cat` | ZSet（member=category, score=累计分） | 用户类目偏好 |
-| `up:{userId}:brand` | ZSet（member=brand, score=累计分） | 用户品牌偏好 |
-| `bh:{userId}:recent` | ZSet（member=itemId, score=时间戳权重） | 最近浏览（时间衰减） |
-| `cf:{itemId}` | Hash（field=itemId, value=共现次数） | Item-CF 共现矩阵 |
-| `rec:{userId}:{scene}` | String（JSON 商品列表） | 推荐结果缓存，TTL 5-10min |
+> **Phase 2 实现说明**：原设计使用 `up:` 前缀 + ZSet 结构，实际实现改为 `profile:` 前缀 + Hash/List 结构（详见 [hmall-agent-profile-and-notification-design.md](./hmall-agent-profile-and-notification-design.md) §3.1）。画像由后端 `paySuccessListener`（purchase）和 `CartServiceImpl`（cart）共同写入，Agent 侧仅 `analyze_user_preferences` miss 后回写画像，使用 HINCRBY 原子增量更新。
+
+| Key | 结构 | 说明 | 实现状态 |
+|-----|------|------|---------|
+| `profile:{userId}:events` | List（LPUSH+LTRIM 50，TTL 7d） | 行为流（加购/下单/收货事件） | ✅ Phase 2 已实现 |
+| `profile:{userId}:categories` | Hash（field=category, value=累计得分，TTL 30d） | 用户类目偏好 | ✅ Phase 2 已实现 |
+| `profile:{userId}:brands` | Hash（field=brand, value=累计得分，TTL 30d） | 用户品牌偏好 | ✅ Phase 2 已实现 |
+| `profile:{userId}:prices` | List（LPUSH+LTRIM 20，TTL 30d） | 最近购买价格 | ✅ Phase 2 已实现 |
+| `profile:{userId}:stats` | Hash（purchase_count/cart_count/last_update，TTL 30d） | 统计信息 | ✅ Phase 2 已实现 |
+| `cf:{itemId}` | Hash（field=itemId, value=共现次数） | Item-CF 共现矩阵 | ⏸ Phase 3 |
+| `rec:{userId}:{scene}` | String（JSON 商品列表） | 推荐结果缓存，TTL 5-10min | ⏸ Phase 3 |
 
 ---
 
@@ -1091,18 +1095,18 @@ const shortcuts = [
 
 ### 10.1 分步实施
 
-| 步骤 | 改动点 | 工作量 | 价值 | 阶段 |
-|------|--------|--------|------|------|
-| 1 | Agent 新增 `get_recommendations_api` 工具 | 小 | 核心 | Phase 1 |
-| 2 | Agent 新增 `analyze_user_preferences` 工具 | 中 | 差异化 | Phase 1 |
-| 3 | Agent 新增 `format_recommendations` + `format_preferences` | 小 | 输出规范 | Phase 1 |
-| 4 | Agent 新增 `personalized-recommendation` Skill | 小 | 工作流 | Phase 1 |
-| 5 | Agent 修改 Prompt + 正则路由 + 工具注册 | 小 | 触发 | Phase 1 |
-| 6 | 后端 `GET /recommend` 接口（Phase 1: SQL+ES） | 中 | 数据供给 | Phase 1 |
-| 7 | 后端 `POST /behaviors` 接口 + MQ Consumer | 中 | 数据采集 | Phase 2 |
-| 8 | 前端 `ProductDetail.vue` 浏览埋点 | 小 | 数据积累 | Phase 2 |
-| 9 | 后端 Redis 画像计算（Consumer） | 中 | 画像精度 | Phase 2 |
-| 10 | 后端 Item-CF 共现矩阵（定时任务） | 中 | 召回质量 | Phase 2 |
+| 步骤 | 改动点 | 工作量 | 价值 | 阶段 | 状态 |
+|------|--------|--------|------|------|------|
+| 1 | Agent 新增 `get_recommendations_api` 工具 | 小 | 核心 | Phase 1 | ✅ 已完成 |
+| 2 | Agent 新增 `analyze_user_preferences` 工具 | 中 | 差异化 | Phase 1 | ✅ 已完成 |
+| 3 | Agent 新增 `format_recommendations` + `format_preferences` | 小 | 输出规范 | Phase 1 | ✅ 已完成 |
+| 4 | Agent 新增 `personalized-recommendation` Skill | 小 | 工作流 | Phase 1 | ✅ 已完成 |
+| 5 | Agent 修改 Prompt + 正则路由 + 工具注册 | 小 | 触发 | Phase 1 | ✅ 已完成 |
+| 6 | 后端 `GET /recommend` 接口（Phase 1: SQL+ES） | 中 | 数据供给 | Phase 1 | ✅ 已完成 |
+| 7 | 行为采集写入画像（后端 `paySuccessListener` 写 purchase + `CartServiceImpl` 写 cart） | 中 | 数据采集 | Phase 2 | ✅ 已完成（实现方式调整：后端直接写 Redis 而非 POST /behaviors + MQ，覆盖 Agent + 前端 UI 全路径） |
+| 8 | 前端 `ProductDetail.vue` 浏览埋点 | 小 | 数据积累 | Phase 2 | ⏸ 待实施 |
+| 9 | Redis 画像计算（`ProfileStore` HINCRBY 增量更新 + `RecommendServiceImpl` 共享读取） | 中 | 画像精度 | Phase 2 | ✅ 已完成 |
+| 10 | 后端 Item-CF 共现矩阵（定时任务） | 中 | 召回质量 | Phase 2 | ⏸ 待实施 |
 
 ### 10.2 Phase 1 交付物（Agent 侧优先）
 
@@ -1156,7 +1160,8 @@ Phase 1 不需要行为采集（步骤 7-8）和画像服务（步骤 9-10），
 | `hmall-agent/src/workspace/customer/skills/personalized-recommendation/SKILL.md` | **新增**：推荐工作流规范 |
 | `hmall/item-service/src/main/java/com/hmall/item/controller/ItemController.java` | **修改**：新增 `/recommend` + `/behaviors` 接口 |
 | `hmall/search-service/src/main/java/com/hmall/search/service/impl/SearchServiceImpl.java` | **参考**：ES 召回逻辑复用其 BoolQuery 模式 |
-| `hmall/trade-service/src/main/java/com/hmall/trade/Listener/paySuccessListener.java` | **修改**：旁路发送 purchase 行为消息 |
+| `hmall/trade-service/src/main/java/com/hmall/trade/Listener/paySuccessListener.java` | **修改**：支付成功后 `StringRedisTemplate` HINCRBY 写入 purchase 画像 |
+| `hmall/cart-service/src/main/java/com/hmall/cart/service/impl/CartServiceImpl.java` | **修改**：加购成功后 `StringRedisTemplate` HINCRBY 写入 cart 画像（覆盖 Agent + 前端 UI 全路径） |
 
 ---
 

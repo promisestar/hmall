@@ -1035,19 +1035,50 @@ hm:
 
 ## 十、后续优化方向
 
-以下为设计文档 Phase 2/3 内容，本次未实现：
+### 10.1 Phase 2 已完成项（用户画像持久化）
+
+以下 Phase 2 项已通过 [hmall-agent-profile-and-notification-design.md](./hmall-agent-profile-and-notification-design.md) 第一部分落地：
+
+| 方向 | 说明 | 阶段 | 状态 |
+|------|------|------|------|
+| 行为采集写入画像 | Agent 写操作工具成功后直接写 Redis 画像（`ProfileStore.record_event`），非 POST /behaviors + MQ | Phase 2 | ✅ 已完成 |
+| Redis 画像计算 | `ProfileStore` HINCRBY 增量更新 `profile:{uid}:categories/brands/prices/stats`（非 Consumer + ZSet） | Phase 2 | ✅ 已完成 |
+| 购买行为旁路采集 | `paySuccessListener` 支付成功后用 `StringRedisTemplate` HINCRBY 写入画像（非发 MQ 消息） | Phase 2 | ✅ 已完成 |
+| 加购行为旁路采集 | `CartServiceImpl.addItem2Cart` 加购成功后用 `StringRedisTemplate` HINCRBY 写入画像（覆盖 Agent + 前端 UI 全路径） | Phase 2 | ✅ 已完成 |
+| 推荐服务共享画像 | `RecommendServiceImpl.recommend()` 优先读 Redis 画像，miss 降级原 Feign 聚合 | Phase 2 | ✅ 已完成 |
+
+### 10.2 待实施项
 
 | 方向 | 说明 | 阶段 |
 |------|------|------|
-| 行为采集 `POST /behaviors` | 浏览/收藏/加购行为上报，MQ 异步落库 | Phase 2 |
 | 前端浏览埋点 | `ProductDetail.vue` 的 `onMounted` 上报 view 行为 | Phase 2 |
-| Redis 画像计算 | Consumer 更新 `up:{uid}:cat` / `up:{uid}:brand` ZSet | Phase 2 |
 | Item-CF 共现矩阵 | `cf:{itemId}` Hash，定时任务计算 | Phase 2 |
-| 推荐结果缓存 | `rec:{userId}:{scene}` String，TTL 5-10min | Phase 2 |
-| 购买行为旁路采集 | `paySuccessListener` 发 purchase 行为消息 | Phase 2 |
 | 向量召回 | ES `dense_vector` 语义相似，提升"看了又看"质量 | Phase 3 |
 | 实时推荐反馈 | 用户点击/加购行为反馈到画像 | Phase 3 |
 | 正则规则动态加载 | 推荐正则从 Nacos 动态加载 | Phase 3 |
+
+### 10.3 Phase 2 实现说明
+
+Phase 2 用户画像持久化已落地，详见 [hmall-agent-profile-and-notification-design.md](./hmall-agent-profile-and-notification-design.md) 第一部分。核心变更：
+
+**Agent 侧（`hmall-agent/`）**：
+- 新增 `src/profile/store.py` — `ProfileStore` 类：Redis 画像 CRUD + HINCRBY 增量更新，权重 purchase=5/cart=3/view=1（与 Phase 1 `_accumulate_preference` 一致）
+- 新增 `src/profile/memory.py` — `save_memory` / `get_memories` 两个 @tool 工具，基于 LangGraph Store 跨会话语义记忆
+- 修改 `tools.py` — `analyze_user_preferences` 画像优先（命中 0 次 Gateway）+ miss 降级 Phase 1 + 同步回写；加购/确认收货画像写入移至后端（避免双重记录），`update_cart_quantity_api` 不再记录 cart 事件
+- 修改 `http_client.py` — 新增 `_extract_user_id` 函数（复用 `extract_token_from_config` 三级优先级 + JWT 兜底解码）
+- 修改 `formatters.py` — `format_preferences` 适配画像直读模式（orders/cart 可选）
+- 修改 `config.py` — 新增 `LANGGRAPH_STORE_URI`；`pyproject.toml` — `redis` 改为 `redis[hiredis]`
+
+**后端侧（`hmall/`）**：
+- 修改 `paySuccessListener.java` — 注入 `StringRedisTemplate` + `IOrderDetailService` + `ItemClient`，支付成功后查订单详情+商品信息，HINCRBY 写入 Redis 画像
+- 修改 `CartServiceImpl.java` — 注入 `StringRedisTemplate`，加购成功后查商品信息，HINCRBY 写入 Redis 画像（覆盖 Agent + 前端 UI 全路径）
+- 修改 `RecommendServiceImpl.java` — 注入 `StringRedisTemplate`，偏好聚合优先读 Redis 画像，miss 降级原 Feign 聚合
+
+**关键实现偏差**：
+1. **行为采集方式**：原设计为 `POST /behaviors` + MQ Consumer 异步落库，实际改为后端直接写 Redis（`paySuccessListener` 写 purchase 画像 + `CartServiceImpl` 写 cart 画像），覆盖 Agent + 前端 UI 全部行为路径，无需新增 API 和 MQ Consumer。Agent 侧 `analyze_user_preferences` miss 后同步回写画像
+2. **Redis 画像结构**：原设计为 `up:` 前缀 + ZSet，实际改为 `profile:` 前缀 + Hash/List（HINCRBY 增量更新）
+3. **序列化兼容性**：后端 `RedisService` 的 Hash 操作用 `redisTemplate`（Jackson 序列化），与 Agent 侧 `redis.asyncio`（plain string）不兼容。解决方案：后端画像读写均使用 `StringRedisTemplate`
+4. **画像写入归属调整**：加购画像从 Agent 侧 `add_to_cart_api` 移至后端 `CartServiceImpl`（覆盖前端 UI 直接加购路径）；确认收货画像从 `confirm_receive_api` 移至 `paySuccessListener`（覆盖所有支付路径）；`update_cart_quantity_api` 不再记录 cart 事件（修改数量不改变偏好方向）。调整目的：避免双重记录 + 覆盖非 Agent 入口的行为
 
 ---
 

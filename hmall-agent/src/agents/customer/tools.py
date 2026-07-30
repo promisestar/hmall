@@ -20,7 +20,14 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.types import interrupt
 
-from src.gateway.http_client import GatewayError, extract_token_from_config, gateway_client
+from src.gateway.http_client import (
+    GatewayError,
+    _extract_user_id,
+    extract_token_from_config,
+    gateway_client,
+)
+from src.profile.store import profile_store
+from src.profile.memory import get_memories, save_memory
 from src.tools.formatters import (
     format_address_list,
     format_cart_list,
@@ -212,6 +219,10 @@ async def add_to_cart_api(item_id: int, config: RunnableConfig) -> str:
             token=token,
             json={"itemId": item_id, "num": 1},
         )
+
+        # Phase 2: cart 画像由后端 CartServiceImpl.addItem2Cart 写入，
+        # Agent 不再重复记录（避免双重记录，后端覆盖 Agent + 前端 UI 全部加购路径）
+
         return f"✅ 商品 {item_id} 已加入购物车"
     except GatewayError as e:
         return f"❌ 加入购物车失败: {e}"
@@ -237,6 +248,9 @@ async def update_cart_quantity_api(item_id: int, num: int, config: RunnableConfi
             token=token,
             json={"num": num},
         )
+
+        # Phase 2: 修改数量不记录 cart 事件（add_to_cart_api 已记录，修改数量不改变偏好方向）
+
         return f"✅ 购物车中商品 {item_id} 的数量已修改为 {num}"
     except GatewayError as e:
         return f"❌ 修改购物车数量失败: {e}"
@@ -425,6 +439,10 @@ async def confirm_receive_api(order_id: int, config: RunnableConfig) -> str:
     if approval.strip() == "确认收货":
         try:
             await gateway_client.put(f"/orders/{order_id}", token=token)
+
+            # Phase 2: purchase 画像由后端 paySuccessListener 在支付成功时写入，
+            # 确认收货不再重复记录 purchase 事件（避免画像得分翻倍）
+
             return f"✅ 订单 {order_id} 已确认收货"
         except GatewayError as e:
             return f"❌ 确认收货失败: {e}"
@@ -642,6 +660,19 @@ async def analyze_user_preferences(config: RunnableConfig) -> str:
     if not token:
         return "❌ 偏好分析需要先登录"
 
+    # ====== Phase 2: 画像优先（命中时 0 次 Gateway 调用） ======
+    user_id = _extract_user_id(config)
+    if user_id:
+        try:
+            profile = await profile_store.get_profile(user_id)
+            if profile and (profile.get("categories") or profile.get("brands")):
+                return format_preferences(
+                    profile["categories"], profile["brands"], profile["prices"],
+                )
+        except Exception:
+            pass  # 画像读取失败降级到实时计算
+    # ====== Phase 2 结束 ======
+
     try:
         # 并发获取购买历史和购物车
         orders_page, cart_items = await asyncio.gather(
@@ -712,6 +743,16 @@ async def analyze_user_preferences(config: RunnableConfig) -> str:
         }
         _accumulate_preference(category_scores, brand_scores, price_points, merged, weight=3)
 
+    # ====== Phase 2: 同步回写画像（backfill_profile 内部有 try/except，不会抛异常） ======
+    if user_id and category_scores:
+        try:
+            await profile_store.backfill_profile(
+                user_id, category_scores, brand_scores, price_points,
+            )
+        except Exception:
+            pass  # 回写失败不影响响应，下次 miss 时会再次触发
+    # ====== Phase 2 结束 ======
+
     return format_preferences(category_scores, brand_scores, price_points, orders, cart)
 
 
@@ -744,4 +785,7 @@ def get_all_tools():
         # 个性化推荐
         get_recommendations_api,
         analyze_user_preferences,
+        # 用户记忆（Phase 2 新增）
+        save_memory,
+        get_memories,
     ]

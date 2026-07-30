@@ -12,6 +12,7 @@ import com.hmall.item.service.IItemService;
 import com.hmall.item.service.IRecommendService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -27,6 +28,10 @@ import java.util.stream.Collectors;
  * <p>
  * 偏好聚合在 item-service 侧完成：trade-service 返回已购 itemId+num，
  * item-service 查 item 表补充 category/brand 后按购买数量加权聚合 Top3。
+ * <p>
+ * Phase 2 扩展：偏好聚合优先读 Redis 画像（profile:{userId}:categories/brands），
+ * 命中时跳过 Feign 聚合（0 次 Feign 调用），miss 降级原全量聚合逻辑。
+ * 画像由 Agent 侧 record_event 和后端 paySuccessListener 共同写入。
  */
 @Slf4j
 @Service
@@ -36,6 +41,10 @@ public class RecommendServiceImpl implements IRecommendService {
     private final TradeClient tradeClient;
     private final SearchClient searchClient;
     private final IItemService itemService;
+    private final StringRedisTemplate stringRedisTemplate;
+
+    // 画像 Redis Key 前缀（与 Agent 侧 src/profile/store.py 保持一致）
+    private static final String PROFILE_PREFIX = "profile:";
 
     @Override
     public RecommendVO recommend(Long userId, String scene, Integer size, Long itemId) {
@@ -56,40 +65,59 @@ public class RecommendServiceImpl implements IRecommendService {
             }
             excludeIds.add(itemId);
         } else if (userId != null) {
-            // scene=home/cart: Feign 调用 trade-service 获取已购商品
-            List<OrderDetailDTO> purchasedItems = safeQueryPurchasedItems();
-            if (purchasedItems != null && !purchasedItems.isEmpty()) {
-                // 收集已购商品 ID（用于排除已购）
-                List<Long> itemIds = purchasedItems.stream()
-                        .map(OrderDetailDTO::getItemId)
-                        .collect(Collectors.toList());
-                excludeIds = new ArrayList<>(itemIds);
+            // Phase 2: 优先读 Redis 画像（命中时偏好聚合 0 次 Feign 调用）
+            String catKey = PROFILE_PREFIX + userId + ":categories";
+            Map<Object, Object> redisCatScores = stringRedisTemplate.opsForHash().entries(catKey);
 
-                // 批量查询商品获取 category/brand
-                List<Item> purchasedItemList = itemService.listByIds(itemIds);
-                if (purchasedItemList != null && !purchasedItemList.isEmpty()) {
-                    // 构建 itemId -> num 映射
-                    Map<Long, Integer> numMap = purchasedItems.stream()
-                            .collect(Collectors.toMap(
-                                    OrderDetailDTO::getItemId,
-                                    OrderDetailDTO::getNum,
-                                    Integer::sum));
+            if (redisCatScores != null && !redisCatScores.isEmpty()) {
+                // 画像命中：直接使用 Redis 聚合偏好
+                categories = topNFromStringMap(redisCatScores, 3);
+                String brandKey = PROFILE_PREFIX + userId + ":brands";
+                Map<Object, Object> redisBrandScores = stringRedisTemplate.opsForHash().entries(brandKey);
+                topBrands = topNFromStringMap(redisBrandScores, 3);
+                // excludeIds 仍需 Feign（已购列表不存画像）
+                List<OrderDetailDTO> purchasedItems = safeQueryPurchasedItems();
+                if (purchasedItems != null && !purchasedItems.isEmpty()) {
+                    excludeIds = purchasedItems.stream()
+                            .map(OrderDetailDTO::getItemId)
+                            .collect(Collectors.toList());
+                }
+            } else {
+                // 画像 miss：降级原全量聚合逻辑（Phase 1 代码不变）
+                List<OrderDetailDTO> purchasedItems = safeQueryPurchasedItems();
+                if (purchasedItems != null && !purchasedItems.isEmpty()) {
+                    // 收集已购商品 ID（用于排除已购）
+                    List<Long> itemIds = purchasedItems.stream()
+                            .map(OrderDetailDTO::getItemId)
+                            .collect(Collectors.toList());
+                    excludeIds = new ArrayList<>(itemIds);
 
-                    // 聚合类目/品牌偏好（按购买数量加权）
-                    Map<String, Integer> catScores = new HashMap<>();
-                    Map<String, Integer> brandScores = new HashMap<>();
-                    for (Item item : purchasedItemList) {
-                        Integer num = numMap.getOrDefault(item.getId(), 1);
-                        if (item.getCategory() != null && !item.getCategory().isEmpty()) {
-                            catScores.merge(item.getCategory(), num, Integer::sum);
+                    // 批量查询商品获取 category/brand
+                    List<Item> purchasedItemList = itemService.listByIds(itemIds);
+                    if (purchasedItemList != null && !purchasedItemList.isEmpty()) {
+                        // 构建 itemId -> num 映射
+                        Map<Long, Integer> numMap = purchasedItems.stream()
+                                .collect(Collectors.toMap(
+                                        OrderDetailDTO::getItemId,
+                                        OrderDetailDTO::getNum,
+                                        Integer::sum));
+
+                        // 聚合类目/品牌偏好（按购买数量加权）
+                        Map<String, Integer> catScores = new HashMap<>();
+                        Map<String, Integer> brandScores = new HashMap<>();
+                        for (Item item : purchasedItemList) {
+                            Integer num = numMap.getOrDefault(item.getId(), 1);
+                            if (item.getCategory() != null && !item.getCategory().isEmpty()) {
+                                catScores.merge(item.getCategory(), num, Integer::sum);
+                            }
+                            if (item.getBrand() != null && !item.getBrand().isEmpty()) {
+                                brandScores.merge(item.getBrand(), num, Integer::sum);
+                            }
                         }
-                        if (item.getBrand() != null && !item.getBrand().isEmpty()) {
-                            brandScores.merge(item.getBrand(), num, Integer::sum);
-                        }
+                        // 取 Top3
+                        categories = topN(catScores, 3);
+                        topBrands = topN(brandScores, 3);
                     }
-                    // 取 Top3
-                    categories = topN(catScores, 3);
-                    topBrands = topN(brandScores, 3);
                 }
             }
         }
@@ -192,6 +220,37 @@ public class RecommendServiceImpl implements IRecommendService {
                 .limit(n)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 从 Redis Hash entries（Map<Object, Object>，value 为 String 数字）取 Top N
+     * <p>
+     * 用于读取 StringRedisTemplate 存储的画像数据（与 Agent 侧 redis.asyncio 兼容）。
+     */
+    private List<String> topNFromStringMap(Map<Object, Object> scores, int n) {
+        if (scores == null || scores.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return scores.entrySet().stream()
+                .sorted((a, b) -> {
+                    int va = parseIntSafe(a.getValue());
+                    int vb = parseIntSafe(b.getValue());
+                    return Integer.compare(vb, va);
+                })
+                .limit(n)
+                .map(e -> e.getKey().toString())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 安全解析整数（Redis Hash value 为 String 类型）
+     */
+    private int parseIntSafe(Object value) {
+        try {
+            return Integer.parseInt(value.toString());
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     /**
