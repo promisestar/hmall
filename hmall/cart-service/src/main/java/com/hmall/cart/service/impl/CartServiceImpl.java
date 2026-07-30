@@ -23,10 +23,15 @@ import com.hmall.common.utils.LuaScriptLoader;
 import com.hmall.common.utils.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -50,11 +55,21 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
     private final CartProperties cartProperties;
     private final RedisService redisService;
     private final CartSyncSender cartSyncSender;
+    private final StringRedisTemplate stringRedisTemplate;
 
     private static final String CART_KEY_PREFIX = "cart:user:";
     private static final String CART_NUM_KEY_SUFFIX = ":num";
     private static final String CART_VERSION_KEY_SUFFIX = ":v";
     private static final long CART_TTL_DAYS = 30;
+
+    // 画像 Redis Key 前缀（与 Agent 侧 src/profile/store.py 保持一致）
+    private static final String PROFILE_PREFIX = "profile:";
+    // 购物车行为权重（与 Phase 1 _accumulate_preference weight=3 一致）
+    private static final int CART_WEIGHT = 3;
+    // 画像 TTL 30 天
+    private static final int PROFILE_TTL_DAYS = 30;
+    // 价格记录最大保留条数
+    private static final int PRICE_MAX_LEN = 20;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -135,6 +150,10 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
 
             // Redis 写入成功后，MQ 异步通知落 MySQL（result 为 Lua 返回的实际数量）
             int actualNum = (result != null) ? result.intValue() : 1;
+
+            // Phase 2: 增量写入用户画像（失败不影响加购流程，内部 try-catch）
+            writeCartProfile(userId, cartFormDTO);
+
             CartSyncMessage syncMsg = toSyncMessage(cartFormDTO, userId, version, actualNum);
             cartSyncSender.sendSync(syncMsg);
         } catch (BizIllegalException e) {
@@ -281,6 +300,69 @@ public class CartServiceImpl extends ServiceImpl<CartMapper, Cart> implements IC
                 cart.setVersion(version);
                 updateById(cart);
             }
+        }
+    }
+
+    // ==================== Phase 2: 用户画像写入 ====================
+
+    /**
+     * 加购成功后增量写入用户画像。
+     * <p>
+     * 使用 StringRedisTemplate 确保 hash field/value 为 plain string，
+     * 与 Agent 侧 redis.asyncio 读写兼容。
+     * 异常时仅 log.warn 不抛出，保证画像写入失败不影响加购流程。
+     */
+    private void writeCartProfile(Long userId, CartFormDTO cartFormDTO) {
+        try {
+            // Feign 查商品获取 category/brand/price
+            List<ItemDTO> items = itemClient.queryItemsByIds(Collections.singleton(cartFormDTO.getItemId()));
+            if (items == null || items.isEmpty()) {
+                return;
+            }
+            ItemDTO item = items.get(0);
+
+            String prefix = PROFILE_PREFIX + userId;
+            byte[] categoriesKeyB = (prefix + ":categories").getBytes(StandardCharsets.UTF_8);
+            byte[] brandsKeyB = (prefix + ":brands").getBytes(StandardCharsets.UTF_8);
+            byte[] pricesKeyB = (prefix + ":prices").getBytes(StandardCharsets.UTF_8);
+            byte[] statsKeyB = (prefix + ":stats").getBytes(StandardCharsets.UTF_8);
+            long ttlSeconds = PROFILE_TTL_DAYS * 24 * 3600L;
+            int score = CART_WEIGHT; // cart 权重=3，num=1
+
+            // 使用 pipeline 批量执行所有 Redis 操作（1 次网络往返）
+            stringRedisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                if (item.getCategory() != null && !item.getCategory().isEmpty()) {
+                    connection.hashCommands().hIncrBy(categoriesKeyB,
+                            item.getCategory().getBytes(StandardCharsets.UTF_8), score);
+                    connection.keyCommands().expire(categoriesKeyB, ttlSeconds);
+                }
+                if (item.getBrand() != null && !item.getBrand().isEmpty()) {
+                    connection.hashCommands().hIncrBy(brandsKeyB,
+                            item.getBrand().getBytes(StandardCharsets.UTF_8), score);
+                    connection.keyCommands().expire(brandsKeyB, ttlSeconds);
+                }
+                if (item.getPrice() != null) {
+                    connection.listCommands().lPush(pricesKeyB,
+                            String.valueOf(item.getPrice()).getBytes(StandardCharsets.UTF_8));
+                    connection.listCommands().lTrim(pricesKeyB, 0, PRICE_MAX_LEN - 1);
+                    connection.keyCommands().expire(pricesKeyB, ttlSeconds);
+                }
+
+                // 统计信息
+                connection.hashCommands().hIncrBy(statsKeyB,
+                        "cart_count".getBytes(StandardCharsets.UTF_8), 1);
+                connection.hashCommands().hSet(statsKeyB,
+                        "last_update".getBytes(StandardCharsets.UTF_8),
+                        String.valueOf(System.currentTimeMillis() / 1000).getBytes(StandardCharsets.UTF_8));
+                connection.keyCommands().expire(statsKeyB, ttlSeconds);
+
+                return null;
+            });
+
+            log.debug("用户加购画像写入成功, userId={}, itemId={}", userId, cartFormDTO.getItemId());
+        } catch (Exception e) {
+            log.warn("加购画像写入失败，不影响加购流程, userId={}, itemId={}",
+                    userId, cartFormDTO.getItemId(), e);
         }
     }
 

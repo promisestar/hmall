@@ -15,7 +15,7 @@ Agent Service (LangGraph Server :8090)
   ├── 中间件层：AuthMiddleware → PermissionMiddleware → RegexShortcutMiddleware → SkillsMiddleware
   ├── CustomerAgent：18 个工具，5 个 Skills
   ├── AdminAgent：10 个工具，3 个 Skills
-  └── Redis Checkpoint（db=1 隔离）
+  └── 用户画像（Redis db=0，与后端共享）
   │
   │ HTTP (httpx)
   ▼
@@ -28,7 +28,7 @@ hm-gateway (:8080) → 各微服务 (:8081-:8090)
 - **双 JWT 认证**：C 端用户 JWT 和管理后台 JWT 独立验证
 - **二次确认**：危险操作通过 LangGraph interrupt() 实现 Human-in-the-loop
 - **Agent 零数据库**：所有数据操作通过 Gateway → 微服务 API 完成
-- **Redis Checkpoint**：复用 hmall Redis（db=1 隔离），支持中断恢复
+- **用户画像持久化**：Redis Hash/List 增量聚合（db=0），Agent 侧与后端共享
 
 ## 快速开始
 
@@ -80,7 +80,7 @@ npm run dev
 | `DASHSCOPE_API_KEY` | 通义千问 API Key | — |
 | `LLM_MODEL_NAME` | LLM 模型名 | qwen-turbo |
 | `REDIS_HOST` | Redis 主机 | localhost |
-| `REDIS_DB` | Redis 数据库（db=1 隔离） | 1 |
+| `PROFILE_REDIS_DB` | 画像 Redis DB（须与后端 spring.redis.database 一致） | 0 |
 | `JAVA_GATEWAY_URL` | hmall Gateway 地址 | http://localhost:8080 |
 | `AGENT_PORT` | Agent 服务端口 | 8090 |
 | `JWT_VERIFY_LOCAL` | 是否本地验证 JWT | false（依赖 Gateway） |
@@ -125,7 +125,7 @@ hmall-agent/
 ├── pyproject.toml           # 项目依赖
 ├── .env.example             # 环境变量模板
 ├── src/
-│   ├── core/                # 核心配置（config/llms/redis_checkpoint）
+│   ├── core/                # 核心配置（config/llms）
 │   ├── gateway/             # HTTP 客户端 + JWT 验证
 │   ├── middleware/          # 中间件（auth/permission/regex/rag）
 │   ├── agents/

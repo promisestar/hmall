@@ -409,21 +409,39 @@ def format_preferences(
     cat_scores: dict,
     brand_scores: dict,
     prices: list,
-    orders: list,
-    cart: list,
+    orders: list | None = None,
+    cart: list | None = None,
 ) -> str:
-    """格式化用户偏好分析结果 → Markdown 列表。"""
-    order_count = len(orders)
-    cart_count = len(cart)
+    """格式化用户偏好分析结果 → Markdown 列表。
 
-    if order_count == 0 and cart_count == 0:
-        return "暂无足够的购买/购物车数据来分析偏好，推荐时将使用热门商品兜底"
+    Args:
+        cat_scores: 类目得分字典
+        brand_scores: 品牌得分字典
+        prices: 价格列表
+        orders: 订单列表（画像直读模式为 None，跳过统计行）
+        cart: 购物车列表（画像直读模式为 None，跳过统计行）
+    """
+    # 画像直读模式（orders/cart 为 None）：仅展示聚合数据
+    is_profile_mode = orders is None and cart is None
+
+    if not is_profile_mode:
+        order_count = len(orders)
+        cart_count = len(cart)
+
+        if order_count == 0 and cart_count == 0:
+            return "暂无足够的购买/购物车数据来分析偏好，推荐时将使用热门商品兜底"
+    else:
+        # 画像直读模式：画像为空时提示
+        if not cat_scores and not brand_scores and not prices:
+            return "暂无足够的画像数据来分析偏好，推荐时将使用热门商品兜底"
 
     lines = [
         "## 📊 您的购物偏好分析",
         "",
-        f"基于 {order_count} 笔订单 + {cart_count} 件购物车商品",
     ]
+
+    if not is_profile_mode:
+        lines.append(f"基于 {order_count} 笔订单 + {cart_count} 件购物车商品")
 
     # 类目 Top 3
     if cat_scores:

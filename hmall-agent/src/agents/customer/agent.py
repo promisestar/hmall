@@ -2,10 +2,11 @@
 
 使用 DeepAgents create_agent 声明式定义，配置：
 - model: 通义千问 qwen-turbo
-- tools: 18 个 C 端工具
+- tools: 22 个 C 端工具（Phase 1: 20 个 + Phase 2: 2 个记忆工具）
 - middleware: AuthMiddleware → PermissionMiddleware → RegexShortcutMiddleware → SkillsMiddleware
 - context_schema: Context（agent_type, user_id, user_token, enable_rag）
 - skills: 5 个 SKILL.md 规范文件
+- store: LangGraph Store（graph.json 配置 InMemoryStore，平台自动注入到 config.configurable.store）
 """
 
 from dataclasses import dataclass

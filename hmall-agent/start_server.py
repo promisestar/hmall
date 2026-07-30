@@ -30,7 +30,7 @@ def setup_environment():
     # 设置环境变量
     os.environ.update({
         "DATABASE_URI": ":memory:",
-        "REDIS_URI": os.getenv("REDIS_CHECKPOINT_URI", "fake"),
+        "REDIS_URI": "fake",
         "MIGRATIONS_PATH": "__inmem",
         "ALLOW_PRIVATE_NETWORK": "true",
         "LANGGRAPH_UI_BUNDLER": "true",

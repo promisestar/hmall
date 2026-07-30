@@ -22,11 +22,17 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 2048
 
-    # ==================== Redis（Checkpoint 后端） ====================
+    # ==================== Redis ====================
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: str = ""
-    REDIS_DB: int = 1  # db=1 与 hmall 业务数据（db=0）隔离
+
+    # 画像 Redis DB — 必须与后端 spring.redis.database 一致（默认 0），
+    # 确保 Agent 侧和后端共享同一份画像数据。
+    PROFILE_REDIS_DB: int = 0
+
+    # ==================== LangGraph Store（Layer 3 语义记忆） ====================
+    LANGGRAPH_STORE_URI: str = ""  # 留空则复用 redis_url
 
     # ==================== Java 后端 ====================
     JAVA_GATEWAY_URL: str = "http://localhost:8080"
@@ -54,7 +60,7 @@ class Settings(BaseSettings):
     def redis_url(self) -> str:
         """构建 Redis 连接 URL。"""
         auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/0"
 
     @property
     def project_root(self) -> Path:

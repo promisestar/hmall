@@ -187,5 +187,79 @@ def extract_token_from_config(config) -> str:
     return ""
 
 
+def _extract_user_id(config) -> str:
+    """从 LangGraph RunnableConfig 中提取 user_id。
+
+    优先级与 extract_token_from_config 一致：
+    1. config.configurable.user_id（前端传入，最可靠）
+    2. config.configurable.context.user_id（AuthMiddleware 注入，JWT_VERIFY_LOCAL=true 时）
+    3. config.runtime.context.user_id（DeepAgents 运行时上下文）
+
+    以上均无时，尝试从 user_token JWT payload 解码 user_id（兜底，
+    JWT_VERIFY_LOCAL=false 时 AuthMiddleware 不写入 context.user_id）。
+    """
+    if not config or not isinstance(config, dict):
+        return ""
+
+    configurable = config.get("configurable", {})
+    if not isinstance(configurable, dict):
+        configurable = {}
+
+    # 1. config.configurable.user_id（前端传入）
+    user_id = configurable.get("user_id", "")
+    if user_id:
+        return str(user_id)
+
+    # 2. configurable.context.user_id（AuthMiddleware 注入）
+    context = configurable.get("context")
+    if context and hasattr(context, "user_id"):
+        uid = getattr(context, "user_id", "")
+        if uid:
+            return str(uid)
+
+    # 3. runtime.context.user_id（DeepAgents 运行时上下文）
+    runtime = config.get("runtime", {})
+    if isinstance(runtime, dict):
+        context = runtime.get("context")
+        if context and hasattr(context, "user_id"):
+            uid = getattr(context, "user_id", "")
+            if uid:
+                return str(uid)
+
+    # 4. 兜底：从 user_token JWT payload 解码 user_id
+    token = configurable.get("user_token", "")
+    if not token:
+        context = configurable.get("context")
+        if context and hasattr(context, "user_token"):
+            token = getattr(context, "user_token", "")
+    if token:
+        uid = _decode_user_id_from_jwt(token)
+        if uid:
+            return str(uid)
+
+    return ""
+
+
+def _decode_user_id_from_jwt(token: str) -> str:
+    """从 JWT payload 中解码 user_id（不验证签名）。
+
+    复用 auth.get_jti 的 base64 解码模式，仅用于 JWT_VERIFY_LOCAL=false 时的兜底。
+    """
+    try:
+        import base64
+        import json
+
+        parts = token.split(".")
+        if len(parts) != 3:
+            return ""
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(payload))
+        user_id = decoded.get("user_id", "")
+        return str(user_id) if user_id else ""
+    except Exception:
+        return ""
+
+
 # 全局客户端实例
 gateway_client = GatewayClient()
