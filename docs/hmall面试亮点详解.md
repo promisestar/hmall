@@ -26,6 +26,7 @@
 18. [服务启动顺序与端口分配](#18-服务启动顺序与端口分配)
 19. [项目文件规模与统计](#19-项目文件规模与统计)
 20. [面试专题：项目最难部分与解决方案](#20-面试专题项目最难部分与解决方案)
+21. [Agent 用户画像构建与记忆机制](#21-agent-用户画像构建与记忆机制)
 
 ---
 
@@ -1967,4 +1968,248 @@ public void deleteActivity(Long id) {
 
 ---
 
-*本文档基于 hmall 代码库实际审查整理。架构设计亮点包括：Agent 三级路由降低 LLM 调用成本、双 JWT 认证权限隔离、Redis + RabbitMQ 秒杀削峰、中间件链关注点分离、LightRAG + MCP 三层桥接、Gateway 统一认证限流、ES + LLM 协同推荐、本地消息表分布式最终一致性、Seata 跨服务强一致性、Feign 用户上下文自动透传、Sentinel 熔断保护、Nacos 动态路由零停机热更新、RabbitMQ 延迟消息订单超时取消、RBAC 三层动态权限控制、级联管理 DB 事务 + Redis 缓存同步清除。*
+## 21. Agent 用户画像构建与记忆机制
+
+### 设计动机
+
+电商 Agent 最大的挑战不是"能不能查到商品"，而是"知不知道用户是谁"——用户说"帮我推荐一款耳机"，如果 Agent 不知道用户之前买了什么、预算多少、偏好什么品牌，就只能给一个通用的热销列表。这和一个真正懂你的导购差距太大了。
+
+更深层的问题：用户今天说"想要一个运动耳机但再考虑考虑"，三天后再来，Agent 如果不记得这句话，就得从头问起——用户体验非常割裂。
+
+**总结核心矛盾**：
+| 矛盾 | 表现 |
+|------|------|
+| **冷启动** | 新用户没有任何行为数据，推荐缺乏依据 |
+| **跨服务数据孤岛** | 用户数据散落在 5 个微服务的独立数据库中（浏览、加购、购买、搜索、收藏），Agent 无法直接查询 |
+| **跨对话记忆** | LLM 本身无状态，上次对话中用户表达的意图下次对话就忘了 |
+| **性能 vs 精准** | 实时聚合全量用户行为数据需要多次 Feign 调用（2-3 秒），而推荐需要毫秒级响应 |
+
+### 实现方案
+
+hmall 构建了一套**三层记忆/画像体系**，由 Agent（Python）和后端微服务（Java）协同运作，共享同一份 Redis 数据：
+
+```
+                      ┌────────────────────────────────────────┐
+                      │           Agent 服务 (Python)            │
+                      │                                         │
+                      │  analyze_user_preferences()              │
+                      │    ├─ [优先] profile_store.get_profile() │
+                      │    │   → Redis Hash 画像 (<5ms)          │
+                      │    └─ [降级] 实时聚合 Gateway 调用        │
+                      │        → backfill_profile() 回写 Redis   │
+                      │                                         │
+                      │  get_memories() / save_memory()          │
+                      │    → LangGraph Store 语义记忆            │
+                      └──────────────┬─────────────────────────┘
+                                     │ 共享 Redis (db=0)
+                      ┌──────────────┴─────────────────────────┐
+                      │         后端微服务 (Java)                │
+                      │                                         │
+                      │  CartServiceImpl.writeCartProfile()      │
+                      │    → HINCRBY profile:{uid}:categories 3  │
+                      │                                         │
+                      │  paySuccessListener.writePurchaseProfile │
+                      │    → HINCRBY profile:{uid}:categories 5  │
+                      └─────────────────────────────────────────┘
+```
+
+**Redis 画像 Key 设计（Java 和 Python 共享，db=0）**：
+
+| Redis Key | 类型 | 内容 | TTL |
+|-----------|------|------|-----|
+| `profile:{userId}:categories` | Hash | `{类目名: 累计得分}` | 30 天 |
+| `profile:{userId}:brands` | Hash | `{品牌名: 累计得分}` | 30 天 |
+| `profile:{userId}:prices` | List | 最近购买价格列表（最多 20 条） | 30 天 |
+| `profile:{userId}:stats` | Hash | `{purchase_count, cart_count, last_update}` | 30 天 |
+| `profile:{userId}:events` | List | 行为事件 JSON 流（最近 50 条） | 7 天 |
+
+#### Layer 1：行为事件流 — 可回溯的原始日志
+
+每次用户行为（加购、购买）以 JSON 事件形式 `LPUSH` 到 `profile:{userId}:events`，保留最近 50 条。
+
+```json
+{"type": "cart", "item_id": 123, "category": "手机", "brand": "Apple",
+ "price": 699900, "weight": 3, "ts": "2026-07-30T10:00:00"}
+{"type": "purchase", "item_id": 456, "category": "耳机", "brand": "Sony",
+ "price": 129900, "weight": 5, "ts": "2026-07-29T15:30:00"}
+```
+
+**价值**：当需要更深度的偏好分析时（如"用户最近一周的购买节奏"），Layer 2 的聚合分数不够，可以回溯源事件重新按时间衰减加权。
+
+#### Layer 2：聚合画像 — 毫秒级偏好查询
+
+后端 Java 在关键行为点**实时增量更新**画像得分，权重体系：
+
+| 行为 | 触发点 | 权重 | 写入方式 |
+|------|--------|:----:|---------|
+| **purchase（购买）** | trade-service `paySuccessListener` | **5** | `HINCRBY profile:{uid}:categories {cat} 5×num` |
+| **cart（加购）** | cart-service `CartServiceImpl.writeCartProfile()` | **3** | `HINCRBY profile:{uid}:categories {cat} 3` |
+| **view（浏览）** | Agent 侧 `profile_store.record_event()` | **1** | 预留（当前未大规模启用） |
+
+**加购画像写入**（`CartServiceImpl.writeCartProfile()`，行 315-367）：
+
+```java
+// 1. Feign 查询商品信息
+List<ItemDTO> items = itemClient.queryItemsByIds(form.getItemIds());
+
+// 2. Redis Pipeline 批量原子写入
+stringRedisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+    for (ItemDTO item : items) {
+        // HINCRBY 原子增量 — 无需分布式锁
+        connection.hIncrBy(categoryKey, item.getCategory(), 3);
+        connection.hIncrBy(brandKey, item.getBrand(), 3);
+    }
+    connection.lPush(priceKey, item.getPrice().toString());
+    connection.lTrim(priceKey, 0, 19);  // 保留最近 20 条
+    connection.expire(categoryKey, Duration.ofDays(30));
+    // ...
+    return null;
+});
+
+// 3. 失败静默 — 不阻塞加购主流程
+```
+
+**购买画像写入**（`paySuccessListener.writePurchaseProfile()`, 行 88-167）：
+
+```java
+// 监听 RabbitMQ pay.success → 查订单详情 → Feign 查商品 → HINCRBY ×5
+// 多商品场景：每个商品分别 HINCRBY，累加购买数量
+```
+
+**画像读取**（Agent 侧 `analyze_user_preferences`，`tools.py` 行 652-756）：
+
+```python
+# Phase 2 优先：读 Redis 画像 (<5ms, 0 次网络调用)
+profile = await profile_store.get_profile(user_id)
+if profile and profile.get("categories"):
+    top_categories = sorted(profile["categories"].items(),
+                           key=lambda x: x[1], reverse=True)[:3]
+    return top_categories
+
+# Phase 1 降级：实时计算 + 回写
+orders = await http_client.get(f"{gateway}/orders/page")    # Feign
+cart = await http_client.get(f"{gateway}/carts")            # Feign
+items = await http_client.get(f"{gateway}/items?ids=...")   # Feign
+prefs = _accumulate_preference(orders, cart, items)         # purchase×5, cart×3
+await profile_store.backfill_profile(user_id, prefs)        # 回写 Redis
+```
+
+#### Layer 3：语义记忆 — 跨对话上下文
+
+与 Layer 1/2 的数值型画像不同，Layer 3 存储**自然语言记忆**——"用户说过什么"。
+
+两个工具通过 `profile/memory.py` 暴露给 LLM，使用 **LangGraph Store API** 操作：
+
+```python
+# save_memory — 当用户表达购物意图但未完成
+# 例：用户说"想买手机但再考虑考虑"
+await store.aput(
+    ("user_memory", user_id),           # namespace
+    f"shopping_intent_{timestamp}",     # key
+    {"content": "正在挑选手机，预算约5000元，偏好品牌Apple", "ts": timestamp}
+)
+
+# get_memories — 每次对话开始时 LLM 自动调用
+memories = []
+async for item in store.asearch(("user_memory", user_id)):
+    memories.append(item.value)
+# → [{"content": "正在挑选手机，预算约5000元，偏好品牌Apple", "ts": "..."}]
+```
+
+**持久化方式**：
+- 当前使用 `InMemoryStore`（开发环境轻量方案）
+- 可无缝升级为 PostgreSQL 或 Redis 持久化后端——LangGraph Store 接口不变
+
+**系统提示词中的使用规范**（`prompts.py`）：
+
+```
+每次对话开始时，自动调用 get_memories 读取历史记忆，
+在首次回复中自然融入（如"欢迎回来！上次您在看手机类商品，
+今天新到了一些热门款"）。
+
+当用户明确表达购物意图但未完成时，调用 save_memory 保存意图。
+不要生硬复述记忆内容，要自然地融入对话。
+```
+
+#### 完整数据流：从用户行为到 Agent 知识
+
+```
+用户行为              写入者                     Redis 层               Agent 使用
+────────              ────                      ──────                 ────────
+浏览商品 (前端)        [预留: Agent 侧]           events [行为流]        [暂未大规模使用]
+加购 (前端/对话)       CartServiceImpl            categories [Hash]     analyze_user_preferences()
+                      .writeCartProfile()        brands [Hash]         RecommendServiceImpl
+                      (Pipeline HINCRBY ×3)     prices [List]         .recommend()
+                                                stats [Hash]          (优先读画像 → 0次Feign)
+                                                
+下单支付 (前端)        paySuccessListener         categories [Hash]     analyze_user_preferences()
+                      .writePurchaseProfile()    brands [Hash]         RecommendServiceImpl
+                      (Pipeline HINCRBY ×5)     prices [List]         .recommend()
+                                                stats [Hash]          
+                                                
+对话中的意图           save_memory 工具           LangGraph Store        get_memories 工具
+("想买手机再看看")     (namespace=user_memory)    (InMemoryStore)       (下次对话自动读取)
+```
+
+### 设计亮点
+
+**1. 画像与业务完全解耦 — 写入失败不阻塞主流程**
+
+画像写入在 `try-catch` 中静默执行。加购时 Redis 不可用？加购照样成功，仅 `log.warn`。支付回调时 Redis 挂了？订单照样创建，画像稍后补。**用户永远不会因为"画像系统故障"而加不了购物车或付不了款**。
+
+```java
+// CartServiceImpl.writeCartProfile() — 静默失败
+try {
+    stringRedisTemplate.executePipelined(...);
+} catch (Exception e) {
+    log.warn("Failed to write cart profile for user {},不影响加购流程", userId, e);
+    // 不抛异常，不阻塞加购
+}
+```
+
+**2. Java 和 Python 共享 Redis 画像 — 跨语言零翻译开销**
+
+后端 Java 用 `StringRedisTemplate` 写（纯字符串，无 Jackson 序列化歧义），Agent Python 用 `redis.asyncio` 读——同一个 `profile:123:categories`，`HGETALL` 返回 `{"手机":"25","耳机":"9"}`，两边解析零差异。没有 gRPC 定义、没有中间 API 层、没有额外的序列化开销。
+
+**3. 画像优先、实时降级、自动回写 — 冷启动平滑过渡**
+
+新用户第一次对话时 Redis 画像为空 → Agent 自动降级到实时聚合（3 次 Gateway 调用，2-3 秒）→ 聚合完成后 `backfill_profile()` 回写 Redis → 下次对话直接命中（<5ms）。用户无感知，Agent 自己完成了从冷到热的过渡。
+
+**4. 三层记忆互补 — 各司其职**
+
+| 层级 | 存储 | 查询延迟 | 适用场景 |
+|------|------|:---:|------|
+| Layer 1 行为流 | Redis List | <1ms | 最近行为回溯、时序分析 |
+| Layer 2 聚合画像 | Redis Hash | <1ms | 类目/品牌/价格偏好查询 |
+| Layer 3 语义记忆 | LangGraph Store | <5ms | 跨对话意图延续 |
+
+Layer 2 只能告诉你"用户喜欢手机类目"，但不知道用户"想要 iPhone 但嫌贵"。Layer 3 记得这句话——多层互补，形成完整的"用户认知"。
+
+**5. `HINCRBY` 原子增量 — 无锁并发写入**
+
+Java 侧多个行为事件可能并发写入（用户同时加购商品 A 和商品 B），Python Agent 降级回写也可能与 Java 同时发生。`HINCRBY` 是 Redis 原子命令，天然保证 `读-改-写` 的并发安全，不需要分布式锁。
+
+```bash
+# 两个并发请求同时 HINCRBY
+HINCRBY profile:123:categories "手机" 3    # → 手机: 3
+HINCRBY profile:123:categories "手机" 5    # → 手机: 8  (原子累加，无覆盖)
+```
+
+### 对比分析
+
+| 方案 | 跨服务画像 | 跨语言共享 | 写失败影响 | 跨对话记忆 | 冷启动 |
+|------|:---:|:---:|:---:|:---:|:---:|
+| 各服务独立本地缓存 | ❌ 数据孤岛 | — | 无 | ❌ | ❌ |
+| 统一画像微服务（gRPC） | ✅ | ✅（需定义 proto） | ⚠️ 服务不可用影响 | ❌ | ⚠️ |
+| 纯 LLM 记忆（系统提示词注入） | ❌ 无法聚合行为数据 | — | — | ⚠️ 上下文窗口有限 | ❌ |
+| **Redis 共享 + 三层记忆（hmall）** | **✅ Java/Python 直连同一 Redis** | **✅ String 序列化零歧义** | **✅ 静默失败不阻塞** | **✅ LangGraph Store** | **✅ 降级回写** |
+
+### 面试展示要点
+
+> "Agent 最怕的是不知道自己服务的用户是谁。我们构建了一个三层记忆体系：Layer 1 行为事件流在 Redis List 里——每次加购、购买都 LPUSH 一条 JSON，保留最近 50 条，可以做时序分析。Layer 2 聚合画像在 Redis Hash 里——后端 Java 在加购和支付成功时做 HINCRBY 增量更新，类目得分×3、购买得分×5，Agent 读取时 <5ms 拿到用户偏好 Top3。Layer 3 语义记忆在 LangGraph Store 里——用户说'想买手机再看看'，Agent 调 save_memory 记下来，三天后再来自动读取。
+
+> 关键设计有几个：一是'画像与业务解耦'——画像写入失败 try-catch 静默处理，不影响加购和支付主流程。二是'跨语言零翻译'——Java 用 StringRedisTemplate 写字符串，Python 用 redis.asyncio 读，同一个 Hash 两边解析零歧义。三是'画像优先、实时降级、自动回写'——首次对话 Redis 画像为空时自动降级到实时计算（3 次 Gateway 调用），算完后把结果 HSET 回 Redis，下次直接命中。整个冷启动过程对用户完全透明。"
+
+---
+
+*本文档基于 hmall 代码库实际审查整理。架构设计亮点包括：Agent 三级路由降低 LLM 调用成本、双 JWT 认证权限隔离、Redis + RabbitMQ 秒杀削峰、中间件链关注点分离、LightRAG + MCP 三层桥接、Gateway 统一认证限流、ES + LLM 协同推荐、Agent 三层画像记忆体系（行为流 + 聚合画像 + 语义记忆）、本地消息表分布式最终一致性、Seata 跨服务强一致性、Feign 用户上下文自动透传、Sentinel 熔断保护、Nacos 动态路由零停机热更新、RabbitMQ 延迟消息订单超时取消、RBAC 三层动态权限控制、级联管理 DB 事务 + Redis 缓存同步清除。*

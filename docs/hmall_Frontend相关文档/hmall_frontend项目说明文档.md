@@ -1,8 +1,8 @@
 # hmall 前端实现说明文档
 
-> 版本：v1.0
-> 日期：2026-07-17
-> 设计文档：`docs/admin-service-design.md`、`docs/hmall-frontend-optimization-plan.md`
+> 版本：v1.1
+> 日期：2026-07-31
+> 设计文档：`docs/hmall_Agent相关文档/`、`docs/管理后台相关文档/`、`docs/秒杀功能实现/`
 
 ---
 
@@ -461,6 +461,12 @@ ChatPage（页面容器）
 - 更新 Agent 助手前端界面（Markdown 消息渲染、猜你想做快捷入口）
 - 扩展 Agent 推荐能力
 
+**Phase 2 新增能力**：
+- **用户记忆工具**（`save_memory` / `get_memories`）：Agent 在对话开始时自动读取用户历史意图记忆，在首次回复中自然融入（如"欢迎回来！上次您在看手机类商品"）。用户明确表达未完成的购物意图时自动保存
+- **个性化推荐增强**：Agent 通过 Redis 用户画像优先分析偏好（画像命中时 0 次后端调用），推荐结果附带个性化理由生成。后端 `CartServiceImpl` 和 `paySuccessListener` 在加购/支付时自动写入画像，前端无需额外适配
+- **CustomerAgent 工具扩充**：从 20 个增至 **22 个**（新增 `save_memory` / `get_memories`）
+- **AdminAgent 工具扩充**：从 10 个增至 **11 个**（新增秒杀管理相关工具）
+
 ---
 
 ## 七、配置说明
@@ -575,14 +581,17 @@ export default defineConfig({
 
 | 文档 | 关系 |
 |------|------|
-| `docs/admin-service-design.md` | 管理后台设计文档：本文档管理端部分的源头 |
-| `docs/管理后台相关文档/admin-service-implementation-report.md` | 管理后台后端实现报告：对应后端实现 |
-| `docs/hmall-frontend-optimization-plan.md` | 前端优化需求文档：P0/P1 需求来源 |
-| `docs/秒杀功能实现/seckill-design.md` | 秒杀系统设计文档：C 端秒杀页面设计来源 |
-| `docs/秒杀功能实现/seckill-admin-design.md` | 秒杀管理后台设计文档：管理端秒杀页面设计来源 |
-| `docs/Agent功能相关文档/` | Agent 功能文档：AI 助手设计来源 |
-| `hmall-agent/` | Agent 后端服务：LangGraph Python 服务端 |
+| `docs/hmall_Agent相关文档/hmall_Agent设计方案文档.md` | Agent 设计方案：AI 助手设计来源（系统架构 / 推荐 / 画像 / RAG） |
+| `docs/hmall_Agent相关文档/hmall_Agent实现说明文档.md` | Agent 实现报告：对应后端 Agent 实现 |
+| `docs/hmall_Agent相关文档/hmall_Agent项目说明文档.md` | Agent 项目说明：快速理解 Agent 功能 |
+| `docs/管理后台相关文档/hmall_Admin设计方案文档.md` | 管理后台设计方案：管理端页面设计来源 |
+| `docs/管理后台相关文档/hmall_Admin实现说明文档.md` | 管理后台实现报告：对应后端 admin-service 实现 |
+| `docs/管理后台相关文档/hmall_管理后台项目说明文档.md` | 管理后台项目说明：快速理解管理后台功能 |
+| `docs/秒杀功能实现/hmall_seckill设计方案文档.md` | 秒杀设计方案：C 端 + 管理端秒杀页面设计来源 |
+| `docs/秒杀功能实现/hmall_seckill实现说明文档.md` | 秒杀实现报告：对应后端秒杀功能实现 |
+| `docs/秒杀功能实现/hmall_seckill项目说明文档.md` | 秒杀项目说明：快速理解秒杀功能 |
+| `hmall-agent/` | Agent 后端服务：LangGraph + DeepAgents Python 服务端 |
 
 ---
 
-> **实现完成度**：C 端商城核心链路（浏览→加购→下单→支付）全部实现；管理后台 RBAC + 商品/订单/用户管理全部实现；秒杀系统 C 端 + 管理端全部实现；AI Agent 助手双端集成完成。Dashboard 数据对接为后续扩展。
+> **实现完成度**：C 端商城核心链路（浏览→加购→下单→支付）全部实现；管理后台 RBAC + 商品/订单/用户管理全部实现；秒杀系统 C 端 + 管理端全部实现；AI Agent 助手双端集成完成，Phase 2 用户记忆 + 画像推荐增强已落地。Dashboard 数据对接为后续扩展。
