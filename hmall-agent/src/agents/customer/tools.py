@@ -26,8 +26,8 @@ from src.gateway.http_client import (
     extract_token_from_config,
     gateway_client,
 )
-from src.profile.store import profile_store
-from src.profile.memory import get_memories, save_memory
+from src.user_profile.store import profile_store
+from src.user_profile.memory import get_memories, save_memory
 from src.tools.formatters import (
     format_address_list,
     format_cart_list,
