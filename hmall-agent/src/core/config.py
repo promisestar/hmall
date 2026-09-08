@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     CUSTOMER_JKS_PATH: str = "keys/hmall.jks"
     ADMIN_JKS_PATH: str = "keys/admin.jks"
 
+    # ==================== 身份探查（方案 3：Gateway introspect） ====================
+    # Agent 通过 GET /users/me 或 /admin/info 向 Gateway 索取权威 userId
+    INTROSPECT_CACHE_TTL: int = 60  # 秒；0 表示禁用缓存
+    # true 时 introspect 失败可回退本地 JWT 解码（默认关闭，保证与 Gateway 强一致）
+    INTROSPECT_FALLBACK_JWT: bool = False
+
     # ==================== RAG（LightRAG + MCP） ====================
     RAG_BASE_URL: str = "http://localhost:9621"      # LightRAG Server 地址
     RAG_USERNAME: str = "admin"                      # LightRAG 登录用户名

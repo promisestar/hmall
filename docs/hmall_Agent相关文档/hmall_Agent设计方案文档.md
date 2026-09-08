@@ -14,10 +14,11 @@
 ---
 
 # 第一部分：hmall Agent 系统设计
-> 版本：v2.1  
-> 日期：2026-07-16  
+> 版本：v2.2  
+> 日期：2026-09-07  
 > 
-> v2.1 变更：SDK 升级至 1.x、前端重构为独立页面 + Markdown 渲染、移除 configurable 改用 context-only
+> v2.1 变更：SDK 升级至 1.x、前端重构为独立页面 + Markdown 渲染、移除 configurable 改用 context-only  
+> v2.2 变更：多租户会话隔离（LangGraph Auth + `metadata.owner`）；Gateway introspect（`GET /users/me` / `GET /admin/info`）作为 Agent 侧 userId 权威来源；开发态 Checkpoint 确认为 inmem + `.langgraph_api` 落盘（修正早期 Redis Checkpoint 表述）
 
 ---
 
@@ -819,117 +820,123 @@ knowledge_base/
 
 ## 5. 对话记忆设计
 
-### 5.1 LangGraph Thread + Redis Checkpoint
+### 5.1 LangGraph Thread + Checkpointer（开发态 inmem 落盘）
 
-v2.0 使用 LangGraph 的 Thread 机制替代自定义 Redis 对话记忆。每个对话线程（Thread）对应一个 `thread_id`，LangGraph 自动管理消息历史和状态持久化。
+v2.0+ 使用 LangGraph 的 Thread 机制管理会话历史。每个对话线程对应一个 `thread_id`，图状态（messages、interrupt 等）由 Checkpointer 持久化。
 
 ```
-v1.0: 自定义 ChatMemory（Redis List, 20条/30min TTL, 手动管理）
-v2.0: LangGraph Thread + Redis Checkpoint（自动管理, 支持 interrupt 恢复）
+会话历史：Checkpointer（按 thread_id）
+长期语义记忆：Store（按 namespace + key，跨 thread）
+用户隔离：Auth 写入 metadata.owner = {agent_type}:{user_id}，search/read/run 按 owner 过滤
 ```
 
-**Redis Checkpoint 配置**：
+**开发态持久化（现行）**：
 
-```python
-# src/core/redis_checkpoint.py
-from langgraph.checkpoint.redis import RedisSaver
-from src.core.config import settings
+- `LANGGRAPH_RUNTIME_EDITION=inmem`：热路径内存，冷路径 pickle 至 `.langgraph_api/`
+- 文件：`.langgraph_checkpoint.*.pckl`（storage/writes/blobs）、`.langgraph_ops.pckl`、`store.pckl`
+- 进程重启后可恢复；生产可换 Postgres 等，owner 过滤逻辑不变
 
-# 复用 hmall Redis，使用 db=1 隔离（hmall 业务用 db=0）
-checkpointer = RedisSaver(
-    redis_url=f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}"
-)
-```
+> 早期方案曾规划 Redis Checkpoint（db=1）。若文档其他处仍出现该表述，以本节与实现代码为准。
 
 **Checkpoint 机制说明**：
 
-| 机制 | 说明 |
+| 概念 | 说明 |
 |------|------|
-| Thread | 每个对话线程有唯一 `thread_id`，前端通过 SDK 创建和管理 |
-| Checkpoint | 每次图节点执行后自动保存状态（messages, todos, files 等）到 Redis |
-| 恢复 | 通过 `thread_id` 自动加载历史消息，支持中断恢复（interrupt） |
-| 清理 | 删除 Thread 时自动清理 Checkpoint 数据（`DELETE /threads/{id}`） |
+| Thread | 唯一 `thread_id`；创建时打 `metadata.owner` |
+| Checkpoint | 节点执行后保存图状态快照（含 messages、pending writes / interrupt） |
+| 恢复 | 同 thread 续聊 / `command.resume`；重启后从落盘 load |
+| 清理 | `DELETE /threads/{id}` |
+| 多租户 | 非「一个用户一个 Redis db」，而是 Auth 强制 owner 过滤 |
 
-**与 v1.0 的对比**：
+**交互流程**：
 
-| 维度 | v1.0 ChatMemory | v2.0 LangGraph Checkpoint |
-|------|----------------|--------------------------|
-| 存储 | Redis List（手动 rpush/ltrim） | Redis Checkpoint（自动 kv 存储） |
-| 消息限制 | 固定 20 条（ltrim 裁剪） | 无硬限制（可配置 recursion_limit） |
-| TTL | 30 分钟手动 expire | 线程删除时清理（或配置 TTL） |
-| 状态持久化 | 仅消息文本 | 完整图状态（messages + interrupt 状态 + todos + files） |
-| 中断恢复 | 不支持（自定义 confirm Key 模拟） | 原生支持（interrupt + resume） |
-| 隔离 | `agent:chat:{userId}:{conversationId}` | `thread_id`（LangGraph 管理） |
+1. 前端带 `Authorization` + `X-Hmall-Agent-Type` → Auth introspect → `owner`  
+2. `threads.create({ metadata: { owner, ... } })`（服务端也会强制写入 owner）  
+3. `runs.stream(thread_id, ...)` → 加载该 thread Checkpoint → 执行  
+4. interrupt → Checkpoint 保存挂起状态 → `resume` 继续  
+5. `threads.search({ metadata: { owner } })` 仅返回本人会话  
 
-### 5.2 Thread 生命周期
+### 5.2（历史对比）v1.0 ChatMemory vs 现行方案
+
+| 维度 | v1.0 ChatMemory | 现行 LangGraph Checkpointer |
+|------|-----------------|---------------------------|
+| 存储 | Redis List（手动） | inmem + `.langgraph_api`（或生产 Postgres） |
+| interrupt | 自建确认键 | 原生 pending writes |
+| 用户隔离 | Key 含 userId | `metadata.owner` + Auth |
+| 跨会话意图 | 无 / 弱 | Store Layer 3 + Redis 画像 |
+
+### 5.3 Thread 生命周期
 
 ```
-1. 前端 client.threads.create() → 创建 Thread，返回 thread_id
-2. 用户发送消息 → stream.submit({messages: [...]})
-   → LangGraph 从 Redis 加载该 thread 的 Checkpoint
+1. 前端带 Authorization → Auth introspect → owner
+2. client.threads.create({ metadata: { owner, user_id, agent_type } }) → thread_id
+3. 用户发送消息 → runs.stream(thread_id, …, context + headers)
+   → 加载该 thread 的 Checkpoint
    → 执行 Agent 图（中间件 → LLM/正则 → 工具 → interrupt/end）
-   → 每步自动保存 Checkpoint 到 Redis
-3. interrupt 暂停 → Checkpoint 保存中断状态
-   → 用户回复 → stream.submit(null, {command: {resume: value}})
-   → 从 Checkpoint 恢复，继续执行
-4. 用户切换对话 → 新 thread_id → 加载另一个 Thread 的 Checkpoint
-5. 删除对话 → client.threads.delete(thread_id) → 清理 Redis Checkpoint
+   → 每步自动保存 Checkpoint（开发态落盘 .langgraph_api）
+4. interrupt 暂停 → Checkpoint 保存挂起写入
+   → resume → 从 Checkpoint 继续
+5. threads.search({ metadata: { owner } }) → 仅本人会话
+6. 删除对话 → threads.delete(thread_id)
 ```
 
 ---
 
 ## 6. 安全设计
 
-### 6.1 双 JWT 认证中间件
+### 6.1 双 JWT + Gateway introspect（userId 权威对齐）
 
-```python
-# src/middleware/auth.py
-from langchain.agents.middleware import AgentMiddleware, ModelRequest
-from src.gateway.auth import verify_jwt
+hmall-agent **不是**挂在 Gateway 后的微服务，收不到 `user-info` 头。因此身份对齐采用：
 
-
-class AuthMiddleware(AgentMiddleware):
-    """双 JWT 认证中间件。
-    
-    从 context_schema 读取 user_token，验证 JWT 有效性，
-    提取 user_id 用于数据隔离。
-    
-    Token 来源：
-    - C 端：用户登录 POST /users/login → hmall.jks（RSA）
-    - 管理端：管理后台登录 POST /admin/login → admin.jks（RSA，独立）
-    """
-    
-    def wrap_model_call(self, request, handler):
-        context = request.runtime.context if request.runtime else None
-        if not context or not context.user_token:
-            # 无 Token，仅允许只读操作（如查看商品）
-            return handler(request)
-        
-        # 验证 JWT
-        user_info = verify_jwt(context.user_token, context.agent_type)
-        if user_info:
-            # 注入 user_id 到 context
-            context.user_id = user_info["user_id"]
-        
-        return handler(request)
-    
-    async def awrap_model_call(self, request, handler):
-        return self.wrap_model_call(request, handler)
+```
+前端 Authorization: JWT
+        │
+        ├─ LangGraph Auth.authenticate
+        │     └─ introspect：
+        │           C 端 GET /users/me（Gateway 验签 → UserContext）
+        │           管理端 GET /admin/info（admin-service 自验）
+        │     └─ identity.owner = {agent_type}:{user_id}
+        │
+        └─ context.user_token → 工具调 Gateway（业务写路径再次验签）
 ```
 
-| Agent | Token 来源 | 密钥 | 验证方式 |
-|-------|-----------|------|---------|
-| CustomerAgent | C 端用户登录 `POST /users/login` | `hmall.jks`（RSA） | AuthMiddleware 本地验证 / Gateway 验证 |
-| AdminAgent | 管理后台登录 `POST /admin/login` | `admin.jks`（RSA，独立） | AuthMiddleware 本地验证 / Gateway 验证 |
+**AuthMiddleware（异步路径）**：优先 `JWT_VERIFY_LOCAL` 本地 jks；否则 `await introspect` 写入 `context.user_id`；仅当 `INTROSPECT_FALLBACK_JWT=true` 才回退 payload 解码。
+
+**JWT claim 约定**（与 Java 签发一致）：
+
+| 端 | claim | 示例 |
+|----|-------|------|
+| C 端 | `user` | `42` |
+| 管理端 | `sub` + `type=ADMIN` | `7` |
+
+**多租户 threads**：
+
+```python
+# src/security/auth.py（示意）
+@auth.on.threads.create
+async def on_thread_create(ctx, value):
+    filters = {"owner": ctx.user.identity}
+    value.setdefault("metadata", {}).update(filters)
+    return filters
+
+@auth.on.threads.search
+async def on_thread_search(ctx, value):
+    return {"owner": ctx.user.identity}
+```
+
+| Agent | Token 来源 | introspect | 验证方 |
+|-------|-----------|------------|--------|
+| CustomerAgent | `POST /users/login` → hmall.jks | `GET /users/me` | Gateway `AuthGlobalFilter` |
+| AdminAgent | `POST /admin/login` → admin.jks | `GET /admin/info` | admin-service（Gateway 对 `/admin/**` 放行） |
 
 **Token 传递链**：
 
 ```
-前端 → LangGraph SDK stream.submit({messages: [...]}, {config: {...}, context: {user_token: "xxx", agent_type: "customer"}})
-     → LangGraph Runtime 创建 Context(user_token="xxx", agent_type="customer")
-     → AuthMiddleware 读取 request.runtime.context.user_token
-     → 验证 JWT → 注入 user_id
-     → 工具调用时 gateway_client 携带 user_token 到 Gateway
+前端 → Client({ defaultHeaders: { Authorization, X-Hmall-Agent-Type } })
+     → runs.stream(..., { context: { user_token, agent_type, user_id } })
+     → Auth.authenticate → introspect → owner
+     → AuthMiddleware → context.user_id
+     → 工具 gateway_client 携带同一 JWT → Gateway / admin-service
 ```
 
 ### 6.2 工具权限拦截中间件
@@ -993,7 +1000,7 @@ class PermissionMiddleware(AgentMiddleware):
 
 | 顺序 | 中间件 | 位置 | 功能 |
 |------|--------|------|------|
-| 1 | `AuthMiddleware` | `src/middleware/auth.py` | 双 JWT 认证，注入 user_id |
+| 1 | `AuthMiddleware` | `src/middleware/auth.py` | Gateway introspect 注入权威 user_id |
 | 2 | `PermissionMiddleware` | `src/middleware/permission.py` | 工具权限拦截（AdminAgent 纯只读） |
 | 3 | `RegexShortcutMiddleware` | `src/middleware/regex_shortcut.py` | L1 正则快捷路由（<5ms 拦截高频指令） |
 | 4 | `SkillsMiddleware` | `deepagents.middleware` | 加载 SKILL.md 规范文件 |
@@ -1087,7 +1094,7 @@ class XxxMiddleware(AgentMiddleware):
 
 | 层序 | 中间件 | 触发条件 | 是否可能跳过 LLM | 行为 |
 |:---:|--------|----------|:---:|------|
-| 1 | **AuthMiddleware** | 始终执行 | ❌ | 从 `request.runtime.context` 读取 `user_token`；验证 JWT（`JWT_VERIFY_LOCAL=false` 时透传）；注入 `user_id` 到 context |
+| 1 | **AuthMiddleware** | 始终执行 | ❌ | 从 context 读 `user_token`；默认 Gateway introspect 注入权威 `user_id`（可选本地 jks / fallback） |
 | 2 | **PermissionMiddleware** | 始终执行 | ❌ | 读取 `context.agent_type`；若为 `admin`，从工具列表中移除 9 个写操作工具（`add_to_cart_api`/`do_seckill_api` 等）；若为 `customer`，透传全部工具 |
 | 3 | **RegexShortcutMiddleware** | 始终执行 | ✅ | 检查最后一条 human 消息内容；匹配 L1 正则规则（如 `查看秒杀`/`运营日报`）→ 直接 `ainvoke` 对应工具 → 返回 `AIMessage`；**不匹配时** → `handler(request)` 传给下一层 |
 | 4 | **SkillsMiddleware** | 仅 Regex 未命中时到达 | ❌ | 从虚拟文件系统读取 SKILL.md（如 `shopping-guide`/`daily-report`）；追加到 `system_message` |
@@ -2175,7 +2182,7 @@ DashScope API (dashscope.aliyuncs.com)
 │                                                                    │
 │  ┌────────────────────────────────────────────────────────────┐   │
 │  │  中间件层（DeepAgent Middleware Chain）                      │   │
-│  │  ├── AuthMiddleware（JWT 透传，注入 user_id）                 │   │
+│  │  ├── AuthMiddleware（introspect 注入 user_id）                 │   │
 │  │  ├── PermissionMiddleware（推荐工具需登录）                    │   │
 │  │  ├── RegexShortcutMiddleware（L1: "推荐/猜你喜欢" 快捷路由）  │   │
 │  │  └── SkillsMiddleware（加载 personalized-recommendation）    │   │

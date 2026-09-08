@@ -68,7 +68,7 @@
 │                          │                                         │
 │  ┌───────────────────────▼────────────────────────────────────┐   │
 │  │  中间件层（DeepAgent Middleware Chain）                      │   │
-│  │  ├── AuthMiddleware（双 JWT 透传）                            │   │
+│  │  ├── AuthMiddleware（Gateway introspect 注入 user_id）       │   │
 │  │  ├── PermissionMiddleware（AdminAgent 纯只读过滤）             │   │
 │  │  ├── RegexShortcutMiddleware（L1 正则快捷路由 <5ms）          │   │
 │  │  ├── SkillsMiddleware（SKILL.md 规范加载）                    │   │
@@ -83,7 +83,9 @@
 │                          │                                         │
 │  ┌───────────────────────▼────────────────────────────────────┐   │
 │  │  基础设施                                                     │   │
-│  │  ├── Redis Checkpoint（db=1 隔离，对话记忆 + interrupt 恢复）  │   │
+│  │  ├── Checkpointer（inmem + .langgraph_api；按 owner 多租户）   │   │
+│  │  ├── Store（语义记忆 Layer 3）                                │   │
+│  │  └── Redis 画像（db=0，与后端共享）                            │   │
 │  │  ├── DeepAgents（Agent 框架）                                 │   │
 │  │  └── 通义千问 qwen-turbo（LLM，OpenAI 兼容接口）              │   │
 │  └────────────────────────────────────────────────────────────┘   │
@@ -140,8 +142,9 @@ LangGraph Runtime 创建 Context(user_token="...", agent_type="customer")
   ▼
 AuthMiddleware.awrap_model_call
   ├── 读取 request.runtime.context.user_token
-  ├── JWT_VERIFY_LOCAL=false → 透传 token（依赖 Gateway 验证）
-  └── 注入 user_id 到 context（本地验证时）
+  ├── 默认 → Gateway introspect 注入权威 user_id
+  ├── JWT_VERIFY_LOCAL=true → 本地 jks 优先
+  └── INTROSPECT_FALLBACK_JWT 时才回退 payload 解码
   │
   ▼
 工具调用（@tool 函数）
@@ -170,31 +173,39 @@ hmall-agent/
 │
 ├── src/
 │   ├── core/
-│   │   ├── config.py                  # Pydantic Settings 配置
-│   │   ├── llms.py                    # LLM 实例（qwen-turbo）
-│   │   └── redis_checkpoint.py        # Redis Checkpoint 后端
+│   │   ├── config.py                  # Pydantic Settings 配置（含 INTROSPECT_*）
+│   │   └── llms.py                    # LLM 实例（qwen-turbo）
+│   │
+│   ├── security/
+│   │   ├── auth.py                    # LangGraph Auth：introspect + threads 多租户
+│   │   └── jwt_payload.py             # JWT payload 解码（claim 与 Java 对齐）
 │   │
 │   ├── gateway/
 │   │   ├── http_client.py             # 异步 HTTP 客户端（httpx）
-│   │   └── auth.py                    # JWT 验证（预留桩）
+│   │   ├── introspect.py              # Gateway 权威身份探查（/users/me、/admin/info）
+│   │   └── auth.py                    # JWT 本地验签（预留，JWT_VERIFY_LOCAL）
 │   │
 │   ├── middleware/
-│   │   ├── auth.py                    # AuthMiddleware 双 JWT 透传
+│   │   ├── auth.py                    # AuthMiddleware：introspect 注入 user_id
 │   │   ├── permission.py              # PermissionMiddleware 工具权限
 │   │   ├── regex_shortcut.py          # RegexShortcutMiddleware L1 路由
-│   │   └── rag_context.py             # RAGMiddleware（已实现：动态注入 RAG 工具）
+│   │   └── rag_context.py             # RAGMiddleware（动态注入 RAG 工具）
+│   │
+│   ├── user_profile/
+│   │   ├── store.py                   # Redis 画像 Layer 1/2
+│   │   └── memory.py                  # LangGraph Store 语义记忆 Layer 3
 │   │
 │   ├── agents/
 │   │   ├── customer/
 │   │   │   ├── agent.py               # CustomerAgent 定义
 │   │   │   ├── prompts.py             # 系统提示词
-│   │   │   ├── tools.py               # 18 个 @tool 工具
+│   │   │   ├── tools.py               # C 端工具（含记忆工具）
 │   │   │   └── regex_rules.py         # L1 正则规则
 │   │   │
 │   │   └── admin/
 │   │       ├── agent.py               # AdminAgent 定义
 │   │       ├── prompts.py             # 系统提示词
-│   │       ├── tools.py               # 10 个只读工具 + 日报编排
+│   │       ├── tools.py               # 管理端工具 + 日报编排
 │   │       └── regex_rules.py         # L1 正则规则
 │   │
 │   ├── tools/
@@ -257,20 +268,20 @@ qwen_model = ChatOpenAI(
 )
 ```
 
-#### 3.2.3 Redis Checkpoint（`src/core/redis_checkpoint.py`）
+#### 3.2.3 会话 Checkpoint（开发态 inmem + `.langgraph_api`）
 
-复用 hmall Redis，使用 `db=1` 隔离，`langgraph-checkpoint-redis` 自动管理对话状态：
-
-```python
-checkpointer = RedisSaver(redis_url=_settings.redis_url)
-```
+当前 `start_server.py` 使用 `LANGGRAPH_RUNTIME_EDITION=inmem`。会话状态由 `langgraph-runtime-inmem` 的 Checkpointer 管理：
 
 | 机制 | 说明 |
 |------|------|
-| Thread | 每个对话线程有唯一 `thread_id`，前端通过 SDK 创建和管理 |
-| Checkpoint | 每次图节点执行后自动保存状态（messages, interrupt 状态等）到 Redis |
-| 恢复 | 通过 `thread_id` 自动加载历史消息，支持 interrupt 中断恢复 |
-| 清理 | 删除 Thread 时自动清理 Checkpoint 数据 |
+| Thread | 每个对话线程有唯一 `thread_id`；创建时打上 `metadata.owner` |
+| Checkpoint | 图节点执行后保存 messages / interrupt 等；热路径内存，冷路径 pickle |
+| 落盘目录 | `.langgraph_api/.langgraph_checkpoint.*.pckl`、`.langgraph_ops.pckl` |
+| Store | `.langgraph_api/store.pckl`（Layer 3 语义记忆） |
+| 恢复 | 同 `thread_id` 续聊；进程重启后从 pickle `load()` |
+| 多租户 | LangGraph Auth 按 `owner` 过滤，非按 Redis db 隔离用户 |
+
+> **说明**：早期方案曾规划 `RedisSaver(db=1)`；现行代码以 inmem + 本地落盘为准。生产可替换为 Postgres 等托管后端，逻辑模型（Checkpointer vs Store、owner 过滤）不变。
 
 ### 3.3 Gateway HTTP 客户端（`src/gateway/http_client.py`）
 
@@ -305,10 +316,19 @@ def extract_token_from_config(config) -> str:
 | 属性 | 值 |
 |------|-----|
 | 位置 | 中间件链第 1 层 |
-| 功能 | 双 JWT 认证，从 context 读取 token 透传/验证 |
-| 本地验证 | `JWT_VERIFY_LOCAL=true` 时用 keystore 验证 JWT 提取 user_id |
-| Gateway 验证 | `JWT_VERIFY_LOCAL=false`（默认）时透传 token，依赖 Gateway 验证 |
+| 功能 | 从 context 读取 `user_token`，注入权威 `user_id` |
+| 默认路径 | **Gateway introspect**（`src/gateway/introspect.py`）：C 端 `GET /users/me`，管理端 `GET /admin/info` |
+| 本地验签 | `JWT_VERIFY_LOCAL=true` 时优先 jks 验签（预留） |
+| 回退 | 仅当 `INTROSPECT_FALLBACK_JWT=true` 才允许本地 JWT payload 解码 |
 | 无 Token 行为 | 允许只读操作（商品浏览），写操作由工具层检查 |
+
+配套模块：
+
+| 模块 | 职责 |
+|------|------|
+| `src/security/auth.py` | LangGraph Auth：introspect 得到 `owner`，threads/store 按 owner / user_id 隔离 |
+| `src/security/jwt_payload.py` | 解码 claim：C 端 `user`，管理端 `sub`（与 Java 签发一致） |
+| `src/gateway/introspect.py` | 调 Gateway 权威接口 + 短 TTL 缓存 |
 
 #### 3.4.2 PermissionMiddleware（`src/middleware/permission.py`）
 
@@ -619,6 +639,13 @@ def _status_text(status, mapping) -> str:
             "description": "管理助手 Agent：秒杀管理、订单查询、商品管理、库存查看、运营日报"
         }
     },
+    "store": {
+        "type": "in_memory"
+    },
+    "auth": {
+        "path": "./src/security/auth.py:auth",
+        "disable_studio_auth": true
+    },
     "env": ".env"
 }
 ```
@@ -629,11 +656,13 @@ def _status_text(status, mapping) -> str:
 
 | 环境变量 | 值 | 说明 |
 |---------|-----|------|
-| `LANGSERVE_GRAPHS` | graph.json 内容 | Agent 图注册 |
+| `LANGSERVE_GRAPHS` | graph.json 的 graphs | Agent 图注册 |
+| `LANGGRAPH_AUTH` | graph.json 的 auth | 多租户 Auth + introspect |
+| `LANGGRAPH_STORE` | graph.json 的 store | Store 配置 |
 | `LANGGRAPH_HTTP` | `{"app": "api.batch_report:app"}` | 自定义路由挂载 |
-| `LANGGRAPH_RUNTIME_EDITION` | `inmem` | 内存运行时 |
+| `LANGGRAPH_RUNTIME_EDITION` | `inmem` | 开发态内存运行时（落盘 `.langgraph_api`） |
 | `LANGGRAPH_API_URL` | `http://localhost:8090` | API 地址 |
-| `DATABASE_URI` | `:memory:` | 内存数据库 |
+| `DATABASE_URI` | `:memory:` | 不用 Postgres 元库 |
 | `ALLOW_PRIVATE_NETWORK` | `true` | 允许内网访问 |
 
 启动后提供：
@@ -944,11 +973,11 @@ LLM_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_TEMPERATURE=0.7
 LLM_MAX_TOKENS=2048
 
-# Redis（Checkpoint 后端）
+# Redis（用户画像 Layer 1/2，与后端共享 db=0）
 REDIS_HOST=192.168.100.128
 REDIS_PORT=6379
 REDIS_PASSWORD=
-REDIS_DB=1                          # db=1 与 hmall 业务数据（db=0）隔离
+PROFILE_REDIS_DB=0
 
 # Java 后端
 JAVA_GATEWAY_URL=http://localhost:8080
@@ -958,10 +987,14 @@ AGENT_HOST=0.0.0.0
 AGENT_PORT=8090
 LOG_LEVEL=INFO
 
-# JWT（双 Token 验证）
-JWT_VERIFY_LOCAL=false              # false 时依赖 Gateway 验证
-CUSTOMER_JKS_PATH=keys/hmall.jks   # C 端 RSA 密钥
-ADMIN_JKS_PATH=keys/admin.jks      # 管理端 RSA 密钥（独立）
+# JWT（双 Token；本地 jks 验签为可选）
+JWT_VERIFY_LOCAL=false
+CUSTOMER_JKS_PATH=keys/hmall.jks
+ADMIN_JKS_PATH=keys/admin.jks
+
+# 身份探查（方案 3：Gateway introspect）
+INTROSPECT_CACHE_TTL=60
+INTROSPECT_FALLBACK_JWT=false
 
 # RAG（LightRAG + MCP）
 RAG_BASE_URL=http://localhost:9621
@@ -980,10 +1013,10 @@ RAG_MCP_PORT=8008
 | `deepagents` | ≥0.5.9 | Agent 框架（`create_agent`） |
 | `langchain` | ≥1.2.12 | 消息管理 + 工具调用 |
 | `langchain-openai` | ≥0.3.0 | 通义千问 OpenAI 兼容接口 |
-| `langgraph-cli[inmem]` | ≥0.4.26 | 图执行 + API Server + Checkpoint |
-| `langgraph-checkpoint-redis` | ≥1.0.0 | Redis Checkpoint 后端 |
+| `langgraph-cli[inmem]` | ≥0.4.26 | 图执行 + API Server + inmem Checkpoint/Store |
 | `httpx` | ≥0.27.0 | 异步 HTTP 客户端 |
 | `pydantic-settings` | ≥2.0.0 | 环境变量配置管理 |
+| `redis[hiredis]` | — | 用户画像 Redis 客户端 |
 | `fastapi` | ≥0.115.0 | 自定义路由 |
 | `uvicorn` | ≥0.30.0 | ASGI 服务器 |
 
@@ -1000,9 +1033,11 @@ RAG_MCP_PORT=8008
 
 | 配置 | 说明 |
 |------|------|
-| `REDIS_DB=1` | 使用 db=1 与 hmall 业务数据（db=0）隔离，作为 LangGraph Checkpoint 后端 |
-| `JWT_VERIFY_LOCAL=false` | 依赖 Gateway 验证 JWT，Agent 层仅透传 token，简化部署 |
-| `JAVA_GATEWAY_URL` | hmall Gateway 地址，所有 API 调用经此路由 |
+| `PROFILE_REDIS_DB=0` | 画像与后端共享 Redis db=0 |
+| `INTROSPECT_CACHE_TTL` | Gateway introspect 缓存秒数；`0` 禁用 |
+| `INTROSPECT_FALLBACK_JWT` | `false`（默认）时 introspect 失败不回退本地解码 |
+| `JWT_VERIFY_LOCAL` | `true` 时优先本地 jks；默认 `false` 走 introspect |
+| `JAVA_GATEWAY_URL` | hmall Gateway 地址，业务 API 与 introspect 均经此路由 |
 
 ---
 
@@ -1014,23 +1049,28 @@ RAG_MCP_PORT=8008
 
 **理由**：L1 正则匹配 + 工具调用响应 <5ms，零 LLM 成本；L2 interrupt 原生支持多轮交互和二次确认；L3 LLM 兜底处理复杂问题。相比纯 LLM 方案，大幅降低延迟和 API 调用成本。
 
-### 6.2 决策：JWT_VERIFY_LOCAL=false 依赖 Gateway 验证
+### 6.2 决策：Gateway introspect 作为 Agent 侧 userId 权威来源
 
-**决策**：Agent 层不做 JWT 本地验证，仅透传 token 到 Gateway。
-
-**理由**：
-- hmall Gateway 已有完善的 JWT 验证（`AuthGlobalFilter`）、Token 黑名单检查、自动续期
-- Agent 层本地验证需要维护双 keystore（`hmall.jks` + `admin.jks`），增加部署复杂度
-- Gateway 验证后通过 `user-info` 头传递 userId，Agent 工具调用时携带 token 即可
-
-### 6.3 决策：Redis db=1 隔离 Checkpoint
-
-**决策**：复用 hmall Redis 实例，使用 `db=1` 作为 LangGraph Checkpoint 后端。
+**决策**：Agent 不把本地 JWT base64 解码当作权威 userId；默认通过 Gateway（或 admin-service）introspect 对齐身份。
 
 **理由**：
-- hmall 业务数据使用 `db=0`，Checkpoint 使用 `db=1` 互不干扰
-- 无需额外部署 Redis 实例，降低运维成本
-- LangGraph Checkpoint 自动管理读写，支持 interrupt 中断恢复
+- Agent 是独立入口，收不到 Gateway 写入的 `user-info` 头，与挂在 Gateway 后的微服务拿 ID 方式不同
+- C 端 `GET /users/me` 只读 `UserContext`（Gateway 验签结果）；管理端 `GET /admin/info` 由 admin-service 验 admin JWT——与现有双 JWT / `/admin/**` 白名单架构一致
+- 可继承 Gateway 黑名单、过期等能力；伪造 payload 的假 token 无法通过 introspect
+- 短缓存（`INTROSPECT_CACHE_TTL`，默认 60s）摊薄 threads API 的额外 RT
+- `INTROSPECT_FALLBACK_JWT` 默认关闭，避免「名存实亡」的弱一致
+
+**配套**：`graph.json` 注册 `auth.path=./src/security/auth.py:auth`；`start_server.py` 注入 `LANGGRAPH_AUTH`。
+
+### 6.3 决策：多租户按 metadata.owner 隔离会话（非 Redis db 分用户）
+
+**决策**：会话历史按 LangGraph Checkpointer 的 `thread_id` 存储；用户隔离靠 Auth 写入并过滤 `metadata.owner={agent_type}:{user_id}`。
+
+**理由**：
+- Checkpointer 本身不以 userId 为主键；仅靠前端持有 thread_id 不足以防越权
+- `owner` 带 `agent_type` 前缀，避免 C 端用户 `1` 与管理员 `1` 冲突
+- 开发态落盘 `.langgraph_api`；生产可换 Postgres，过滤逻辑不变
+- Layer 3 Store 另按 namespace 第二段 `user_id` 做跨会话记忆隔离
 
 ### 6.4 决策：管理端 API 自动解包 R<T>
 
@@ -1112,34 +1152,35 @@ npm run dev                          # Vite dev server
 
 ### 7.3 启动检查清单
 
-- [ ] Redis 服务运行中（`redis-cli -n 1 PING` → `PONG`）
-- [ ] hmall Java 微服务全部启动（Gateway `http://localhost:8080/hi` 可访问）
+- [ ] Redis 服务运行中（画像用 db=0：`redis-cli -n 0 PING` → `PONG`）
+- [ ] hmall Java 微服务全部启动（Gateway `http://localhost:8080/hi` 可访问；user-service 含 `GET /users/me`）
 - [ ] `.env` 中 `DASHSCOPE_API_KEY` 已填入有效密钥
-- [ ] `.env` 中 `REDIS_HOST` / `REDIS_PORT` 指向 hmall Redis
+- [ ] `.env` 中 `JAVA_GATEWAY_URL` / Redis 指向正确地址；`INTROSPECT_FALLBACK_JWT=false`
 - [ ] `uv sync` 安装依赖无错误
-- [ ] `start_server.py` 启动日志无异常
+- [ ] `start_server.py` 启动日志无异常（已加载 `LANGGRAPH_AUTH`）
 - [ ] 访问 `http://localhost:8090/ok` → 返回 `{"ok": true}`
+- [ ] 未带 Authorization 访问 `/threads/search` → 401
+- [ ] 登录后带 JWT 创建 thread → metadata 含 `owner`
+- [ ] 用户 A 的 token 无法 `getState` 用户 B 的 thread_id
 - [ ] 访问 `http://localhost:8090/api/v1/llm/health` → 返回 `{"llm_reachable": true, "status": "ok"}`
 - [ ] 访问 `http://localhost:8090/docs` → OpenAPI 文档可加载
-- [ ] 访问 `http://localhost:8090/ui` → LangGraph Studio 可加载
+- [ ] 访问 `http://localhost:8090/ui` → LangGraph Studio 可加载（`disable_studio_auth`）
 - [ ] `GET /assistants/search` → 返回 customer_agent 和 admin_agent
 - [ ] 前端 `npm run dev` 启动无错误
-- [ ] 前端页面右下角出现 AI 客服浮动按钮，点击跳转 `/portal/chat` 全屏对话页
-- [ ] 管理后台 header 出现 "AI助手" 按钮，点击跳转 `/admin/chat` 对话页
+- [ ] 前端对话页请求头含 `Authorization` 与 `X-Hmall-Agent-Type`
 - [ ] AI 消息以 Markdown 格式渲染（标题/列表/表格/代码块正常显示）
-- [ ] 长文本/商品 ID 不超出消息气泡边界
 
 ---
 
 ## 八、已知问题与后续优化
 
-### 8.1 JWT 本地验证未实现
+### 8.1 JWT 本地 jks 验签仍为可选项
 
-**现状**：`JWT_VERIFY_LOCAL=false`，Agent 层不做 JWT 本地验证，依赖 Gateway 验证。
+**现状**：默认 `JWT_VERIFY_LOCAL=false`，Agent 通过 Gateway introspect（`/users/me`、`/admin/info`）获取权威 userId，并用于多租户 `owner` 与 `context.user_id`。工具调业务 API 仍携带原 JWT，由 Gateway / admin-service 再次验签。
 
-**影响**：Agent 层无法提前拦截无效 token，所有无效请求会到达 Gateway 才被拒绝。
+**影响**：Agent 进会话前会多一次（可缓存）HTTP 探查；Gateway / user-service 不可用时鉴权失败（503/401），符合「强一致」预期。
 
-**后续优化**：实现 `src/gateway/auth.py` 中的双 keystore JWT 本地验证（使用 `cryptography` 库解析 `hmall.jks` / `admin.jks`），`JWT_VERIFY_LOCAL=true` 时在 Agent 层验证并提取 `user_id`。
+**后续优化**：如需离线或降延迟，可实现 `src/gateway/auth.py` 双 keystore 本地验签，与 introspect 并存；或开启 `INTROSPECT_FALLBACK_JWT`（仅运维应急，会削弱与 Gateway 的强一致）。
 
 ### 8.2 RAG 知识库集成（已实现）
 
@@ -2337,4 +2378,34 @@ Phase 2 用户画像持久化已落地，详见 [hmall-agent-profile-and-notific
 
 > **实现完成度**：Phase 1（步骤 1-6）全部实现，Agent 侧 2 个新工具 + 2 个 Formatter + 1 个 Skill + Prompt/正则/注册增强就绪，后端 `GET /recommend` 接口遵循"Feign 聚合偏好 → ES 召回 → 销量排序"三步管线（Feign 调用 trade-service 获取已购商品 + Feign 调用 search-service ES 召回），Gateway 路由需手动配置 Nacos。推荐具备完整降级链路（trade-service Feign 降级 → ES Fallback → MySQL 热销兜底 → Agent 搜索提示）。Phase 2（行为采集 + Redis 画像 + Item-CF）为后续优化项。
 
+---
+
+## 十二、变更记录：多租户会话隔离与 Gateway introspect（2026-09）
+
+### 12.1 背景
+
+1. 会话历史仅按 `thread_id` 存储时，缺少用户级硬隔离，存在越权读取风险。  
+2. Agent 为独立入口，收不到 Gateway 的 `user-info`；仅本地解码 JWT 无法与业务微服务「Gateway 验签 → UserContext」对齐。
+
+### 12.2 代码变更
+
+| 位置 | 变更 |
+|------|------|
+| `hmall/user-service/.../UserController.java` | **新增** `GET /users/me`，返回 `{ userId, agentType }`，只读 `UserContext` |
+| `hmall-agent/src/gateway/introspect.py` | **新增** Gateway 身份探查 + 短 TTL 缓存 |
+| `hmall-agent/src/security/auth.py` | **新增** LangGraph Auth：introspect → `owner`；threads/store 过滤 |
+| `hmall-agent/src/security/jwt_payload.py` | **新增** claim 对齐（C 端 `user` / 管理端 `sub`） |
+| `hmall-agent/src/middleware/auth.py` | **修改** 异步路径走 introspect 注入 `context.user_id` |
+| `hmall-agent/src/core/config.py` | **新增** `INTROSPECT_CACHE_TTL`、`INTROSPECT_FALLBACK_JWT` |
+| `hmall-agent/graph.json` | **新增** `auth` 配置；`start_server.py` 注入 `LANGGRAPH_AUTH` |
+| `hmall-agent/src/gateway/http_client.py` | **修改** `_decode_user_id_from_jwt` 使用正确 claim |
+| `hmall-frontend/.../useLangGraph.ts` | **修改** `Authorization` + `X-Hmall-Agent-Type`；create/search 带 `owner` |
+
+### 12.3 行为约定
+
+- `owner = {agent_type}:{user_id}`  
+- C 端 introspect：`GET /users/me`（经 Gateway 验签）  
+- 管理端 introspect：`GET /admin/info`（admin-service 自验；Gateway 对 `/admin/**` 放行）  
+- 开发态 Checkpoint / Store 落盘：`.langgraph_api/`  
+- 默认不回退本地 JWT 解码（`INTROSPECT_FALLBACK_JWT=false`）
 

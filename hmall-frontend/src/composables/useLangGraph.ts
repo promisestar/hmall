@@ -4,8 +4,8 @@
  * 封装 @langchain/langgraph-sdk 1.x Client，管理对话状态，
  * 提供 sendMessage / resume / clearHistory 方法。
  *
- * SDK 1.x 的 runs.stream() 正确转发 context / command 字段，
- * 无需 fetch 绕过。支持 customer_agent 和 admin_agent 两种 Agent。
+ * 多租户：请求携带 Authorization；服务端 Auth 按 metadata.owner 隔离 threads。
+ * owner 格式：`${agentType}:${userId}`（与 hmall-agent/src/security/auth.py 一致）。
  */
 
 import { Client } from '@langchain/langgraph-sdk'
@@ -34,6 +34,7 @@ export interface InterruptData {
 export interface AgentContext {
   agent_type: 'customer' | 'admin'
   user_token: string
+  user_id?: string
   enable_rag?: boolean
 }
 
@@ -42,13 +43,49 @@ export interface UseLangGraphOptions {
   apiUrl?: string
   /** Agent ID：customer_agent 或 admin_agent */
   assistantId: 'customer_agent' | 'admin_agent'
+  /** sessionStorage 中的 token key（portal: token / admin: admin-token） */
+  tokenKey?: string
+  /** 与 token 对应的 agent 类型，用于解析 JWT 与 owner */
+  agentType?: 'customer' | 'admin'
+}
+
+/** 解码 JWT payload（不校验签名） */
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+    return JSON.parse(atob(padded))
+  } catch {
+    return null
+  }
+}
+
+/** 从 JWT 解析多租户身份（与后端 jwt_payload.py 对齐） */
+function resolveIdentity(
+  token: string,
+  agentType: 'customer' | 'admin',
+): { userId: string; owner: string } | null {
+  const payload = decodeJwtPayload(token)
+  if (!payload) return null
+
+  let userId = ''
+  if (agentType === 'admin') {
+    userId = String(payload.sub ?? '')
+  } else {
+    userId = String(payload.user ?? payload.user_id ?? '')
+  }
+  if (!userId || userId === 'undefined' || userId === 'null') return null
+  return { userId, owner: `${agentType}:${userId}` }
 }
 
 export function useLangGraph(options: UseLangGraphOptions) {
   const apiUrl = options.apiUrl || import.meta.env.VITE_AGENT_URL || 'http://localhost:8090'
   const assistantId = options.assistantId
-
-  const client = new Client({ apiUrl })
+  const tokenKey = options.tokenKey || (options.agentType === 'admin' ? 'admin-token' : 'token')
+  const agentType: 'customer' | 'admin' =
+    options.agentType || (assistantId === 'admin_agent' ? 'admin' : 'customer')
 
   // ==================== 响应式状态 ====================
   const messages: Ref<ChatMessage[]> = ref([])
@@ -58,16 +95,54 @@ export function useLangGraph(options: UseLangGraphOptions) {
   const error: Ref<string | null> = ref(null)
   const threads: Ref<ThreadSummary[]> = ref([])
   const isThreadsLoading = ref(false)
-  let _currentContext: AgentContext | null = null  // 缓存当前 context，供 resume 复用
+  let _currentContext: AgentContext | null = null
+  let _boundOwner: string | null = null
+
+  // ==================== Client / 身份 ====================
+
+  function _readToken(): string {
+    return sessionStorage.getItem(tokenKey) || ''
+  }
+
+  function _getIdentity(): { userId: string; owner: string; token: string } | null {
+    const token = _readToken()
+    if (!token) return null
+    const id = resolveIdentity(token, agentType)
+    if (!id) return null
+    return { ...id, token }
+  }
+
+  /** 每次请求用当前 token 新建 Client，避免换账号后仍带旧 Authorization */
+  function _createClient(token: string): Client {
+    const authValue = token.toLowerCase().startsWith('bearer ')
+      ? token
+      : `Bearer ${token}`
+    return new Client({
+      apiUrl,
+      defaultHeaders: {
+        Authorization: authValue,
+        'X-Hmall-Agent-Type': agentType,
+      },
+    })
+  }
+
+  /** 用户切换时清空本地会话状态，避免串会话 */
+  function _ensureOwnerBound(owner: string) {
+    if (_boundOwner && _boundOwner !== owner) {
+      threadId.value = null
+      messages.value = []
+      interruptData.value = null
+      _currentContext = null
+    }
+    _boundOwner = owner
+  }
 
   // ==================== 内部方法 ====================
 
-  /** 生成唯一 ID */
   function _genId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   }
 
-  /** 从 SDK Message 对象中提取文本内容 */
   function _extractContent(msg: { content: unknown }): string {
     const content = msg.content
     if (typeof content === 'string') return content
@@ -83,21 +158,17 @@ export function useLangGraph(options: UseLangGraphOptions) {
     return ''
   }
 
-  /** 处理 SSE 流式响应 */
   async function _processStream(streamResponse: AsyncGenerator<any>) {
     let aiMessage: ChatMessage | null = null
 
     for await (const chunk of streamResponse) {
-      // 处理消息增量更新（流式 token + 完整消息）
       if (chunk.event === 'messages/partial' || chunk.event === 'messages/complete') {
         for (const msg of chunk.data || []) {
-          // SDK 1.x 统一使用 type="ai"，不再出现 "AIMessageChunk"
           if (msg.type !== 'ai') continue
 
           const content = _extractContent(msg)
           if (!content) continue
 
-          // 同一条 AI 消息（同 id）复用同一个 ChatMessage，实现增量更新
           const msgId = msg.id || _genId()
           if (!aiMessage || aiMessage.id !== msgId) {
             aiMessage = {
@@ -108,8 +179,6 @@ export function useLangGraph(options: UseLangGraphOptions) {
             }
             messages.value.push(aiMessage)
           } else {
-            // 通过响应式数组索引更新，确保 Vue 检测到变化
-            // 直接修改 aiMessage.content 会绕过 Proxy，导致 UI 不刷新
             const idx = messages.value.findIndex(m => m.id === msgId)
             if (idx !== -1) {
               messages.value[idx].content = content
@@ -118,17 +187,14 @@ export function useLangGraph(options: UseLangGraphOptions) {
         }
       }
 
-      // 处理 values 事件（检查 interrupt）
       if (chunk.event === 'values') {
         const data = chunk.data || {}
 
-        // 检测 interrupt
         if (data.__interrupt__) {
           const interrupt = Array.isArray(data.__interrupt__)
             ? data.__interrupt__[0]
             : data.__interrupt__
 
-          // interrupt value 可能是 {type, message, ...} 结构
           const value = interrupt?.value || interrupt
           if (typeof value === 'object' && value?.message) {
             interruptData.value = value as InterruptData
@@ -141,7 +207,6 @@ export function useLangGraph(options: UseLangGraphOptions) {
         }
       }
 
-      // 处理错误 —— 在 UI 中展示错误消息
       if (chunk.event === 'error') {
         const errMsg = chunk.data?.message || chunk.data?.error || 'Agent 处理失败'
         error.value = errMsg
@@ -166,11 +231,29 @@ export function useLangGraph(options: UseLangGraphOptions) {
   async function sendMessage(text: string, context: AgentContext) {
     if (!text.trim() || isLoading.value) return
 
+    const identity = _getIdentity()
+    if (!identity) {
+      error.value = '请先登录后再使用智能助手'
+      messages.value.push({
+        id: _genId(),
+        type: 'ai',
+        content: '❌ 请先登录后再使用智能助手',
+        timestamp: Date.now(),
+      })
+      return
+    }
+
+    _ensureOwnerBound(identity.owner)
     error.value = null
     isLoading.value = true
-    _currentContext = context  // 缓存 context，供 resume 复用
+    const enrichedContext: AgentContext = {
+      ...context,
+      user_token: identity.token,
+      user_id: identity.userId,
+      agent_type: agentType,
+    }
+    _currentContext = enrichedContext
 
-    // 添加用户消息到 UI
     messages.value.push({
       id: _genId(),
       type: 'human',
@@ -178,15 +261,20 @@ export function useLangGraph(options: UseLangGraphOptions) {
       timestamp: Date.now(),
     })
 
+    const client = _createClient(identity.token)
+
     try {
-      // 创建或复用 Thread
       if (!threadId.value) {
-        const thread = await client.threads.create()
+        const thread = await client.threads.create({
+          metadata: {
+            owner: identity.owner,
+            user_id: identity.userId,
+            agent_type: agentType,
+          },
+        })
         threadId.value = thread.thread_id
       }
 
-      // 流式调用 Agent —— SDK 1.x 正确转发 context 字段
-      // LangGraph 0.6.0+ 禁止同时传 configurable 和 context，统一用 context
       const streamResponse = client.runs.stream(threadId.value, assistantId, {
         input: {
           messages: [{ type: 'human', content: text }],
@@ -194,19 +282,19 @@ export function useLangGraph(options: UseLangGraphOptions) {
         config: {
           recursion_limit: 100,
         },
-        context,
+        context: enrichedContext,
         streamMode: ['messages', 'values'],
       })
 
       await _processStream(streamResponse)
-      // 发送后异步刷新会话列表（不阻塞 UI）
       fetchThreads()
     } catch (e: any) {
-      // 添加错误提示消息
+      const msg = e?.message || error.value || '发送失败'
+      error.value = msg
       messages.value.push({
         id: _genId(),
         type: 'ai',
-        content: `❌ 发送失败：${error.value}`,
+        content: `❌ 发送失败：${msg}`,
         timestamp: Date.now(),
       })
     } finally {
@@ -216,16 +304,21 @@ export function useLangGraph(options: UseLangGraphOptions) {
 
   /**
    * 恢复中断（二次确认 / 多轮交互）
-   * @param value 用户回复的确认值
    */
   async function resume(value: string) {
     if (!threadId.value || isLoading.value) return
+
+    const identity = _getIdentity()
+    if (!identity) {
+      error.value = '请先登录后再继续操作'
+      return
+    }
+    _ensureOwnerBound(identity.owner)
 
     interruptData.value = null
     error.value = null
     isLoading.value = true
 
-    // 添加用户回复到 UI
     messages.value.push({
       id: _genId(),
       type: 'human',
@@ -233,14 +326,22 @@ export function useLangGraph(options: UseLangGraphOptions) {
       timestamp: Date.now(),
     })
 
+    const client = _createClient(identity.token)
+    const ctx: AgentContext = {
+      ...(_currentContext || { agent_type: agentType, user_token: identity.token }),
+      user_token: identity.token,
+      user_id: identity.userId,
+      agent_type: agentType,
+    }
+    _currentContext = ctx
+
     try {
-      // SDK 1.x 正确转发 command + context 字段
       const streamResponse = client.runs.stream(threadId.value, assistantId, {
         command: { resume: value },
         config: {
           recursion_limit: 100,
         },
-        context: _currentContext || undefined,
+        context: ctx,
         streamMode: ['messages', 'values'],
       })
 
@@ -258,15 +359,17 @@ export function useLangGraph(options: UseLangGraphOptions) {
     }
   }
 
-  /**
-   * 拒绝中断（取消操作）
-   */
+  /** 拒绝中断（取消操作） */
   async function rejectInterrupt() {
     if (!threadId.value) return
+    const identity = _getIdentity()
+    if (!identity) return
+
     interruptData.value = null
     isLoading.value = true
 
     try {
+      const client = _createClient(identity.token)
       const streamResponse = client.runs.stream(threadId.value, assistantId, {
         command: { goto: '__end__' },
         config: { recursion_limit: 100 },
@@ -280,12 +383,12 @@ export function useLangGraph(options: UseLangGraphOptions) {
     }
   }
 
-  /**
-   * 清除对话历史
-   */
+  /** 清除对话历史 */
   async function clearHistory() {
-    if (threadId.value) {
+    const identity = _getIdentity()
+    if (threadId.value && identity) {
       try {
+        const client = _createClient(identity.token)
         await client.threads.delete(threadId.value)
       } catch {
         // 忽略删除错误
@@ -301,7 +404,6 @@ export function useLangGraph(options: UseLangGraphOptions) {
 
   // ==================== 会话管理 ====================
 
-  /** 从线程状态中提取消息列表 */
   function _parseMessagesFromState(state: any): ChatMessage[] {
     const msgs = state?.values?.messages || state?.messages || []
     if (!Array.isArray(msgs)) return []
@@ -316,17 +418,25 @@ export function useLangGraph(options: UseLangGraphOptions) {
       .filter((m: ChatMessage) => m.content)
   }
 
-  /** 从消息列表生成预览文本 */
   function _getPreview(msgs: ChatMessage[]): string {
     const first = msgs.find(m => m.type === 'human' || m.type === 'ai')
     return first ? first.content.slice(0, 40) : '新对话'
   }
 
-  /** 获取会话列表 */
+  /** 获取当前用户的会话列表（服务端按 owner 过滤） */
   async function fetchThreads() {
     isThreadsLoading.value = true
     try {
+      const identity = _getIdentity()
+      if (!identity) {
+        threads.value = []
+        return
+      }
+      _ensureOwnerBound(identity.owner)
+
+      const client = _createClient(identity.token)
       const list = await client.threads.search({
+        metadata: { owner: identity.owner },
         limit: 50,
         offset: 0,
       })
@@ -349,7 +459,7 @@ export function useLangGraph(options: UseLangGraphOptions) {
       }
       threads.value = summaries
     } catch {
-      // 忽略列表获取错误
+      threads.value = []
     } finally {
       isThreadsLoading.value = false
     }
@@ -360,6 +470,12 @@ export function useLangGraph(options: UseLangGraphOptions) {
     if (targetThreadId === threadId.value) return
     if (isLoading.value) return
 
+    const identity = _getIdentity()
+    if (!identity) {
+      error.value = '请先登录'
+      return
+    }
+
     threadId.value = targetThreadId
     messages.value = []
     interruptData.value = null
@@ -367,11 +483,11 @@ export function useLangGraph(options: UseLangGraphOptions) {
 
     try {
       isLoading.value = true
+      const client = _createClient(identity.token)
       const state = await client.threads.getState(targetThreadId)
       const msgs = _parseMessagesFromState(state)
       messages.value = msgs
 
-      // 检查是否有未完成的 interrupt
       const interrupts = (state as any)?.interrupts
       if (interrupts && typeof interrupts === 'object') {
         for (const key of Object.keys(interrupts)) {
@@ -389,6 +505,8 @@ export function useLangGraph(options: UseLangGraphOptions) {
       }
     } catch (e: any) {
       error.value = e.message || '加载会话失败'
+      threadId.value = null
+      messages.value = []
     } finally {
       isLoading.value = false
     }
@@ -406,7 +524,11 @@ export function useLangGraph(options: UseLangGraphOptions) {
 
   /** 删除指定会话 */
   async function deleteThread(targetThreadId: string) {
+    const identity = _getIdentity()
+    if (!identity) return
+
     try {
+      const client = _createClient(identity.token)
       await client.threads.delete(targetThreadId)
       if (targetThreadId === threadId.value) {
         threadId.value = null
@@ -421,7 +543,6 @@ export function useLangGraph(options: UseLangGraphOptions) {
   }
 
   return {
-    // 状态
     messages,
     isLoading,
     interruptData,
@@ -429,7 +550,6 @@ export function useLangGraph(options: UseLangGraphOptions) {
     error,
     threads,
     isThreadsLoading,
-    // 方法
     sendMessage,
     resume,
     rejectInterrupt,

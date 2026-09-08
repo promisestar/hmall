@@ -401,7 +401,11 @@ const {
   switchThread,
   newConversation,
   deleteThread,
-} = useLangGraph({ assistantId: props.assistantId })
+} = useLangGraph({
+  assistantId: props.assistantId,
+  tokenKey: props.tokenKey,
+  agentType: props.agentType,
+})
 
 onMounted(() => {
   fetchThreads()

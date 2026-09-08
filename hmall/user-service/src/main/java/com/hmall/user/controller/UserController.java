@@ -11,6 +11,8 @@ import com.hmall.user.service.IUserService;
 import com.hmall.common.domain.PageDTO;
 import com.hmall.common.domain.PageQuery;
 import com.hmall.common.domain.R;
+import com.hmall.common.exception.UnauthorizedException;
+import com.hmall.common.utils.UserContext;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,9 @@ import javax.validation.Valid;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Api(tags = "用户相关接口")
 @RestController
@@ -68,6 +73,29 @@ public class UserController {
     public void logout(HttpServletRequest request) {
         String token = request.getHeader("Authorization");
         userService.logout(token);
+    }
+
+    // ==================== 当前登录用户（Agent introspect / 前端自检） ====================
+
+    /**
+     * 返回 Gateway 验签后注入的当前用户 ID。
+     * <p>
+     * 必须走网关认证（勿加入 excludePaths）：userId 仅来自 {@link com.hmall.common.utils.UserContext}，
+     * 与 Gateway 解析结果一致，供 hmall-agent 权威对齐身份。
+     * <p>
+     * 注意：本接口声明在 {@code /{id}} 之前，避免 "me" 被当成路径参数。
+     */
+    @ApiOperation("当前登录用户（introspect）")
+    @GetMapping("/me")
+    public Map<String, Object> me() {
+        Long userId = UserContext.getUser();
+        if (userId == null) {
+            throw new UnauthorizedException("未登录");
+        }
+        Map<String, Object> body = new HashMap<>(4);
+        body.put("userId", userId);
+        body.put("agentType", "customer");
+        return body;
     }
 
     // ==================== 管理后台接口（admin-service 调用） ====================

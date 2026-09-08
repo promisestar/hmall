@@ -22,6 +22,8 @@
 14. [后端服务集成](#14-后端服务集成)
 15. [配置体系](#15-配置体系)
 16. [启动流程](#16-启动流程)
+17. [会话历史与多租户隔离](#17-会话历史与多租户隔离)
+18. [身份权威对齐（Gateway introspect）](#18-身份权威对齐gateway-introspect)
 
 ---
 
@@ -62,8 +64,10 @@ hm-gateway (:8080) → item/cart/trade/user/seckill/search 微服务
 | 特点 | 说明 |
 |------|------|
 | **三级路由** | L1 正则中间件（<5ms）→ L2 interrupt 状态机 → L3 LLM 兜底 |
-| **双 JWT 认证** | C 端用户 JWT 和管理后台 JWT 独立验证，安全隔离 |
-| **Agent 零数据库** | 不直连 MySQL，所有数据操作通过 Gateway → 微服务 API 完成 |
+| **双 JWT 认证** | C 端用户 JWT 和管理后台 JWT 独立体系，互不串用 |
+| **Gateway introspect** | Agent 通过 `GET /users/me` / `GET /admin/info` 向后端索取权威 userId，与 Gateway 验签结果对齐 |
+| **多租户会话隔离** | LangGraph Auth 按 `metadata.owner={agent_type}:{user_id}` 隔离 threads，用户只能看见自己的会话 |
+| **Agent 零数据库** | 不直连 MySQL，所有业务数据操作通过 Gateway → 微服务 API 完成 |
 | **画像加速** | Redis 增量聚合画像，命中时偏好分析和推荐召回 0 次后端调用 |
 
 ### 关键设计决策
@@ -440,15 +444,17 @@ Agent 不仅需要一个聊天界面，还需要认证注入、工具调用可�
 hmall 前端通过 `@langchain/langgraph-sdk` 连接 Agent 服务，使用 SSE（Server-Sent Events）流式接收 Agent 回复。
 
 **核心流程**：
-1. 用户发送消息 → `POST /threads/{id}/runs/stream` 建立 SSE 连接
+1. 用户发送消息 → `POST /threads/{id}/runs/stream` 建立 SSE 连接（请求头携带 `Authorization` + `X-Hmall-Agent-Type`）
 2. Agent 流式返回：文本片段（chunk）、工具调用开始/结束、interrupt 确认弹窗
 3. 前端实时渲染：Markdown 文本 + 工具结果卡片交替展示
-4. 前端通过 `context` 参数注入 JWT Token，Agent 的 `AuthMiddleware` 自动验证
+4. 前端通过 `context` 注入 `user_token` / `agent_type`；同时 SDK `defaultHeaders` 携带 JWT，供 LangGraph Auth 做多租户鉴权与 Gateway introspect
 
 **关键集成点**：
-- 登录后获取 JWT → 所有 Agent 请求自动附带 Token（由 SDK 的 `context` 参数传递）
+- 登录后获取 JWT → `useLangGraph` 每次请求附带 `Authorization: Bearer <token>` 与 `X-Hmall-Agent-Type`
+- 创建 / 搜索会话时写入或过滤 `metadata.owner`（服务端 Auth 也会强制按 owner 隔离）
 - Agent 返回的 Markdown 中包含商品卡片链接 → 前端解析渲染为可点击的跳转链接
 - `interrupt` 确认弹窗与前端 UI 深度集成 → 用户确认/取消的操作直接驱动 Agent 继续/中断
+- 切换登录账号时清空本地 `threadId`，避免串会话
 
 ### 最终效果
 
@@ -482,9 +488,13 @@ hm-gateway (:8080)
   └── /search                 search-service
 ```
 
-**认证传递**：Agent 从 LangGraph `RunnableConfig` 中提取 JWT Token，通过 HTTP Header `Authorization: Bearer <token>` 透明传递给 Gateway。
+**认证传递**：
 
-**连接池管理**：使用 `httpx.AsyncClient` 单例，连接池大小 20，TCP Keep-Alive 复用，避免每次调用建连开销。
+1. 前端把登录 JWT 同时用于：LangGraph Server 的 `Authorization`（多租户 Auth + introspect）以及 `context.user_token`（工具调 Gateway）。
+2. Agent 工具经 `GatewayClient` 原样携带同一 JWT 调用 Gateway；C 端由 `AuthGlobalFilter` 验签后写入 `user-info`，下游微服务读 `UserContext`。
+3. Agent 本地的 `user_id` **不以 JWT base64 解码为权威**，而是调用 `GET /users/me`（C 端）或 `GET /admin/info`（管理端）向后端索取官方 ID，保证与 Gateway / admin-service 验签结果一致。
+
+**连接池管理**：使用 `httpx.AsyncClient`，按需建连，避免工具调用间长期占用连接。
 
 **画像联写**：Agent 的加购/下单工具调用后端 API 成功后，**后端**自动将行为写入 Redis 画像（而非 Agent 再写一次）。这确保了不管用户通过 Agent 还是前端 UI 操作，画像都能更新。
 
@@ -509,11 +519,13 @@ hm-gateway (:8080)
 ├── 后端配置：JAVA_GATEWAY_URL
 ├── 服务配置：AGENT_PORT、LOG_LEVEL
 ├── JWT 配置：JWT_VERIFY_LOCAL、CUSTOMER_JKS_PATH、ADMIN_JKS_PATH
+├── 身份探查：INTROSPECT_CACHE_TTL、INTROSPECT_FALLBACK_JWT
 └── RAG 配置：RAG_BASE_URL、RAG_USERNAME、RAG_PASSWORD、RAG_MCP_PORT
 
 graph.json
 ├── graphs — Agent 注册（customer_agent / admin_agent 的 .py 路径）
-├── store  — LangGraph Store 配置（当前 in_memory）
+├── store  — LangGraph Store 配置（当前 in_memory，落盘 .langgraph_api/store.pckl）
+├── auth   — 自定义 Auth（`./src/security/auth.py:auth`，多租户 + introspect）
 └── env    — .env 文件路径
 ```
 
@@ -524,7 +536,9 @@ graph.json
 | `DASHSCOPE_API_KEY` | 通义千问 API 密钥（必填） | — |
 | `LLM_MODEL_NAME` | 使用的 LLM 模型 | `qwen-turbo` |
 | `PROFILE_REDIS_DB` | 画像数据存储的 Redis 数据库编号 | `0`（须与后端 spring.redis.database 一致） |
-| `JWT_VERIFY_LOCAL` | JWT 验证方式 | `false`（依赖 Gateway 验证） |
+| `JWT_VERIFY_LOCAL` | 是否在 Agent 本地用 jks 验签 | `false`（默认走 Gateway introspect） |
+| `INTROSPECT_CACHE_TTL` | introspect 结果缓存秒数 | `60`（`0` 禁用） |
+| `INTROSPECT_FALLBACK_JWT` | introspect 失败是否回退本地 JWT 解码 | `false`（保持与 Gateway 强一致） |
 | `JAVA_GATEWAY_URL` | hmall Gateway 地址 | `http://localhost:8080` |
 | `AGENT_PORT` | Agent 服务监听端口 | `8090` |
 
@@ -597,4 +611,76 @@ uv run python start_rag_server.py     # RAG MCP Server（:8008）
 
 ---
 
-*本文档基于 hmall Agent v2.0 编写，各功能的最新状态以实际代码为准。*
+## 17. 会话历史与多租户隔离
+
+### 设计动机
+
+LangGraph 的会话历史按 `thread_id` 存在 Checkpointer 中。若不对 thread 做用户归属，任意客户端只要知道（或枚举）`thread_id`，就可能读到他人对话——这在多用户共用同一 Agent Server 时不可接受。
+
+### 实现思路
+
+采用 LangGraph 官方推荐的 **自定义 Auth**：
+
+1. **鉴权（`@auth.authenticate`）**：校验请求 `Authorization`，经 Gateway introspect 得到权威 `user_id`，构造 `owner = {agent_type}:{user_id}`（避免 C 端与管理端数字 ID 冲突）。
+2. **授权（`@auth.on.threads.*`）**：创建 thread 时写入 `metadata.owner`；search / read / delete / create_run 一律按 `owner` 过滤。
+3. **Store**：语义记忆 namespace 约定为 `("user_memory", user_id)`，Store 授权校验第二段必须匹配当前用户。
+
+开发态 Checkpointer 由 `langgraph-runtime-inmem` 托管：热路径在内存，冷路径周期性 pickle 到工作目录 `.langgraph_api/`（含 `.langgraph_checkpoint.*.pckl`、`.langgraph_ops.pckl`、`store.pckl`），进程重启后会话仍可恢复。这与「纯内存、重启即丢」不同，也不同于早期文档中的 Redis Checkpoint 方案。
+
+前端配合：
+
+- SDK Client 携带 `Authorization` + `X-Hmall-Agent-Type`
+- `threads.create({ metadata: { owner, user_id, agent_type } })`
+- `threads.search({ metadata: { owner } })`
+- 换账号时清空本地 `threadId`
+
+### 最终效果
+
+- 用户 A 只能列出 / 续聊 / 删除自己的会话；无法用 A 的 token 操作 B 的 `thread_id`
+- 同一用户的多个对话仍是多个 thread；换 thread 不自动带上旧会话消息，但 Layer 3 语义记忆与 Redis 画像按 `user_id` 跨会话保留
+- Studio 可通过 `disable_studio_auth` 在本地调试时放宽；业务前端必须登录
+
+---
+
+## 18. 身份权威对齐（Gateway introspect）
+
+### 设计动机
+
+hmall 业务微服务挂在 Gateway 后：Gateway 验签 → 写 `user-info` → 服务读 `UserContext`。  
+hmall-agent 是**独立入口**（浏览器直连 `:8090`），**收不到** Gateway 的 `user-info`。若 Agent 只本地 base64 解码 JWT，则：
+
+- 与 Gateway 解出的 userId 仅靠 claim 约定「碰巧一致」；
+- 默认还不验签，无法继承黑名单 / 过期等 Gateway 能力。
+
+因此引入方案 3：**Agent 拿同一 JWT 去问后端「你认不认、官方 userId 是谁」**。
+
+### 实现思路
+
+| 端 | 权威接口 | 验签位置 | 返回 |
+|----|----------|----------|------|
+| C 端 | `GET /users/me`（user-service，**勿**加白名单） | Gateway `AuthGlobalFilter` → `UserContext` | `{ userId, agentType: "customer" }` |
+| 管理端 | `GET /admin/info` | Gateway 对 `/admin/**` 放行；**admin-service** 自验 admin JWT | `AdminInfoVO.id` |
+
+Agent 侧 `src/gateway/introspect.py`：
+
+- 根据 `X-Hmall-Agent-Type`（或 JWT 猜测）选择接口；
+- 短 TTL 缓存（默认 60s，key=sha256(token)），降低每次 threads API 的额外 RT；
+- 默认 `INTROSPECT_FALLBACK_JWT=false`：失败直接 401/503，不静默回退本地解码。
+
+接入点：
+
+1. LangGraph `src/security/auth.py` → 多租户 `identity` / `owner`
+2. `AuthMiddleware` 异步路径 → 写入 `context.user_id` 供画像与记忆工具使用
+3. 工具调业务 API 仍携带原 JWT，由 Gateway / admin-service **再次**验签决定业务身份
+
+JWT claim 约定（与 Java 签发对齐）：C 端 `payload.user`，管理端 `payload.sub` + `type=ADMIN`。本地 `jwt_payload.py` 仅用于选 introspect 路径或可选回退，**默认不是权威**。
+
+### 最终效果
+
+- Agent 多租户 owner、Redis 画像 Key、Store namespace 使用的 userId，与 Gateway（或 admin-service）验签结果同源；
+- 伪造 payload 的假 JWT：introspect 被后端拒绝 → Agent 拒绝进会话；
+- 业务写路径（加购/下单）仍经 Gateway，不被 Agent 本地解析绑架。
+
+---
+
+*本文档基于 hmall Agent v2.0+（含多租户 Auth 与 Gateway introspect）编写，各功能的最新状态以实际代码为准。*

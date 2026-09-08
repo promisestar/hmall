@@ -26,6 +26,8 @@ hm-gateway (:8080) → 各微服务 (:8081-:8090)
 
 - **三级路由**：L1 正则中间件（<5ms）→ L2 interrupt 状态机 → L3 LLM 兜底
 - **双 JWT 认证**：C 端用户 JWT 和管理后台 JWT 独立验证
+- **身份权威对齐**：Agent 经 Gateway introspect（`GET /users/me` / `GET /admin/info`）获取官方 userId，与业务微服务一致
+- **多租户会话隔离**：LangGraph Auth 按 `metadata.owner`（`{agent_type}:{user_id}`）隔离 threads
 - **二次确认**：危险操作通过 LangGraph interrupt() 实现 Human-in-the-loop
 - **Agent 零数据库**：所有数据操作通过 Gateway → 微服务 API 完成
 - **用户画像持久化**：Redis Hash/List 增量聚合（db=0），Agent 侧与后端共享

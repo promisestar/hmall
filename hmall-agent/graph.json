@@ -13,5 +13,9 @@
     "store": {
         "type": "in_memory"
     },
+    "auth": {
+        "path": "./src/security/auth.py:auth",
+        "disable_studio_auth": true
+    },
     "env": ".env"
 }

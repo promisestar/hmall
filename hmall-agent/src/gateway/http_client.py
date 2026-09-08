@@ -243,20 +243,13 @@ def _extract_user_id(config) -> str:
 def _decode_user_id_from_jwt(token: str) -> str:
     """从 JWT payload 中解码 user_id（不验证签名）。
 
-    复用 auth.get_jti 的 base64 解码模式，仅用于 JWT_VERIFY_LOCAL=false 时的兜底。
+    与 Java 约定对齐：C 端 claim 为 `user`，管理端为 `sub`。
     """
     try:
-        import base64
-        import json
+        from src.security.jwt_payload import extract_identity_from_token
 
-        parts = token.split(".")
-        if len(parts) != 3:
-            return ""
-        payload = parts[1]
-        payload += "=" * (-len(payload) % 4)
-        decoded = json.loads(base64.urlsafe_b64decode(payload))
-        user_id = decoded.get("user_id", "")
-        return str(user_id) if user_id else ""
+        identity = extract_identity_from_token(token)
+        return identity["user_id"] if identity else ""
     except Exception:
         return ""
 

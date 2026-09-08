@@ -22,13 +22,17 @@ def setup_environment():
     # 读取 graph.json
     config_path = Path(__file__).parent / "graph.json"
     graphs = {}
+    auth = None
+    store = None
     if config_path.exists():
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
             graphs = config.get("graphs", {})
+            auth = config.get("auth")
+            store = config.get("store")
 
-    # 设置环境变量
-    os.environ.update({
+    # 设置环境变量（须在 import langgraph_api 之前完成，config 在 import 时读取）
+    env_update = {
         "DATABASE_URI": ":memory:",
         "REDIS_URI": "fake",
         "MIGRATIONS_PATH": "__inmem",
@@ -43,7 +47,13 @@ def setup_environment():
         # 自定义路由
         "LANGGRAPH_HTTP": json.dumps({"app": "api.batch_report:app"}),
         "N_JOBS_PER_WORKER": "3",
-    })
+    }
+    # 多租户 Auth（threads 按 owner 隔离）
+    if auth:
+        env_update["LANGGRAPH_AUTH"] = json.dumps(auth)
+    if store:
+        env_update["LANGGRAPH_STORE"] = json.dumps(store)
+    os.environ.update(env_update)
 
     # 加载 .env
     env_file = Path(__file__).parent / ".env"
