@@ -1,78 +1,113 @@
 # hmall Agent 设计方案文档
 
-> 整合 hmall 枫叶商城 AI 智能助手的全部设计方案，涵盖系统架构、个性化推荐、用户画像持久化、RAG 知识库集成四大模块。
+> **文档定位（Why / What）**：本文件是 hmall Agent 的**权威设计契约**——记录原则、架构、接口约定、模式选型、风险与 Phase 演进。  
+> **不写什么**：大段实现源码、完整前端 Composable、完整 `.env` 全文、逐步 bash 部署手册。上述内容分别见实现说明与项目说明。
 
 ---
 
-## 目录
+## 0. 文档导航与版本说明
 
-- [第一部分：hmall Agent 系统设计](#第一部分hmall-agent-系统设计) — 整体架构 / 技术选型 / Agent 定义 / 中间件 / 交互流程 / 部署方案
-- [第二部分：个性化推荐设计](#第二部分个性化推荐设计) — 推荐管线 / 偏好分析 / 召回排序 / API 设计 / Redis 画像 / 分步实施
-- [第三部分：用户画像与主动通知设计](#第三部分用户画像与主动通知设计) — 画像存储策略 / 增量聚合 / 对话记忆 / 后端集成 / 主动通知方案
-- [第四部分：RAG 知识库集成](#第四部分rag-知识库集成) — LightRAG + MCP 桥接 / Agent 集成 / 运维指南
+### 0.1 三份文档分工
+
+| 文档 | 定位 | 读者 |
+|------|------|------|
+| [hmall_Agent项目说明文档.md](./hmall_Agent项目说明文档.md) | **入门叙事**：动机、心智模型、最小上手路径 | 首次接触、快速建立整体图景 |
+| [hmall_Agent设计方案文档.md](./hmall_Agent设计方案文档.md)（本文） | **Why / What 与契约**：架构、规格、模式、风险、Phase | 方案评审、排期、对照实现 |
+| [hmall_Agent实现说明文档.md](./hmall_Agent实现说明文档.md) | **How**：配置全文、文件级细节、部署验收、与设计的偏差 | 联调、排障、核对落地状态 |
+
+**交叉引用约定**：
+
+- 实现细节（工具函数体、Formatter、SKILL 全文、`.env` 样例、逐步启动命令）→ `hmall_Agent实现说明文档.md`
+- 入门叙事与效果说明 → `hmall_Agent项目说明文档.md`
+- 本文若与代码冲突，以**当前代码 + 实现说明**为准，并在演进状态表中标注偏差
+
+### 0.2 本文结构
+
+| 部分 | 内容 |
+|------|------|
+| **Part A** | 系统核心设计（架构、双 Agent、记忆、安全、中间件、API、前端契约、RAG、部署、演进） |
+| **Part B** | 个性化推荐设计（触发模式、冷启动、后端 API、技术决策、Phase） |
+| **Part C** | 用户画像（Layer 1–3，权威）+ 主动通知（规划中） |
+
+> **说明**：原「第四部分：RAG」已合并入 Part A §12，不再保留第二套 RAG 全文副本。
+
+### 0.3 版本说明
+
+| 版本 | 日期 | 要点 |
+|------|------|------|
+| v2.0 | 2026-06 | DeepAgents + LangGraph；三级路由；双 JWT |
+| v2.1 | 2026-07 | SDK 1.x；前端独立对话页；context-only（禁用 configurable 并存） |
+| v2.2 | 2026-09 | 多租户 `metadata.owner`；Gateway introspect；Checkpoint 确认为 **inmem + `.langgraph_api` 落盘**（废止 Redis Checkpoint db=1 表述） |
+| **v2.3** | **2026-09** | **文档职责收敛**：去重；RAG 合并为单一章；权威数量/状态对齐代码（推荐/画像/RAG 已实现；主动通知规划中） |
+
+### 0.4 权威事实速查（务必对齐代码）
+
+| 项 | 现行事实 |
+|----|----------|
+| CustomerAgent | 约 **20** 业务工具 + **记忆工具**；**Skills 7** |
+| AdminAgent | **11** 工具（10 只读 + 运营日报编排）；**Skills 3** |
+| Checkpoint | `langgraph-runtime-inmem`，冷路径落盘 **`.langgraph_api/`**；**不是** Redis db=1 |
+| 画像 Redis | **db=0**，Key：`profile:{uid}:*` |
+| introspect | C 端 `GET /users/me`；管理端 `GET /admin/info` |
+| RAG | **已实现**（LightRAG `:9621` + MCP `:8008` + `RAGMiddleware`） |
+| 个性化推荐 | **已实现**（Phase 1 + 画像共享） |
+| 画像 Phase 2 | **已落地**；写入端为后端 `CartServiceImpl` + `paySuccessListener` |
+| 主动通知 | **规划中** |
 
 ---
 
-# 第一部分：hmall Agent 系统设计
-> 版本：v2.2  
-> 日期：2026-09-07  
-> 
-> v2.1 变更：SDK 升级至 1.x、前端重构为独立页面 + Markdown 渲染、移除 configurable 改用 context-only  
-> v2.2 变更：多租户会话隔离（LangGraph Auth + `metadata.owner`）；Gateway introspect（`GET /users/me` / `GET /admin/info`）作为 Agent 侧 userId 权威来源；开发态 Checkpoint 确认为 inmem + `.langgraph_api` 落盘（修正早期 Redis Checkpoint 表述）
+# Part A　系统核心设计
 
 ---
 
 ## 1. 概述
 
-### 1.1 背景与目标
+> 压缩定位叙事；完整「项目是什么 / 为什么做」见 [项目说明文档](./hmall_Agent项目说明文档.md)。本章只保留设计原则与 v1 对比，供架构评审使用。
 
-hmall（枫叶商城）已完成微服务架构搭建，包含商品、购物车、订单、支付、用户、搜索、秒杀、管理后台等完整链路。当前缺少 AI 智能助手，用户需要手动浏览页面完成购物流程，运营人员需要逐个页面查看数据。
+### 1.1 背景与目标（摘要）
 
-本设计采用 DeepAgent 架构（LangGraph + DeepAgents），为 hmall 构建两个 AI Agent：
+hmall（枫叶商城）已具备商品、购物车、订单、支付、用户、搜索、秒杀、管理后台等微服务链路，缺少面向自然语言的 AI 助手。本设计采用 **DeepAgents + LangGraph**，提供：
 
-- **客服助手（CustomerAgent）**：面向 C 端用户，支持商品浏览、秒杀、购物车、订单、地址等全链路自然语言交互
-- **管理助手（AdminAgent）**：面向运营人员，支持秒杀管理、订单查询、商品管理、库存状态查看等只读操作 + 运营日报
+- **CustomerAgent（客服助手）**：C 端全链路对话（浏览 / 秒杀 / 购物车 / 订单 / 地址 / 推荐 / 可选 RAG / 跨会话记忆）
+- **AdminAgent（管理助手）**：运营只读查询 + 运营日报；可选 RAG；**禁止写操作**
 
 ### 1.2 设计原则
 
 | 原则 | 说明 |
 |------|------|
-| **三级路由** | L1 正则中间件（<5ms，拦截 80%+ 高频指令）→ L2 interrupt 状态机（多轮交互/二次确认）→ L3 LLM 兜底（~2s） |
-| **Agent 零数据库** | 所有数据操作通过 Gateway → 微服务 API 完成，Agent 不直连数据库 |
-| **双 Token 隔离** | C 端用户 JWT 和管理后台 JWT 独立验证，互不干扰，通过 `context_schema` 传递 |
-| **二次确认** | 危险操作（取消订单、删除地址、清空购物车）通过 LangGraph `interrupt()` 实现 Human-in-the-loop |
-| **空数据兜底** | 所有查询在代码层检测空数据，直接返回固定提示，不走 LLM |
-| **降级策略** | LLM API 超时/异常时自动切换固定兜底文案 |
-| **复用现有基建** | 复用 hmall 的 Redis（Checkpoint 后端）、Gateway（路由+认证）、Nacos（配置） |
-| **DeepAgent 原生** | 使用 `create_agent()` 定义 Agent，Skills 中间件管理规范文件，LangGraph 负责图执行与状态持久化 |
+| **三级路由** | L1 正则中间件（毫秒级，拦截高频指令）→ L2 `interrupt`（多轮 / 二次确认）→ L3 LLM 兜底 |
+| **Agent 零业务库** | 数据操作一律 Gateway → 微服务 API；Agent 不直连 MySQL |
+| **双 Token 隔离** | C 端 JWT 与管理端 JWT 独立；经 `context` + `Authorization` 传递 |
+| **身份权威对齐** | Agent 侧 `userId` 以 Gateway introspect 为准，不以本地 JWT base64 解码为权威 |
+| **多租户会话** | `metadata.owner = {agent_type}:{user_id}`，Auth 强制过滤 threads/store |
+| **二次确认** | 危险写操作通过 `interrupt()` 实现 Human-in-the-loop |
+| **空数据 / 降级** | 查询空结果在代码层固定提示；外部依赖失败有降级路径（如推荐失败 → 搜索提示；RAG 不可达 → 仅业务工具） |
+| **DeepAgent 原生** | `create_agent()` 声明式定义；Skills 管理规范；LangGraph 负责图执行与持久化 |
 
-### 1.3 与原 v1.0 设计（LangChain 版）的对比
+### 1.3 与 v1.0（LangChain 自定义调度）对比
 
-| 维度 | v1.0（LangChain Core） | v2.0（DeepAgent） |
-|------|----------------------|-------------------|
-| Agent 框架 | LangChain Core（自定义 base_agent.py） | DeepAgents (`create_agent`) + LangGraph |
-| 图执行引擎 | 无（自定义 Agent 调度器） | LangGraph (`langgraph-cli[inmem]`) |
-| Web 框架 | FastAPI + WebSocket | LangGraph Server (uvicorn + langgraph_api) |
-| Agent 定义 | 自定义 `base_agent.py`（多轮工具调用循环） | `create_agent()` 声明式定义 |
-| 正则路由 | `intent_router.py`（自定义调度层） | `RegexShortcutMiddleware`（中间件拦截 model_call） |
-| 状态机 | Redis 存储自定义状态（`agent:state:*`） | LangGraph `interrupt()` + Checkpoint 持久化 |
-| 二次确认 | 自定义 `agent:confirm:*` Redis Key + 文本匹配 | LangGraph `interrupt()` 原生 Human-in-the-loop |
-| 对话记忆 | 自定义 `ChatMemory`（Redis List, 20条/30min） | LangGraph Thread + Redis Checkpoint（自动管理） |
-| 前端通信 | WebSocket / SSE / HTTP（自定义协议） | LangGraph SDK (`useStream` / `Client`) |
-| 工具注册 | 函数列表传给 Agent | `get_all_tools()` + DeepAgent 中间件动态注入 |
-| Skills | 无 | `SkillsMiddleware` + SKILL.md 规范文件 |
-| 可观测性 | Loguru + Prometheus（可选） | LangGraph Studio + LangSmith（可选） |
+| 维度 | v1.0 | v2.x（现行） |
+|------|------|-------------|
+| Agent 框架 | 自定义 `base_agent.py` 循环 | DeepAgents `create_agent` + LangGraph |
+| 图 / API | FastAPI + 自建 WS/SSE | LangGraph Server（`langgraph-cli[inmem]`） |
+| L1 路由 | 自定义 `intent_router` | `RegexShortcutMiddleware` |
+| 二次确认 | Redis 确认键 + 文本匹配 | 原生 `interrupt()` + Checkpoint |
+| 对话记忆 | Redis List ChatMemory | Thread Checkpointer（inmem 落盘）+ Store 语义记忆 |
+| 前端 | 自建协议 | LangGraph SDK 1.x（`Client` + SSE） |
+| 身份 | 本地解码为主 | Gateway introspect + 可选本地 jks |
+| Skills / RAG | 无 | SkillsMiddleware + RAGMiddleware（动态 MCP 工具） |
 
 ---
 
 ## 2. 整体架构
 
-### 2.1 系统架构
+### 2.1 系统架构（权威）
 
 ```
 用户（C端 / 管理后台）
   │
   │  LangGraph SDK (HTTP + SSE)
+  │  Authorization + X-Hmall-Agent-Type
   ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │              Agent Service (LangGraph Server :8090)                │
@@ -80,4484 +115,2699 @@ hmall（枫叶商城）已完成微服务架构搭建，包含商品、购物车
 │  ┌────────────────────────────────────────────────────────────┐   │
 │  │  LangGraph API 层                                            │   │
 │  │  ├── POST /threads/{id}/runs/stream（SSE 流式）              │   │
-│  │  ├── POST /assistants/{id}/runs/stream（专用端点）           │   │
-│  │  ├── GET  /assistants/search（助手列表）                     │   │
-│  │  ├── POST /threads（创建线程）                               │   │
-│  │  ├── POST /threads/search（线程列表）                        │   │
-│  │  ├── POST /threads/{id}/state（线程状态/文件同步）           │   │
-│  │  ├── DELETE /threads/{id}（删除线程）                        │   │
-│  │  ├── POST /api/v1/batch-report（自定义路由：批量运营报告）    │   │
-│  │  └── GET  /api/v1/llm/health（自定义路由：LLM 连通性检查）     │   │
+│  │  ├── POST /assistants/{id}/runs/stream                       │   │
+│  │  ├── GET/POST /assistants/*、/threads/*（含 search / state） │   │
+│  │  ├── POST /api/v1/batch-report（自定义：批量运营报告）         │   │
+│  │  └── GET  /api/v1/llm/health（自定义：LLM 连通性）            │   │
 │  └────────────────────────────────────────────────────────────┘   │
 │                          │                                         │
 │  ┌───────────────────────▼────────────────────────────────────┐   │
-│  │  中间件层（DeepAgent Middleware Chain）                      │   │
-│  │  ├── AuthMiddleware（双 JWT 认证：C端 / 管理端）              │   │
-│  │  ├── PermissionMiddleware（工具权限拦截：AdminAgent 纯只读）  │   │
-│  │  ├── RegexShortcutMiddleware（L1 正则快捷路由：<5ms）        │   │
-│  │  ├── SkillsMiddleware（SKILL.md 规范加载）                   │   │
-│  │  └── RAGMiddleware（RAG 动态工具注入：enable_rag=true 时生效）│   │
+│  │  中间件链                                                     │   │
+│  │  Auth → Permission → RegexShortcut → RAG → Skills            │   │
 │  └───────────────────────┬────────────────────────────────────┘   │
 │                          │                                         │
 │  ┌───────────────────────▼────────────────────────────────────┐   │
-│  │  Agent 层（DeepAgents create_agent）                         │   │
-│  │                                                               │   │
-│  │  CustomerAgent                      AdminAgent                │   │
-│  │  ├── model: qwen-turbo              ├── model: qwen-turbo     │   │
-│  │  ├── tools: 18 个 C 端工具           ├── tools: 10 个管理工具  │   │
-│  │  ├── middleware: 5 个                ├── middleware: 4 个     │   │
-│  │  ├── skills: 5 个 SKILL.md           ├── skills: 3 个 SKILL.md│   │
-│  │  ├── context_schema: Context         ├── context_schema: Context│   │
-│  │  └── interrupt: 二次确认/状态机      └── interrupt: （预留）  │   │
-│  └───────────────────────┬────────────────────────────────────┘   │
-│                          │                                         │
-│  ┌───────────────────────▼────────────────────────────────────┐   │
-│  │  工具层（LangChain @tool → httpx → Java API Proxy）          │   │
-│  │  ├── customer_api.py（18 个 C 端工具）                        │   │
-│  │  └── admin_api.py（10 个管理端工具）                          │   │
+│  │  Agent 层                                                    │   │
+│  │  CustomerAgent                         AdminAgent            │   │
+│  │  · ~20 业务 + 记忆工具                 · 11 工具（只读+日报） │   │
+│  │  · Skills 7                            · Skills 3            │   │
+│  │  · interrupt 二次确认/多轮             · interrupt 预留       │   │
 │  └───────────────────────┬────────────────────────────────────┘   │
 │                          │                                         │
 │  ┌───────────────────────▼────────────────────────────────────┐   │
 │  │  基础设施                                                    │   │
-│  │  ├── Redis（LangGraph Checkpoint 后端，db=1 隔离）           │   │
-│  │  ├── DeepAgents（Agent 框架）                                │   │
-│  │  ├── LangGraph（图执行引擎 + API Server）                    │   │
-│  │  └── 通义千问 DashScope（LLM 推理，OpenAI 兼容）              │   │
+│  │  · Checkpointer：inmem + .langgraph_api 落盘（多租户 owner） │   │
+│  │  · Store：in_memory（Layer 3 语义记忆）                      │   │
+│  │  · Redis db=0：用户画像 profile:{uid}:*（与后端共享）        │   │
+│  │  · DashScope qwen-turbo（OpenAI 兼容）                       │   │
+│  │  · RAG：MCP :8008 → LightRAG :9621（可选，enable_rag）       │   │
 │  └────────────────────────────────────────────────────────────┘   │
 └──────────────────────────┬───────────────────────────────────────┘
-                           │ HTTP (httpx)
+                           │ HTTP (httpx)：业务 API + introspect
                            ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │              hm-gateway (:8080)                                    │
-│  ├── AuthGlobalFilter（JWT 认证 + user-id 透传）                    │
-│  ├── RateLimitFilter（秒杀限流）                                    │
-│  └── DynamicRouteLoader（Nacos 动态路由）                           │
+│  AuthGlobalFilter / 限流 / Nacos 动态路由                           │
 └──┬──────┬────────┬────────┬────────┬────────┬───────────────────┘
-   │      │        │        │        │        │
    ▼      ▼        ▼        ▼        ▼        ▼
  item   cart    user    trade    pay    admin    search
-:8081   :8082   :8084   :8085   :8083   :8090   :8089
+:8081   :8082   :8084   :8085   :8083  (管理)   :8089
 ```
 
-### 2.2 三级路由架构（DeepAgent 中间件实现）
+### 2.2 三级路由架构
 
 ```
-用户消息（通过 LangGraph SDK stream.submit）
+用户消息（runs.stream / submit）
   │
-  ├─ L1: RegexShortcutMiddleware (<5ms)
-  │   ├── 拦截 wrap_model_call，在 LLM 调用前检查用户消息
-  │   ├── 匹配 "查看订单" / "查看购物车" / "秒杀活动" 等高频指令
-  │   ├── 直接调用对应 @tool + 代码格式化输出
-  │   ├── 返回 AIMessage（无 tool_call）→ Agent 图直接到 END
-  │   └── 拦截 80%+ 请求，零 LLM 成本
+  ├─ L1: RegexShortcutMiddleware（毫秒级）
+  │   · 匹配「查看订单 / 购物车 / 秒杀 / 猜你喜欢 / 运营日报」等
+  │   · 直接调用对应 @tool + 代码格式化 → AIMessage（无 tool_call）→ END
+  │   · 目标：拦截高频只读查询，零 LLM 成本
   │
-  ├─ L2: LangGraph interrupt() (多轮交互 / 二次确认)
-  │   ├── 地址修改：interrupt 请求字段 → 用户回复 → interrupt 请求新值 → 执行
-  │   ├── 秒杀下单：查活动 → interrupt 确认 → 用户回复"确认" → 下单
-  │   ├── 二次确认：取消订单/删除地址/清空购物车 → interrupt 等待"确认取消"
-  │   └── 前端 InterruptActions 组件处理批准/编辑/拒绝
+  ├─ L2: interrupt()（多轮 / 二次确认）
+  │   · 秒杀下单、取消订单、清空购物车、地址增改等
+  │   · Checkpoint 保存挂起状态；前端 resume 后继续
   │
-  └─ L3: LLM 兜底 (~2s，DeepAgent 默认行为)
-      ├── 闲聊 / 复杂问题 / L1/L2 未命中
-      ├── LLM 自主选择工具调用（DeepAgent Agent Loop）
-      └── 结果格式化输出
+  └─ L3: LLM 兜底（~秒级）
+      · 闲聊、复杂意图、需从上下文抽参的场景
+      · Agent Loop 自主选工具；Skills 提供流程规范
 ```
+
+**设计意图**：把「确定性强、参数可抽取」的指令压到 L1；把「危险写操作」固定到 L2；把「语义模糊」留给 L3。顺序不可颠倒——Regex 必须在 Skills 之前，否则 Skills 加载在短路路径上白做。
 
 ### 2.3 技术栈
 
 | 类别 | 技术 | 说明 |
 |------|------|------|
-| **语言** | Python ≥ 3.12 | |
-| **包管理** | uv | pip 替代，快速依赖解析 |
-| **Agent 框架** | DeepAgents (`deepagents>=0.5.9`) | `create_agent()` 声明式定义 |
-| **图执行引擎** | LangGraph (`langgraph-cli[inmem]>=0.4.26`) | 图执行 + API Server + Checkpoint |
-| **LLM** | 通义千问 qwen-turbo（DashScope，OpenAI 兼容接口） | 通过 `langchain-openai` ChatOpenAI 接入 |
-| **LLM 框架** | LangChain 1.x | 消息管理 + 工具调用 |
-| **Checkpoint 后端** | Redis（复用 hmall Redis，db=1） | `langgraph-checkpoint-redis` |
-| **HTTP 客户端** | httpx | 异步调用 Java 后端 API |
-| **MCP 协议** | FastMCP + `langchain-mcp-adapters` | RAG 桥接（LightRAG → MCP Server → Agent） |
-| **RAG 引擎** | LightRAG（git submodule） | 知识图谱 + 向量检索，REST API 调用 |
-| **可观测性** | LangGraph Studio + LangSmith（可选） | 图可视化 + 追踪 |
-| **日志** | logging（uvicorn 内置） | 结构化日志 |
+| 语言 / 包管理 | Python ≥ 3.12 / uv | |
+| Agent | DeepAgents（`create_agent`） | 声明式 Agent + 中间件 |
+| 运行时 | LangGraph + `langgraph-cli[inmem]` | 图执行、API Server、开发态 Checkpoint |
+| LLM | 通义千问 qwen-turbo（DashScope） | `langchain-openai` ChatOpenAI 兼容接口 |
+| HTTP | httpx | 异步调 Gateway |
+| MCP / RAG | FastMCP + `langchain-mcp-adapters` + LightRAG | 知识库桥接 |
+| 画像 | Redis db=0 | 与 Java 后端共享 `profile:` |
+| 前端 SDK | `@langchain/langgraph-sdk` 1.x | 正确转发 `context` / `command` |
+| 可观测 | LangGraph Studio / LangSmith（可选） | |
+
+> **已废止**：`langgraph-checkpoint-redis` 作为开发态默认 Checkpoint（曾规划 Redis db=1）。现行以 inmem 落盘为准；生产可换 Postgres 等，**owner 过滤模型不变**。
 
 ### 2.4 Agent 注册与路由
 
-**第 1 步：`graph.json` 定义 Agent 注册名**
+**`graph.json` 语义（权威）**：
 
-```json
-{
-    "dependencies": ["."],
-    "graphs": {
-        "customer_agent": {
-            "path": "./src/agents/customer/agent.py:agent",
-            "description": "客服助手 Agent：商品浏览、秒杀、购物车、订单、地址全链路自然语言交互"
-        },
-        "admin_agent": {
-            "path": "./src/agents/admin/agent.py:agent",
-            "description": "管理助手 Agent：秒杀管理、订单查询、商品管理、库存查看、运营日报"
-        }
-    },
-    "env": ".env"
-}
-```
+| 字段 | 语义 |
+|------|------|
+| `graphs.customer_agent` / `admin_agent` | 注册图名 → Python 导出 `agent` 对象路径 |
+| `store.type = in_memory` | LangGraph Store（Layer 3 记忆）；由平台注入 `config.configurable.store` |
+| `auth.path` | 自定义 Auth（introspect + owner 多租户）；`disable_studio_auth: true` 便于 Studio |
+| `env` | 加载 `.env` |
+| （不在 graph.json）`LANGGRAPH_HTTP` | 由 `start_server.py` 注入，挂载自定义 FastAPI（batch-report / llm health） |
 
-**第 2 步：`start_server.py` 注入环境变量**
+前端通过助手 ID（`customer_agent` / `admin_agent`）选择图；同一次请求的 `context.agent_type` 必须与之匹配，供 Permission / introspect 路径选择。
 
-```python
-os.environ["LANGSERVE_GRAPHS"] = json.dumps(graphs)
-```
-
-**第 3 步：LangGraph 自动注册路由**
-
-| 专用端点（推荐） | 通用端点 |
-|-----------------|---------|
-| `POST /assistants/customer_agent/runs/stream` | `POST /runs/stream` + `{"assistant_id": "customer_agent", ...}` |
-| `POST /assistants/admin_agent/runs/stream` | `POST /runs/stream` + `{"assistant_id": "admin_agent", ...}` |
-
-**前端 Agent 选择**：通过 `ConfigDialog` 选择 `assistantId`（`customer_agent` 或 `admin_agent`）→ `localStorage` 持久化 → `useStream` 建立到对应 Agent 的流式连接。
+实现映射与启动环境变量表见 [实现说明 · 服务启动与配置](./hmall_Agent实现说明文档.md)。
 
 ---
 
 ## 3. CustomerAgent 设计（C 端客服助手）
 
-### 3.1 Agent 定义
+### 3.1 职责与 Context
 
-```python
-# src/agents/customer/agent.py
-from dataclasses import dataclass
-from pathlib import Path
+| 字段 | 含义 |
+|------|------|
+| `agent_type` | 固定 `"customer"` |
+| `user_id` | 由 AuthMiddleware / introspect 注入；工具侧可读 |
+| `user_token` | C 端 JWT；工具调 Gateway 携带 |
+| `enable_rag` | 前端「知识库」开关；为 true 时 RAGMiddleware 注入 MCP 工具 |
 
-from deepagents import create_deep_agent as create_agent
-from deepagents.backends import FilesystemBackend
-from deepagents.middleware import SkillsMiddleware
-from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse, wrap_model_call
+中间件顺序（与代码一致）：**Auth → Permission → RegexShortcut → RAG → Skills**。
 
-from src.core.llms import qwen_model
-from src.middleware.auth import AuthMiddleware
-from src.middleware.permission import PermissionMiddleware
-from src.middleware.regex_shortcut import RegexShortcutMiddleware
+### 3.2 工具规格（约 20 业务 + 记忆）
 
-from src.agents.customer.prompts import SYSTEM_PROMPT
-from src.agents.customer.tools import get_all_tools
+> 完整参数、返回格式、空数据文案见实现说明 Part I。此处仅列**契约级规格**。
 
+#### 商品浏览（3）
 
-@dataclass
-class Context:
-    """CustomerAgent 运行时上下文（通过 LangGraph SDK context 传入）"""
-    agent_type: str = "customer"     # "customer" or "admin"
-    user_id: str = ""                # 当前 C 端用户 ID
-    user_token: str = ""             # C 端用户 JWT Token
-    enable_rag: bool = False         # RAG 开关（前端控制，True 时注入 RAG 工具）
+| 工具 | API | 登录 | 备注 |
+|------|-----|------|------|
+| `search_items_api` | `GET /search` | 否 | ES 全文；推荐降级可复用 |
+| `get_item_detail_api` | `GET /items/{id}` | 否 | |
+| `get_item_page_api` | `GET /items/page` | 否 | |
 
+#### 秒杀（3）
 
-# ============================================================================
-# Skills 配置
-# ============================================================================
-skills_root = str((Path(__file__).parent.parent.parent / "workspace" / "customer").resolve())
-skills_backend = FilesystemBackend(root_dir=skills_root, virtual_mode=True)
+| 工具 | API | 登录 | 备注 |
+|------|-----|------|------|
+| `get_seckill_activities_api` | `GET /seckill/activities` | 否 | L1 高频 |
+| `get_seckill_product_api` | `GET /seckill/products/{relationId}` | 否 | |
+| `do_seckill_api` | `POST /seckill/order/{relationId}` | 是 | **L2 interrupt 确认** |
 
-skills_middleware = SkillsMiddleware(
-    backend=skills_backend,
-    sources=[
-        "/skills/shopping-guide/",
-        "/skills/seckill-order/",
-        "/skills/cart-management/",
-        "/skills/order-management/",
-        "/skills/address-management/",
-    ]
-)
+#### 购物车（5）
 
-# L1 正则快捷路由中间件
-regex_middleware = RegexShortcutMiddleware(
-    tool_registry=get_all_tools(),
-    rules=REGEX_RULES,  # 见 3.3 节
-)
+| 工具 | API | 登录 | 备注 |
+|------|-----|------|------|
+| `get_cart_list_api` | `GET /carts` | 是 | L1 |
+| `add_to_cart_api` | `POST /carts` | 是 | 画像由后端 CartService 写 |
+| `update_cart_quantity_api` | `PUT /carts/{itemId}` | 是 | 不记 cart 画像事件 |
+| `delete_cart_item_api` | `DELETE /carts/{itemId}` | 是 | **interrupt** |
+| `clear_cart_api` | `DELETE /carts` | 是 | **interrupt**；不走 L1 |
 
-# ============================================================================
-# Agent 创建
-# ============================================================================
-agent = create_agent(
-    model=qwen_model,                      # 通义千问 qwen-turbo
-    tools=get_all_tools(),                 # 18 个 C 端工具
-    backend=skills_backend,               # 虚拟文件系统
-    middleware=[
-        AuthMiddleware(),                  # 双 JWT 认证
-        PermissionMiddleware(),            # 工具权限拦截
-        regex_middleware,                  # L1 正则快捷路由
-        skills_middleware,                 # Skills 规范加载
-    ],
-    system_prompt=SYSTEM_PROMPT,
-    context_schema=Context,
-)
-```
+#### 订单（4）
 
-### 3.2 工具清单（18 个）
+| 工具 | API | 登录 | 备注 |
+|------|-----|------|------|
+| `get_order_list_api` | `GET /orders/page` | 是 | L1；支持状态筛选 |
+| `get_order_detail_api` | `GET /orders/{id}` | 是 | |
+| `cancel_order_api` | `POST /orders/batch/close` | 是 | **interrupt** |
+| `confirm_receive_api` | `PUT /orders/{orderId}` | 是 | **interrupt**；购买画像由支付监听写 |
 
-基于 hmall C 端 API 设计，所有工具通过 Gateway `:8080` 调用，使用 `@tool` 装饰器注册：
+#### 地址（3）
 
-#### 商品浏览（3 个）
+| 工具 | API | 登录 | 备注 |
+|------|-----|------|------|
+| `get_address_list_api` | `GET /addresses` | 是 | L1 |
+| `add_address_api` | `POST /addresses` | 是 | **interrupt 多轮收集** |
+| `update_address_api` | `PUT /addresses/{id}` | 是 | **interrupt 多轮** |
 
-| 工具名 | API | 说明 |
-|--------|-----|------|
-| `search_items_api` | `GET /search` | 搜索商品（ES 全文检索） |
-| `get_item_detail_api` | `GET /items/{id}` | 商品详情 |
-| `get_item_page_api` | `GET /items/page` | 分页浏览商品 |
+#### 个性化推荐（2）
 
-#### 秒杀（3 个）
+| 工具 | API / 行为 | 登录 | 备注 |
+|------|------------|------|------|
+| `get_recommendations_api` | `GET /recommend` | 是 | scene=`home`/`detail`/`cart` |
+| `analyze_user_preferences` | 画像优先 / miss 降级聚合 | 是 | 详见 Part B / Part C |
 
-| 工具名 | API | 说明 |
-|--------|-----|------|
-| `get_seckill_activities_api` | `GET /seckill/activities` | 秒杀活动列表（含场次+商品） |
-| `get_seckill_product_api` | `GET /seckill/products/{relationId}` | 秒杀商品详情（含实时库存） |
-| `do_seckill_api` | `POST /seckill/order/{relationId}` | 秒杀下单（需登录，**interrupt 二次确认**） |
+#### 跨会话记忆（Layer 3）
 
-#### 购物车（5 个）
+| 工具 | 存储 | 备注 |
+|------|------|------|
+| `save_memory` | LangGraph Store `user_memory` | 未完成购物意图等 |
+| `get_memories` | 同上 | 对话开始 / 推荐前读取 |
 
-| 工具名 | API | 说明 |
-|--------|-----|------|
-| `get_cart_list_api` | `GET /carts` | 购物车列表（需登录） |
-| `add_to_cart_api` | `POST /carts` | 加入购物车（需登录） |
-| `update_cart_quantity_api` | `PUT /carts/{itemId}` | 修改数量（需登录） |
-| `delete_cart_item_api` | `DELETE /carts/{itemId}` | 删除商品（需登录，**interrupt 二次确认**） |
-| `clear_cart_api` | `DELETE /carts` | 清空购物车（需登录，**interrupt 二次确认**） |
+> hmall 暂无优惠券 / 售后工具（相对部分对标项目更少）。工具实现体见实现说明，不在本文粘贴。
 
-#### 订单（4 个）
+### 3.3 L1 正则路由（规格）
 
-| 工具名 | API | 说明 |
-|--------|-----|------|
-| `get_order_list_api` | `GET /orders/page` | 订单列表（需登录，支持状态筛选） |
-| `get_order_detail_api` | `GET /orders/{id}` | 订单详情（需登录） |
-| `cancel_order_api` | `POST /orders/batch/close` | 取消订单（需登录，**interrupt 二次确认**） |
-| `confirm_receive_api` | `PUT /orders/{orderId}` | 确认收货（需登录，**interrupt 二次确认**） |
+| 用户输入示例 | 路由工具 | 层 |
+|-------------|---------|-----|
+| 查看秒杀 / 秒杀活动 | `get_seckill_activities_api` | L1 |
+| 搜索手机 / 查找… | `search_items_api` | L1 |
+| 查看购物车 | `get_cart_list_api` | L1 |
+| 查看订单 / 待付款订单 | `get_order_list_api` | L1 |
+| 查看订单 100 | `get_order_detail_api` | L1 |
+| 查看地址 | `get_address_list_api` | L1 |
+| 有什么推荐 / 猜你喜欢 | `get_recommendations_api` | L1 |
+| 取消订单 / 清空购物车 / 确认收货 / 改地址 | 对应写工具 | **L2**（不拦截） |
 
-#### 收货地址（3 个）
+规则：危险写与多轮收集**禁止** L1 短路；参数需语义抽取的（如「秒杀 iPhone」）走 L3。
 
-| 工具名 | API | 说明 |
-|--------|-----|------|
-| `get_address_list_api` | `GET /addresses` | 地址列表（需登录） |
-| `add_address_api` | `POST /addresses` | 新增地址（需登录，**interrupt 多轮收集**） |
-| `update_address_api` | `PUT /addresses/{addressId}` | 修改地址（需登录，**interrupt 多轮收集**） |
+### 3.4 L2 interrupt 状态机（设计）
 
-> **注**：hmall 暂无优惠券和售后功能，相比 nova-mall-agent 减少 5 个工具。
-
-#### 工具实现示例
-
-```python
-# src/agents/customer/tools.py
-from langchain_core.tools import tool
-from langgraph.types import interrupt
-from src.gateway.http_client import gateway_client
-
-
-@tool
-async def get_seckill_activities_api() -> str:
-    """获取当前所有秒杀活动列表，含场次、商品和实时库存信息。"""
-    result = await gateway_client.get("/seckill/activities")
-    if not result:
-        return "当前没有进行中的秒杀活动"
-    return format_seckill_activities(result)
-
-
-@tool
-async def do_seckill_api(relation_id: int) -> str:
-    """秒杀下单。需要二次确认。
-    
-    Args:
-        relation_id: 秒杀商品关联 ID
-    """
-    # 先查询商品详情
-    product = await gateway_client.get(f"/seckill/products/{relation_id}")
-    if not product:
-        return f"未找到秒杀商品 relationId={relation_id}"
-
-    # L2: interrupt 请求用户确认
-    approval = interrupt({
-        "type": "confirmation",
-        "message": (
-            f"确认秒杀以下商品？\n"
-            f"商品名: {product['itemName']}\n"
-            f"秒杀价: ¥{product['seckillPrice']}\n"
-            f"限购: {product['limit']}件\n"
-            f"剩余: {product['stock']}件\n"
-            f"回复\"确认\"下单"
-        ),
-        "expected_response": "确认",
-    })
-
-    if approval.strip() == "确认":
-        result = await gateway_client.post(f"/seckill/order/{relation_id}")
-        return f"✅ 秒杀请求已提交，正在排队... → {result}"
-    else:
-        return "❌ 已取消秒杀"
-
-
-@tool
-async def update_address_api(address_id: int) -> str:
-    """修改收货地址。通过多轮交互收集修改字段和新值。
-    
-    Args:
-        address_id: 地址 ID（序号）
-    """
-    # L2: interrupt 请求修改字段
-    field_response = interrupt({
-        "type": "field_selection",
-        "message": f"请问要修改地址{address_id}的哪个字段？(姓名/手机号/省份/城市/区/详细地址)",
-    })
-
-    field = field_response.strip()
-
-    # L2: interrupt 请求新值
-    new_value = interrupt({
-        "type": "value_input",
-        "message": f"请输入新的{field}",
-    })
-
-    result = await gateway_client.put(
-        f"/addresses/{address_id}",
-        json={"field": field, "value": new_value}
-    )
-    return f"✅ 地址{address_id}的{field}已修改为{new_value}"
-
-
-def get_all_tools():
-    """返回 CustomerAgent 所需的全部工具列表。"""
-    return [
-        # 商品浏览
-        search_items_api, get_item_detail_api, get_item_page_api,
-        # 秒杀
-        get_seckill_activities_api, get_seckill_product_api, do_seckill_api,
-        # 购物车
-        get_cart_list_api, add_to_cart_api, update_cart_quantity_api,
-        delete_cart_item_api, clear_cart_api,
-        # 订单
-        get_order_list_api, get_order_detail_api, cancel_order_api, confirm_receive_api,
-        # 地址
-        get_address_list_api, add_address_api, update_address_api,
-    ]
-```
-
-### 3.3 L1 正则快捷路由中间件
-
-```python
-# src/middleware/regex_shortcut.py
-import re
-from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
-from langchain_core.messages import AIMessage
-
-
-# 正则路由规则：(pattern, tool_name, param_extractor)
-REGEX_RULES = [
-    # 秒杀
-    (r'(?:查看|查询|当前).{0,3}秒杀', 'get_seckill_activities_api', None),
-    # 购物车
-    (r'(?:查看|查询).{0,5}购物车', 'get_cart_list_api', None),
-    (r'清空\s*购物车', 'clear_cart_api', None),  # 注：clear_cart 需二次确认，不拦截
-    # 订单
-    (r'(?:查询|查看).{0,5}(?:待付款|待发货|待收货|已完成)?订单', 'get_order_list_api', None),
-    (r'(?:查看|看)\s*(?:订单\s*)?(\d+)', 'get_order_detail_api', lambda m: {"order_id": int(m.group(1))}),
-    # 地址
-    (r'(?:查询|查看).{0,5}地址', 'get_address_list_api', None),
-    # 商品
-    (r'(?:搜索|查找|找)\s*(.+)', 'search_items_api', lambda m: {"keyword": m.group(1)}),
-    (r'(?:商品|商品列表)', 'get_item_page_api', None),
-]
-
-
-class RegexShortcutMiddleware(AgentMiddleware):
-    """L1 正则快捷路由中间件。
-    
-    在 LLM 调用前检查用户消息，匹配高频指令时直接调用对应工具并返回结果，
-    跳过 LLM 推理，实现 <5ms 响应。
-    
-    不匹配的消息正常传递给 LLM（L3 兜底）。
-    二次确认类操作（取消订单/删除/清空）不在 L1 拦截，由 L2 interrupt 处理。
-    """
-    
-    def __init__(self, tool_registry, rules):
-        super().__init__()
-        self._tools = {t.name: t for t in tool_registry}
-        self._rules = rules
-    
-    def _try_shortcut(self, request: ModelRequest) -> AIMessage | None:
-        """尝试正则匹配，命中则直接调用工具返回结果。"""
-        last_msg = request.messages[-1]
-        if last_msg.type != "human":
-            return None
-        
-        text = last_msg.content if isinstance(last_msg.content, str) else ""
-        
-        for pattern, tool_name, extractor in self._rules:
-            match = re.search(pattern, text)
-            if match and tool_name in self._tools:
-                tool = self._tools[tool_name]
-                params = extractor(match) if extractor else {}
-                try:
-                    result = tool.invoke(params)
-                    return AIMessage(content=str(result))
-                except Exception as e:
-                    # 工具调用失败，降级到 LLM
-                    return None
-        return None
-    
-    def wrap_model_call(self, request, handler):
-        shortcut = self._try_shortcut(request)
-        if shortcut is not None:
-            return shortcut  # 直接返回，跳过 LLM
-        return handler(request)  # 正常走 LLM
-    
-    async def awrap_model_call(self, request, handler):
-        shortcut = self._try_shortcut(request)
-        if shortcut is not None:
-            return shortcut
-        return await handler(request)
-```
-
-**正则路由规则表**：
-
-| 用户输入示例 | 匹配规则 | 路由工具 | 是否拦截 |
-|-------------|---------|---------|---------|
-| `查看秒杀` / `秒杀活动` | `(?:查看\|查询\|当前).{0,3}秒杀` | `get_seckill_activities_api` | ✅ L1 |
-| `搜索手机` / `查找商品` | `(?:搜索\|查找\|找)\s*(.+)` | `search_items_api` | ✅ L1 |
-| `查看购物车` / `我的购物车` | `(?:查看\|查询).{0,5}购物车` | `get_cart_list_api` | ✅ L1 |
-| `查看订单` / `待付款订单` | `(?:查询\|查看).{0,5}(?:待付款\|...)?订单` | `get_order_list_api` | ✅ L1 |
-| `查看订单100` | `(?:查看\|看)\s*(?:订单\s*)?(\d+)` | `get_order_detail_api` | ✅ L1 |
-| `查看地址` / `我的地址` | `(?:查询\|查看).{0,5}地址` | `get_address_list_api` | ✅ L1 |
-| `取消订单100` | `取消\s*(?:订单\s*)?(\d+)` | `cancel_order_api` | ❌ L2（需确认） |
-| `确认收货100` | `确认\s*(?:收货\s*)?(\d+)` | `confirm_receive_api` | ❌ L2（需确认） |
-| `清空购物车` | `清空\s*购物车` | `clear_cart_api` | ❌ L2（需确认） |
-| `修改地址1` | `修改\s*(\d+)` | `update_address_api` | ❌ L2（多轮） |
-| `新增地址` | `新增地址\|添加地址` | `add_address_api` | ❌ L2（多轮） |
-
-### 3.4 L2 interrupt 状态机设计
-
-#### 地址修改状态机（interrupt 实现）
+**二次确认类**（秒杀下单、取消订单、删购物车项、清空购物车、确认收货）：
 
 ```
-用户: "修改地址1"
-  │
-  ├─ LLM 调用 update_address_api(address_id=1)
-  │
-  ├─ 工具内 interrupt #1（field_selection）:
-  │   → Agent 暂停执行，返回 interrupt 给前端
-  │   → 前端 InterruptActions 展示: "请问要修改哪个字段？"
-  │
-  ├─ 用户回复: "姓名"
-  │   → stream.submit(null, {command: {resume: "姓名"}})
-  │   → Agent 从断点恢复，field = "姓名"
-  │
-  ├─ 工具内 interrupt #2（value_input）:
-  │   → Agent 再次暂停
-  │   → 前端展示: "请输入新的姓名"
-  │
-  ├─ 用户回复: "张三"
-  │   → stream.submit(null, {command: {resume: "张三"}})
-  │   → Agent 恢复，new_value = "张三"
-  │
-  └─ 执行 PUT /addresses/1 → ✅ 地址1的姓名已修改为张三
+工具入口 → 展示摘要 → interrupt(confirmation)
+  → 前端 InterruptActions（批准 / 拒绝）
+  → resume("确认") → 调 Gateway 写接口
+  → 否则取消
 ```
 
-#### 秒杀下单流程（interrupt 实现）
+**多轮收集类**（新增 / 修改地址）：
 
 ```
-用户: "秒杀商品100"
-  │
-  ├─ LLM 调用 do_seckill_api(relation_id=100)
-  │
-  ├─ 工具内查询商品详情 → 获取 iPhone 15, ¥5999, 限购1件, 剩余45件
-  │
-  ├─ 工具内 interrupt（confirmation）:
-  │   → Agent 暂停，返回商品信息和确认提示
-  │   → 前端 InterruptActions 展示确认卡片
-  │
-  ├─ 用户: "确认"
-  │   → stream.submit(null, {command: {resume: "确认"}})
-  │   → Agent 恢复，执行 POST /seckill/order/100
-  │
-  └─ ✅ 秒杀成功！订单号: 123456，请尽快支付
+interrupt(field_selection) → resume(字段)
+  → interrupt(value_input) → resume(新值)
+  → PUT/POST Gateway
 ```
 
-#### 二次确认机制
+Checkpoint 在每次 interrupt 时保存挂起写入；恢复时**不重新跑**已完成节点。前端契约见 §10。
 
-| 操作 | interrupt 消息 | 恢复条件 |
-|------|---------------|---------|
-| 取消订单 | `确定要取消订单「{orderId}」？总金额 ¥{totalFee}。回复"确认取消"执行` | 用户回复"确认取消" |
-| 确认收货 | `确定已收到订单「{orderId}」的商品？回复"确认收货"执行` | 用户回复"确认收货" |
-| 删除购物车 | `确定要删除购物车中的「{itemName}」？回复"确认删除"执行` | 用户回复"确认删除" |
-| 清空购物车 | `确定要清空购物车中的所有商品？回复"确认删除"执行` | 用户回复"确认删除" |
-| 秒杀下单 | `确认秒杀商品「{itemName}」秒杀价 ¥{price}？回复"确认"下单` | 用户回复"确认" |
+### 3.4.1 interrupt 与 Checkpoint 一致性
 
-> **与 v1.0 的区别**：v1.0 使用 Redis Key `agent:confirm:*` 存储待确认操作 + 文本匹配恢复；v2.0 使用 LangGraph `interrupt()` 原生暂停图执行，Checkpoint 自动持久化中断状态，前端通过 `stream.submit(null, {command: {resume: value}})` 恢复。
+interrupt 的正确性依赖 Checkpointer：工具执行到 `interrupt()` 时，图必须把「已完成节点 + 挂起写入」落成快照，否则用户 resume 后会重复扣库存或重复下单。开发态落盘到 `.langgraph_api/` 后，即使 uvicorn worker 短暂重启，未完成的确认流仍可恢复——前提是前端持有同一 `thread_id` 且 Auth 的 `owner` 匹配。
 
-### 3.5 Skills 设计
+**幂等建议（设计层）**：
 
-```markdown
-# src/workspace/customer/skills/shopping-guide/SKILL.md
+| 场景 | 建议 |
+|------|------|
+| 用户重复点击「确认」 | 后端秒杀/取消接口自身幂等；Agent 侧 resume 只投递一次 |
+| 网络重试导致二次 stream | 前端禁用按钮直至 SSE 结束；thread 级 busy 标志 |
+| 超时未确认 | 产品可定义 TTL；过期后 goto end 并提示重新发起 |
 
-# 购物引导技能
+### 3.4.2 危险操作清单与文案原则
 
-## 适用场景
-用户想要浏览、搜索、查看商品详情时激活此技能。
+| 操作 | 确认文案必须包含 | 默认预期回复 |
+|------|------------------|--------------|
+| 秒杀下单 | 品名、秒杀价、限购、剩余库存 | 「确认」 |
+| 取消订单 | 订单号、金额摘要 | 「确认取消」类 |
+| 清空购物车 | 当前件数提示 | 「确认」 |
+| 确认收货 | 订单号 | 「确认」 |
 
-## 工作流程
-1. 确认用户的搜索意图（关键词/分类/价格区间）
-2. 调用 search_items_api 或 get_item_page_api 获取商品列表
-3. 如用户追问某商品，调用 get_item_detail_api 获取详情
-4. 格式化输出：商品名、价格、库存、图片链接
+文案由工具内拼装，**不经 LLM 改写确认关键字段**，避免价格被模型幻觉篡改。LLM 仅在进入工具前负责选对工具与参数。
 
-## 输出格式
-📦 搜索结果（共 N 件）
-─────────────────────
-1. iPhone 15 | ¥5999 | 库存 45 件
-2. MacBook Air | ¥8999 | 库存 12 件
-...
-```
+### 3.4.3 空数据与错误返回约定
 
-Skills 文件清单：
+所有只读工具在代码层区分：
 
-| Skill | 路径 | 说明 |
-|-------|------|------|
-| `shopping-guide` | `/skills/shopping-guide/SKILL.md` | 商品浏览引导 |
-| `seckill-order` | `/skills/seckill-order/SKILL.md` | 秒杀下单流程 |
-| `cart-management` | `/skills/cart-management/SKILL.md` | 购物车管理 |
-| `order-management` | `/skills/order-management/SKILL.md` | 订单查询与操作 |
-| `address-management` | `/skills/address-management/SKILL.md` | 地址管理（含状态机） |
+1. **业务空**：合法但无数据 → 固定中文提示（如「暂无进行中的秒杀」），不调用 LLM 二次润色。  
+2. **认证失败**：缺 token / 401 → 「请先登录」类提示。  
+3. **网关/超时**：返回可理解错误，Regex 短路失败时应降级到 L3 而非空白。  
+4. **部分字段缺失**：Formatter 显示「—」，禁止抛 KeyError 中断 SSE。
+
+### 3.5 Skills（7）
+
+| Skill 目录 | 用途 | 与路由关系 |
+|------------|------|------------|
+| `shopping-guide` | 浏览 / 搜索引导 | L3 为主；搜索亦可 L1 |
+| `seckill-order` | 秒杀选品与下单 | 查活动可 L1；下单 L3+L2 |
+| `cart-management` | 购物车话术与确认 | 查看 L1；写操作 L2 |
+| `order-management` | 订单查询 / 取消 / 收货 | 列表 L1；写 L2 |
+| `address-management` | 地址增改多轮 | 列表 L1；增改 L2 多轮 |
+| `personalized-recommendation` | 推荐触发与理由 | home 可 L1；其余 L3 |
+| `rag-query` | 政策 / FAQ | 仅 `enable_rag` 时有工具 |
+
+**Skills 设计原则**：
+
+1. **流程型而非百科**：写清「先调哪个工具、何时 interrupt、如何解释结果」。  
+2. **与 Prompt 分工**：SYSTEM_PROMPT 管人格与全局红线；SKILL 管场景步骤。  
+3. **可演进**：新业务域优先加 Skill，而不是把 Prompt 无限拉长。  
+
+SKILL.md 全文 → 实现说明 / `src/workspace/customer/skills/`。
+
+### 3.6 CustomerAgent 非功能需求
+
+| 类别 | 要求 |
+|------|------|
+| 延迟 | L1 P99 应远低于 LLM 路径；不在 L1 路径做 RAG 加载 |
+| 安全 | 写操作必须登录；危险写必须 interrupt |
+| 可观测 | 关键工具调用应打结构化日志（tool名、耗时、user_id 哈希） |
+| 兼容 | context-only；SDK 1.x |
+
+### 3.7 与推荐 / 画像 / RAG 的交界
+
+| 能力 | 交界点 |
+|------|--------|
+| 推荐 | 工具 + Skill + L1 规则，见 Part B |
+| 画像 | `analyze_user_preferences` 读 Layer2；记忆工具写 Layer3，见 Part C1 |
+| RAG | 同链 RAGMiddleware；政策类问题优先于臆造，见 §12 |
 
 ---
 
 ## 4. AdminAgent 设计（管理助手）
 
-### 4.1 Agent 定义
+### 4.1 职责与约束
 
-```python
-# src/agents/admin/agent.py
-from dataclasses import dataclass
-from pathlib import Path
+- **纯只读**：业务写工具由 `PermissionMiddleware` 从工具列表剔除；即使 LLM 想调也无法选中。
+- Context：`agent_type="admin"` + 管理端 JWT；introspect 走 `GET /admin/info`。
+- 中间件：Auth → Permission → Regex → RAG → Skills（与 Customer 同构，Permission 行为不同）。
 
-from deepagents import create_deep_agent as create_agent
-from deepagents.backends import FilesystemBackend
-from deepagents.middleware import SkillsMiddleware
+### 4.2 工具规格（11）
 
-from src.core.llms import qwen_model
-from src.middleware.auth import AuthMiddleware
-from src.middleware.permission import PermissionMiddleware
-from src.middleware.regex_shortcut import RegexShortcutMiddleware
+#### 商品（2）/ 订单（2）/ 用户（2）
 
-from src.agents.admin.prompts import SYSTEM_PROMPT
-from src.agents.admin.tools import get_all_tools, REGEX_RULES
+| 工具 | API（经 admin-service） |
+|------|-------------------------|
+| `admin_get_product_page_api` | `GET /admin/product/list` |
+| `admin_get_product_detail_api` | `GET /admin/product/{id}` |
+| `admin_get_order_page_api` | `GET /admin/order/list` |
+| `admin_get_order_detail_api` | `GET /admin/order/{id}` |
+| `admin_get_user_page_api` | `GET /admin/member/list` |
+| `admin_get_user_detail_api` | `GET /admin/member/{id}` |
 
+#### 秒杀管理（4）
 
-@dataclass
-class Context:
-    """AdminAgent 运行时上下文"""
-    agent_type: str = "admin"
-    user_id: str = ""                # 管理员 ID
-    user_token: str = ""             # 管理后台 JWT Token
-    enable_rag: bool = False         # RAG 开关
+| 工具 | API |
+|------|-----|
+| `admin_get_seckill_promotion_page_api` | `GET /admin/seckill/promotion/list` |
+| `admin_get_seckill_relation_page_api` | `GET /admin/seckill/relation/list` |
+| `admin_get_seckill_order_page_api` | `GET /admin/seckill/order/list` |
+| `admin_get_seckill_stock_api` | `GET /admin/seckill/stock/{relationId}` |
 
+#### 编排（1）
 
-# ============================================================================
-# Skills 配置
-# ============================================================================
-skills_root = str((Path(__file__).parent.parent.parent / "workspace" / "admin").resolve())
-skills_backend = FilesystemBackend(root_dir=skills_root, virtual_mode=True)
+| 工具 | 行为 |
+|------|------|
+| `generate_daily_report` | `asyncio.gather` 并发拉订单 / 秒杀 / 关联库存 / 商品 / 用户摘要 → 格式化为运营日报 |
 
-skills_middleware = SkillsMiddleware(
-    backend=skills_backend,
-    sources=[
-        "/skills/daily-report/",
-        "/skills/data-query/",
-        "/skills/rag-query/",
-    ]
-)
+管理端响应常为 `R<T>` 包装；Gateway 客户端需自动解包（技术决策见实现说明）。
 
-regex_middleware = RegexShortcutMiddleware(
-    tool_registry=get_all_tools(),
-    rules=REGEX_RULES,
-)
+### 4.3 运营日报编排设计
 
-# ============================================================================
-# Agent 创建
-# ============================================================================
-agent = create_agent(
-    model=qwen_model,
-    tools=get_all_tools(),
-    backend=skills_backend,
-    middleware=[
-        AuthMiddleware(),
-        PermissionMiddleware(),        # AdminAgent 纯只读，拦截所有写操作
-        regex_middleware,              # L1 正则快捷路由（运营日报等）
-        skills_middleware,
-    ],
-    system_prompt=SYSTEM_PROMPT,
-    context_schema=Context,
-)
-```
+**触发**：L1 匹配「运营日报 / 生成日报 / 帮我做一份日报」等 → 直接调用 `generate_daily_report`（跳过 LLM）。
 
-### 4.2 工具清单（10 个，纯只读）
+**编排原则**：
 
-基于 hmall admin-service + trade-service 管理端 API：
+1. **并发**：五个只读查询并行，降低尾延迟。  
+2. **容错**：单路失败不影响整报；缺项显示「暂无数据」。  
+3. **固定模板**：标题日期 + 订单 / 秒杀 / 商品 / 用户分区，便于运营扫读。  
+4. **只读**：日报工具本身不写库、不改活动。
 
-#### 商品管理（2 个）
-
-| 工具名 | API（经 admin-service 代理） | 说明 |
-|--------|-----|------|
-| `admin_get_product_page_api` | `GET /admin/product/list` | 分页查询商品 |
-| `admin_get_product_detail_api` | `GET /admin/product/{id}` | 商品详情 |
-
-#### 订单管理（2 个）
-
-| 工具名 | API | 说明 |
-|--------|-----|------|
-| `admin_get_order_page_api` | `GET /admin/order/list` | 分页查询订单（状态/时间筛选） |
-| `admin_get_order_detail_api` | `GET /admin/order/{id}` | 订单详情 |
-
-#### 秒杀管理（4 个）
-
-| 工具名 | API | 说明 |
-|--------|-----|------|
-| `admin_get_seckill_promotion_page_api` | `GET /admin/seckill/promotion/list` | 秒杀活动列表 |
-| `admin_get_seckill_relation_page_api` | `GET /admin/seckill/relation/list` | 秒杀商品关联列表（含实时库存） |
-| `admin_get_seckill_order_page_api` | `GET /admin/seckill/order/list` | 秒杀订单列表 |
-| `admin_get_seckill_stock_api` | `GET /admin/seckill/stock/{relationId}` | 每日库存快照 |
-
-#### 用户管理（2 个）
-
-| 工具名 | API | 说明 |
-|--------|-----|------|
-| `admin_get_user_page_api` | `GET /admin/member/list` | C 端用户列表 |
-| `admin_get_user_detail_api` | `GET /admin/member/{id}` | 用户详情 |
-
-> **注**：AdminAgent 纯只读，所有写操作（创建/修改/删除/发货/预热）均不可用，由 PermissionMiddleware 阻止。
-
-### 4.3 运营日报（多工具编排）
-
-自然语言触发（`运营日报` / `帮我做一份日报` / `生成周报`），L1 正则匹配后直接编排 5 个工具调用：
-
-```python
-# src/agents/admin/tools.py（运营日报工具）
-@tool
-async def generate_daily_report() -> str:
-    """生成运营日报。自动编排 5 个查询工具，格式化输出运营摘要。"""
-    # 并发调用 5 个查询工具
-    orders, seckill, stock, products, users = await asyncio.gather(
-        admin_get_order_page_api.invoke({"page": 1, "size": 1}),
-        admin_get_seckill_promotion_page_api.invoke({"page": 1, "size": 1}),
-        admin_get_seckill_relation_page_api.invoke({"page": 1, "size": 1}),
-        admin_get_product_page_api.invoke({"page": 1, "size": 1}),
-        admin_get_user_page_api.invoke({"page": 1, "size": 1}),
-    )
-    
-    return format_daily_report(orders, seckill, stock, products, users)
-```
-
-**日报输出格式**：
+示意输出结构：
 
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📅 2026-07-15 枫叶商城运营日报
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-【订单概览】
-- 今日订单: 156 笔
-- 订单金额: ¥89,200
-- 待发货: 23 笔
-
-【秒杀活动】
-- 进行中活动: 3 场
-- 库存预警商品: 12 件
-- 秒杀订单: 89 笔
-
-【商品概况】
-- 在售商品: 248 件
-- 已下架: 15 件
-
-【用户概况】
-- 总用户数: 1,230
-- 今日新增: 12
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 {date} 枫叶商城运营日报
+【订单概览】笔数 / 金额 / 待发货 …
+【秒杀活动】进行中场次 / 库存预警 / 秒杀订单 …
+【商品概况】在售 / 下架 …
+【用户概况】总量 / 今日新增 …
 ```
 
-**AdminAgent 正则路由规则**：
+自定义 HTTP `POST /api/v1/batch-report` 可内部触发同一编排，供定时或外部系统调用（§8）。
 
-| 用户输入 | 匹配规则 | 路由工具 |
-|---------|---------|---------|
-| `运营日报` / `生成日报` | `(?:运营\|生成\|帮我做).{0,3}日报` | `generate_daily_report` |
-| `查看商品列表` | `(?:查看\|查询\|商品).{0,3}列表` | `admin_get_product_page_api` |
-| `查看订单` | `(?:查看\|查询).{0,5}订单` | `admin_get_order_page_api` |
-| `秒杀活动列表` | `(?:秒杀\|查看).{0,3}活动` | `admin_get_seckill_promotion_page_api` |
+### 4.4 Skills（3）
 
-### 4.4 RAG 知识增强（规划中）
+| Skill | 用途 |
+|-------|------|
+| `daily-report` | 日报话术与字段说明 |
+| `data-query` | 只读查询规范 |
+| `rag-query` | 运营策略 / 库存指南等知识库问答 |
 
-AdminAgent 可集成 RAG 知识库，通过 MCP 协议桥接 LightRAG 服务：
+### 4.5 与 RAG 的关系
 
-```
-AdminAgent                        RAG MCP Server              LightRAG
-──────────────────────────────────────────────────────────────────────
-  admin_agent                         rag_server.py           lightrag-server
-       │                              (FastMCP, :8008)        (:9621)
-       ├─ rag_query() ──── MCP ────►       │
-       ├─ rag_query_data()                  ├─ /query
-       └─ rag_graph_search()                ├─ /query/data
-              │                             └─ /graph/*
-              └─ httpx.AsyncClient ────────►│
-```
+Admin 与 Customer 共用 MCP RAG 工具集；开启 `enable_rag` 后可回答「秒杀库存怎么定」等策略问题。知识文档由 LightRAG WebUI 维护，Agent 只检索。详见 §12。
 
-**知识库文档**：
+### 4.6 AdminAgent 威胁模型（只读保障）
 
-```
-knowledge_base/
-└── admin_knowledge/
-    ├── seckill_strategy.md        # 秒杀运营策略
-    ├── inventory_management.md    # 库存管理指南
-    ├── order_analysis.md          # 订单分析指南
-    ├── user_segmentation.md       # 用户分群方法
-    └── data_interpretation.md     # 数据指标解读
-```
+| 威胁 | 缓解 |
+|------|------|
+| LLM 被诱导「帮我改库存」 | Permission 剔除写工具；无工具则无法执行 |
+| 管理 JWT 泄露到 C 端页面 | 双入口、双 Token；owner 含 agent_type 前缀 |
+| 日报接口被未登录调用 | Auth + introspect；自定义路由亦应校验 |
+| 通过 RAG 套取未授权内部文档 | LightRAG 账号权限与文档分级由运营控制；Agent 侧仅开关 |
 
-用户提问 `秒杀库存怎么设置合理？` → RAGMiddleware 注入 RAG 工具 + 检索知识库 → LLM 专业回答。
+### 4.7 运营日报字段语义（契约）
+
+| 分区 | 最小字段 | 数据来源工具 |
+|------|----------|--------------|
+| 订单 | 笔数、金额、待发货 | `admin_get_order_page_api` |
+| 秒杀 | 进行中场次、预警件数、秒杀订单 | promotion/relation/order |
+| 商品 | 在售、下架 | product page |
+| 用户 | 总量、今日新增（若 API 提供） | member page |
+
+若某管理 API 暂无「今日」维度，日报应标注「当前快照」而非伪造时间序列。后续可扩展「周报」同一编排换时间窗参数。
+
+### 4.8 Admin L1 规则设计要点
+
+- 「运营日报」类短语**只**路由到编排工具，避免误走单表查询。  
+- 「查看订单」等与 C 端话术相似，但工具名完全不同，依赖 `agent_type=admin` 的独立规则表。  
+- 管理端不开放「取消订单」等写意图的正则，即使话术相似也不注册。
 
 ---
 
 ## 5. 对话记忆设计
 
-### 5.1 LangGraph Thread + Checkpointer（开发态 inmem 落盘）
-
-v2.0+ 使用 LangGraph 的 Thread 机制管理会话历史。每个对话线程对应一个 `thread_id`，图状态（messages、interrupt 等）由 Checkpointer 持久化。
+### 5.1 Thread + Checkpointer（开发态 inmem 落盘）
 
 ```
 会话历史：Checkpointer（按 thread_id）
-长期语义记忆：Store（按 namespace + key，跨 thread）
-用户隔离：Auth 写入 metadata.owner = {agent_type}:{user_id}，search/read/run 按 owner 过滤
+长期语义记忆：Store（namespace + key，跨 thread）
+用户隔离：Auth 写入 metadata.owner = {agent_type}:{user_id}
 ```
 
-**开发态持久化（现行）**：
+**现行持久化（权威）**：
 
-- `LANGGRAPH_RUNTIME_EDITION=inmem`：热路径内存，冷路径 pickle 至 `.langgraph_api/`
-- 文件：`.langgraph_checkpoint.*.pckl`（storage/writes/blobs）、`.langgraph_ops.pckl`、`store.pckl`
-- 进程重启后可恢复；生产可换 Postgres 等，owner 过滤逻辑不变
+| 项 | 说明 |
+|----|------|
+| Runtime | `LANGGRAPH_RUNTIME_EDITION=inmem` |
+| 热路径 | 内存 |
+| 冷路径 | pickle 至工作目录 **`.langgraph_api/`**（含 checkpoint / ops / store 相关 `.pckl`） |
+| 重启 | 进程重启后可从落盘恢复 |
+| 生产 | 可替换 Postgres 等托管后端；**owner 过滤逻辑不变** |
 
-> 早期方案曾规划 Redis Checkpoint（db=1）。若文档其他处仍出现该表述，以本节与实现代码为准。
-
-**Checkpoint 机制说明**：
+> **废止表述**：早期「Redis Checkpoint（db=1）」。若旧材料仍写 Redis 会话库，以本节与 `start_server.py` 为准。  
+> Redis **db=0** 仅用于**用户画像**（Part C），与 Checkpoint 无关。
 
 | 概念 | 说明 |
 |------|------|
 | Thread | 唯一 `thread_id`；创建时打 `metadata.owner` |
-| Checkpoint | 节点执行后保存图状态快照（含 messages、pending writes / interrupt） |
-| 恢复 | 同 thread 续聊 / `command.resume`；重启后从落盘 load |
+| Checkpoint | 节点后快照（messages、pending writes / interrupt） |
+| 恢复 | 同 thread 续聊；`command.resume` 继续 interrupt |
 | 清理 | `DELETE /threads/{id}` |
-| 多租户 | 非「一个用户一个 Redis db」，而是 Auth 强制 owner 过滤 |
+| 多租户 | **不是**「每用户一个 Redis db」，而是 Auth 强制 owner 过滤 |
 
-**交互流程**：
+### 5.2 交互流程
 
 1. 前端带 `Authorization` + `X-Hmall-Agent-Type` → Auth introspect → `owner`  
-2. `threads.create({ metadata: { owner, ... } })`（服务端也会强制写入 owner）  
-3. `runs.stream(thread_id, ...)` → 加载该 thread Checkpoint → 执行  
-4. interrupt → Checkpoint 保存挂起状态 → `resume` 继续  
-5. `threads.search({ metadata: { owner } })` 仅返回本人会话  
+2. `threads.create`（服务端强制写入 owner）  
+3. `runs.stream` → 加载 Checkpoint → 中间件 → 工具 / interrupt  
+4. interrupt → 落盘挂起 → `resume`  
+5. `threads.search({ metadata: { owner } })` 仅本人会话  
 
-### 5.2（历史对比）v1.0 ChatMemory vs 现行方案
+### 5.3 与 v1 ChatMemory 对比
 
-| 维度 | v1.0 ChatMemory | 现行 LangGraph Checkpointer |
-|------|-----------------|---------------------------|
-| 存储 | Redis List（手动） | inmem + `.langgraph_api`（或生产 Postgres） |
+| 维度 | v1 Redis List | 现行 |
+|------|---------------|------|
+| 存储 | 手动 List + TTL | inmem + `.langgraph_api` |
 | interrupt | 自建确认键 | 原生 pending writes |
-| 用户隔离 | Key 含 userId | `metadata.owner` + Auth |
-| 跨会话意图 | 无 / 弱 | Store Layer 3 + Redis 画像 |
+| 隔离 | Key 含 userId | `metadata.owner` + Auth |
+| 跨会话意图 | 弱 | Store Layer 3 + Redis 画像 |
 
-### 5.3 Thread 生命周期
+### 5.4 Thread 生命周期（摘要）
 
-```
-1. 前端带 Authorization → Auth introspect → owner
-2. client.threads.create({ metadata: { owner, user_id, agent_type } }) → thread_id
-3. 用户发送消息 → runs.stream(thread_id, …, context + headers)
-   → 加载该 thread 的 Checkpoint
-   → 执行 Agent 图（中间件 → LLM/正则 → 工具 → interrupt/end）
-   → 每步自动保存 Checkpoint（开发态落盘 .langgraph_api）
-4. interrupt 暂停 → Checkpoint 保存挂起写入
-   → resume → 从 Checkpoint 继续
-5. threads.search({ metadata: { owner } }) → 仅本人会话
-6. 删除对话 → threads.delete(thread_id)
-```
+创建 → 多轮 stream（自动 checkpoint）→ 可选 interrupt/resume → search 列表 → delete。  
+详细 API 表见 §8；前端绑定见 §10。
+
+### 5.5 多租户隔离详细规则
+
+| 操作 | Auth 行为 |
+|------|-----------|
+| create thread | 强制 `metadata.owner = {agent_type}:{user_id}` |
+| search threads | 过滤器仅本人 owner |
+| read / stream | 校验资源 owner；不匹配则拒绝 |
+| delete | 同上 |
+| store 读写 | 按 user 维度 namespace；禁止跨用户 key |
+
+**为何 owner 含 agent_type**：C 端用户 id=7 与管理员 id=7 不得共享会话空间。
+
+### 5.6 Checkpoint 运维注意（设计）
+
+| 项 | 说明 |
+|----|------|
+| 目录 | `.langgraph_api/` 含会话隐私，备份与权限按生产密钥标准管理 |
+| 清理 | 定期删除过期 thread；开发态可整目录重建（丢会话） |
+| 扩展 | 生产 Postgres 时迁移策略另案；API 契约不变 |
+| 与画像 | 删除 thread **不**自动清除 `profile:*`；隐私清除需独立 invalidate |
+
+### 5.7 会话与画像 / Store 的分工再强调
+
+| 存储 | 存什么 | 不存什么 |
+|------|--------|----------|
+| Checkpoint | 对话消息、interrupt 挂起 | 类目偏好得分 |
+| Redis 画像 | 聚合偏好与事件 | 完整对话原文 |
+| Store | 短语义记忆 | 订单明细 |
 
 ---
 
-## 6. 安全设计
+## 6. 安全设计（权威）
 
-### 6.1 双 JWT + Gateway introspect（userId 权威对齐）
+### 6.1 双 JWT + Gateway introspect
 
-hmall-agent **不是**挂在 Gateway 后的微服务，收不到 `user-info` 头。因此身份对齐采用：
+hmall-agent **不挂在 Gateway 后方**，收不到 `user-info` 头，故采用「探查对齐」：
 
 ```
 前端 Authorization: JWT
         │
         ├─ LangGraph Auth.authenticate
         │     └─ introspect：
-        │           C 端 GET /users/me（Gateway 验签 → UserContext）
-        │           管理端 GET /admin/info（admin-service 自验）
+        │           C 端  GET /users/me      （Gateway 验签 → UserContext）
+        │           管理端 GET /admin/info   （admin-service 自验；Gateway 对 /admin/** 放行）
         │     └─ identity.owner = {agent_type}:{user_id}
         │
-        └─ context.user_token → 工具调 Gateway（业务写路径再次验签）
-```
-
-**AuthMiddleware（异步路径）**：优先 `JWT_VERIFY_LOCAL` 本地 jks；否则 `await introspect` 写入 `context.user_id`；仅当 `INTROSPECT_FALLBACK_JWT=true` 才回退 payload 解码。
-
-**JWT claim 约定**（与 Java 签发一致）：
-
-| 端 | claim | 示例 |
-|----|-------|------|
-| C 端 | `user` | `42` |
-| 管理端 | `sub` + `type=ADMIN` | `7` |
-
-**多租户 threads**：
-
-```python
-# src/security/auth.py（示意）
-@auth.on.threads.create
-async def on_thread_create(ctx, value):
-    filters = {"owner": ctx.user.identity}
-    value.setdefault("metadata", {}).update(filters)
-    return filters
-
-@auth.on.threads.search
-async def on_thread_search(ctx, value):
-    return {"owner": ctx.user.identity}
+        └─ context.user_token → 工具调 Gateway（业务路径再次验签）
 ```
 
 | Agent | Token 来源 | introspect | 验证方 |
 |-------|-----------|------------|--------|
-| CustomerAgent | `POST /users/login` → hmall.jks | `GET /users/me` | Gateway `AuthGlobalFilter` |
-| AdminAgent | `POST /admin/login` → admin.jks | `GET /admin/info` | admin-service（Gateway 对 `/admin/**` 放行） |
+| Customer | `POST /users/login`（hmall.jks） | `GET /users/me` | Gateway |
+| Admin | `POST /admin/login`（admin.jks） | `GET /admin/info` | admin-service |
 
-**Token 传递链**：
+**JWT claim 约定**（与 Java 签发一致）：
+
+| 端 | claim | 用途 |
+|----|-------|------|
+| C 端 | `user` | 选 introspect 路径 / 可选 fallback |
+| 管理端 | `sub` + `type=ADMIN` | 同上 |
+
+**AuthMiddleware**：默认 introspect 写入 `context.user_id`；`JWT_VERIFY_LOCAL=true` 时可优先本地 jks；仅 `INTROSPECT_FALLBACK_JWT=true` 时才回退 payload 解码（运维应急，削弱与 Gateway 强一致）。
+
+**多租户 hooks（示意）**：`threads.create` / `search` / `read` 等均强制 `owner` 过滤器，防止枚举 `thread_id` 越权读他人会话。
+
+### 6.2 PermissionMiddleware
+
+| Agent | 读 | 写 |
+|-------|----|----|
+| Customer | 全部 C 端工具 | 允许（需 Token + 危险操作 interrupt） |
+| Admin | 管理只读 + 日报 | **全部写工具从 request.tools 剔除** |
+
+写工具集合包括购物车 / 订单取消收货 / 地址写 / 秒杀下单等（与实现 `WRITE_TOOLS` 对齐）。推荐与记忆工具需登录，但不是「管理写」。
+
+### 6.3 参数校验（设计要求）
+
+在 `@tool` 内做类型与业务校验：数量 ≥ 1、手机号格式、ID 为正整数等；失败返回固定错误文案，不抛未处理异常污染 SSE。
+
+### 6.4 Token 传递链（端到端）
 
 ```
-前端 → Client({ defaultHeaders: { Authorization, X-Hmall-Agent-Type } })
-     → runs.stream(..., { context: { user_token, agent_type, user_id } })
-     → Auth.authenticate → introspect → owner
-     → AuthMiddleware → context.user_id
-     → 工具 gateway_client 携带同一 JWT → Gateway / admin-service
+前端 Client({ defaultHeaders: { Authorization, X-Hmall-Agent-Type } })
+  → runs.stream(..., { context: { user_token, agent_type, enable_rag, ... } })
+  → Auth.authenticate → introspect → owner
+  → AuthMiddleware → context.user_id
+  → 工具 gateway_client 携带同一 JWT → Gateway / admin-service
 ```
 
-### 6.2 工具权限拦截中间件
+> LangGraph 0.6+：**禁止**同时传 `configurable` 与 `context` 做认证；统一 **context-only**。
 
-```python
-# src/middleware/permission.py
-from langchain.agents.middleware import AgentMiddleware, ModelRequest
+### 6.5 introspect 缓存与失败策略
 
+| 配置语义 | 建议默认 | 含义 |
+|----------|----------|------|
+| `INTROSPECT_CACHE_TTL` | 60s | 同 Token 短时复用探查结果 |
+| `INTROSPECT_FALLBACK_JWT` | false | 失败不回退解码，保持与 Gateway 一致 |
+| `JWT_VERIFY_LOCAL` | false | 默认不优先本地 jks |
 
-# 写操作工具集（危险操作）
-WRITE_TOOLS = {
-    "add_to_cart_api", "update_cart_quantity_api", "delete_cart_item_api",
-    "clear_cart_api", "cancel_order_api", "confirm_receive_api",
-    "add_address_api", "update_address_api", "do_seckill_api",
-}
+失败时：拒绝建立/继续受保护会话，前端提示重新登录。缓存击穿与后端 5xx 应可观测。
 
+### 6.6 信任边界图
 
-class PermissionMiddleware(AgentMiddleware):
-    """工具权限拦截中间件。
-    
-    AdminAgent 纯只读：过滤掉所有写操作工具，LLM 无法选择它们。
-    CustomerAgent：允许所有工具（写操作需 Token + 二次确认）。
-    """
-    
-    def wrap_model_call(self, request, handler):
-        context = request.runtime.context if request.runtime else None
-        agent_type = getattr(context, "agent_type", "customer") if context else "customer"
-        
-        if agent_type == "admin":
-            # 过滤掉写操作工具
-            filtered_tools = [
-                tool for tool in request.tools 
-                if tool.name not in WRITE_TOOLS
-            ]
-            return handler(request.override(tools=filtered_tools))
-        
-        return handler(request)
-    
-    async def awrap_model_call(self, request, handler):
-        return self.wrap_model_call(request, handler)
+```
+[浏览器] --JWT--> [LangGraph Auth] --introspect--> [Gateway/Admin]
+                                      |
+                                      v
+                                 owner / user_id
+                                      |
+[工具层] --同一 JWT--> [Gateway] --验签--> [微服务]
 ```
 
-| Agent | 读操作 | 写操作 |
-|-------|--------|--------|
-| CustomerAgent | ✅ 全部 C 端读工具 | ✅ 购物车/订单/地址写操作（需 Token + interrupt 确认） |
-| AdminAgent | ✅ 全部管理端读工具 | ❌ 所有写操作被 PermissionMiddleware 过滤 |
+Agent 进程**不是**身份权威；它是「携带用户票证的编排者」。伪造 payload 的假 JWT 在 introspect 被拒。
 
-### 6.3 参数校验
+### 6.7 安全设计检查清单
 
-代码层正则 + 类型检查（在 `@tool` 函数内校验）：
-- 数量 `quantity >= 1`
-- 手机号 11 位数字
-- 地址序号为正整数
-- 商品 ID 为正整数
+- [ ] C / Admin Token 永不混用  
+- [ ] threads 均带 owner 过滤  
+- [ ] Admin 工具列表无写操作  
+- [ ] 危险写均 interrupt  
+- [ ] RAG / 推荐失败可降级  
+- [ ] 日志不打印完整 JWT  
 
 ---
 
 ## 7. 中间件体系
 
-### 7.1 中间件链
+### 7.1 中间件链（权威顺序）
 
-| 顺序 | 中间件 | 位置 | 功能 |
-|------|--------|------|------|
-| 1 | `AuthMiddleware` | `src/middleware/auth.py` | Gateway introspect 注入权威 user_id |
-| 2 | `PermissionMiddleware` | `src/middleware/permission.py` | 工具权限拦截（AdminAgent 纯只读） |
-| 3 | `RegexShortcutMiddleware` | `src/middleware/regex_shortcut.py` | L1 正则快捷路由（<5ms 拦截高频指令） |
-| 4 | `SkillsMiddleware` | `deepagents.middleware` | 加载 SKILL.md 规范文件 |
-| 5 | `RAGMiddleware`（预留） | `src/middleware/rag_context.py` | 根据 `enable_rag` 动态注入 RAG 工具/提示词 |
+| 序 | 中间件 | 功能 | 可否短路 LLM |
+|----|--------|------|:------------:|
+| 1 | AuthMiddleware | introspect / 可选 jks → `user_id` | 否 |
+| 2 | PermissionMiddleware | Admin 剔写工具 | 否 |
+| 3 | RegexShortcutMiddleware | L1 工具直调 | **是** |
+| 4 | RAGMiddleware | `enable_rag` 时注入 MCP 工具 | 否（失败仅降级） |
+| 5 | SkillsMiddleware | 追加 SKILL.md | 否 |
 
-### 7.2 中间件执行流
+> 旧文档曾写「RAG 预留」且顺序把 Skills 写在 RAG 前——以**现行 agent.py** 为准：Customer/Admin 均为 Auth → Permission → Regex → **RAG** → Skills。
 
-```
-用户消息（stream.submit）
-  │
-  ▼
-LangGraph 加载 Thread Checkpoint
-  │
-  ▼
-Agent 图入口 → model_call 被中间件链包裹
-  │
-  ├─ 1. AuthMiddleware.awrap_model_call
-  │   ├── 读取 context.user_token
-  │   ├── 验证 JWT → 注入 user_id
-  │   └── 传递给下一层
-  │
-  ├─ 2. PermissionMiddleware.awrap_model_call
-  │   ├── 读取 context.agent_type
-  │   ├── admin → 过滤写工具
-  │   └── 传递给下一层
-  │
-  ├─ 3. RegexShortcutMiddleware.awrap_model_call
-  │   ├── 检查最后一条 human message
-  │   ├── 匹配正则 → 直接调用工具，返回 AIMessage（跳过 LLM）
-  │   └── 不匹配 → 传递给下一层
-  │
-  ├─ 4. SkillsMiddleware.awrap_model_call
-  │   ├── 读取 SKILL.md 规范
-  │   ├── 追加到 system_message
-  │   └── 传递给下一层
-  │
-  └─ 5. LLM 调用（qwen-turbo）
-      ├── 接收 messages + tools + system_prompt
-      ├── 自主选择工具调用（L3 兜底）
-      └── 返回 AIMessage（可能含 tool_calls）
-  │
-  ▼
-如有 tool_calls → 执行工具（可能触发 interrupt）→ 回到 Agent 图入口
-如无 tool_calls → 图结束 → 返回最终消息
-```
+### 7.2 洋葱模型与触发时机
 
-#### 7.2.1 中间件触发机制
-
-**触发时机**：所有中间件钩在同一个入口点 `awrap_model_call(request, handler)`，由 LangGraph Agent 执行循环统一调度。当图执行到 `model_call` 节点时（即 Agent 准备调用 LLM 推理），中间件链按 `middleware` 列表的顺序依次执行。
+所有中间件钩在 `awrap_model_call`：Agent 图每次进入 `model_call` 节点时统一触发。
 
 ```
-Agent 图执行 → model_call 节点 → 中间件链（洋葱模型）→ LLM
+        ┌─ Auth ──────────────────────────────┐
+        │  ┌─ Permission ───────────────────┐ │
+        │  │  ┌─ Regex（可 return 短路）──┐ │ │
+        │  │  │  ┌─ RAG 注入工具 ───────┐ │ │ │
+        │  │  │  │  ┌─ Skills ────────┐ │ │ │ │
+        │  │  │  │  │  LLM            │ │ │ │ │
+        │  │  │  │  └─────────────────┘ │ │ │ │
+        │  │  │  └──────────────────────┘ │ │ │
+        │  │  └───────────────────────────┘ │ │
+        │  └────────────────────────────────┘ │
+        └─────────────────────────────────────┘
 ```
 
-**洋葱模型**：中间件像洋葱层一样包裹 LLM 调用。每一层通过调用 `handler(request)` 把控制权传给内层，最内层是 LLM 本身。如果一个中间件**不调用** `handler(request)` 而直接返回，就会"短路"——内层中间件和 LLM 都不会被调用。
+有 `tool_calls` → 执行工具（可能 interrupt）→ 回到 `model_call`；无则 END → SSE 最终消息。
 
-```
-        ┌────────────────────────────────┐
-        │  1. AuthMiddleware             │ — 认证 token，注入 user_id
-        │  ┌──────────────────────────┐  │
-        │  │ 2. PermissionMiddleware  │  │ — admin 过滤写工具（9→1）
-        │  │ ┌──────────────────────┐ │  │
-        │  │ │ 3. RegexShortcutMid  │ │  │ — 命中正则 → 直接 return（跳过 LLM）
-        │  │ │  ┌────────────────┐  │ │  │
-        │  │ │  │ 4. SkillsMid   │  │ │  │ — 追加 SKILL.md 到 prompt
-        │  │ │  │  ┌──────────┐  │  │ │  │
-        │  │ │  │  │ LLM 推理  │  │  │ │  │ — 仅当前 4 层都 handler() 后到达
-        │  │ │  │  └──────────┘  │  │  │ │
-        │  │ │  └────────────────┘  │  │  │
-        │  │ └──────────────────────┘  │  │
-        │  └──────────────────────────┘  │
-        └────────────────────────────────┘
-```
+### 7.3 context_schema vs state
 
-**核心代码**：每个中间件通过重写 `AgentMiddleware.awrap_model_call` 控制行为：
+| | context | state（Checkpoint） |
+|---|---------|---------------------|
+| 生命周期 | 单次 run | 跨 turn 持久 |
+| 用途 | agent_type / token / enable_rag | messages / interrupt |
+| 注入 | SDK `context` | `input.messages` / 图更新 |
 
-```python
-class XxxMiddleware(AgentMiddleware):
-    async def awrap_model_call(self, request: ModelRequest, handler):
-        # 1. 前置处理：修改 request（认证/过滤工具/匹配正则）
-        modified_request = self._do_preprocessing(request)
+### 7.4 顺序约束与反例
 
-        # 2. 传给下一层中间件（或 LLM）
-        return await handler(modified_request)
+| 错误顺序 | 后果 |
+|----------|------|
+| Skills 在 Regex 前 | L1 命中仍加载 Skills，浪费 I/O |
+| RAG 在 Permission 前且无过滤 | 一般无写风险，但不利统一鉴权日志 |
+| Auth 过晚 | 后续中间件读不到权威 user_id |
 
-        # 或者短路：不调 handler，直接返回 AIMessage（Regex 命中时）
-        # return AIMessage(content="...结果...")
-```
+### 7.5 Regex 中间件设计细则
 
-**各层详细行为**：
+1. 只检查**最后一条** human 消息。  
+2. 工具 invoke 异常 → 返回 None 走 LLM，避免硬失败。  
+3. 不匹配写操作正则（或匹配后故意不注册）。  
+4. 管理端与 C 端**分表**，禁止共用一张规则表导致串工具。  
 
-| 层序 | 中间件 | 触发条件 | 是否可能跳过 LLM | 行为 |
-|:---:|--------|----------|:---:|------|
-| 1 | **AuthMiddleware** | 始终执行 | ❌ | 从 context 读 `user_token`；默认 Gateway introspect 注入权威 `user_id`（可选本地 jks / fallback） |
-| 2 | **PermissionMiddleware** | 始终执行 | ❌ | 读取 `context.agent_type`；若为 `admin`，从工具列表中移除 9 个写操作工具（`add_to_cart_api`/`do_seckill_api` 等）；若为 `customer`，透传全部工具 |
-| 3 | **RegexShortcutMiddleware** | 始终执行 | ✅ | 检查最后一条 human 消息内容；匹配 L1 正则规则（如 `查看秒杀`/`运营日报`）→ 直接 `ainvoke` 对应工具 → 返回 `AIMessage`；**不匹配时** → `handler(request)` 传给下一层 |
-| 4 | **SkillsMiddleware** | 仅 Regex 未命中时到达 | ❌ | 从虚拟文件系统读取 SKILL.md（如 `shopping-guide`/`daily-report`）；追加到 `system_message` |
-| — | **LLM (qwen-turbo)** | 仅前 4 层都 `handler()` 后到达 | — | 接收 messages + tools + system_prompt；自主选择工具调用（L3 兜底）；返回 AIMessage（可能含 `tool_calls`） |
+### 7.6 RAG 中间件与 L1 的交互
 
-**关键区别**：
-- Auth / Permission / Skills：**始终透传**，只做修改不拦截，LLM 一定会被调用
-- RegexShortcut：**可能短路**，正则命中时直接返回结果，LLM 不会被调用（省去 ~2s 推理时间 + API 成本）
-- 执行顺序由 `middleware` 列表位置决定，顺序不能随意调换（如 Regex 必须在 Skills 之前，否则 Skills 加载工作白做）
-
-**触发时机与 Agent 图执行的关系**：
-
-```
-Agent 图执行循环（每次迭代）:
-  │
-  ├─ 1. 进入 model_call 节点
-  │     └── 中间件链 awrap_model_call(request, handler)
-  │          ├── Auth → 认证
-  │          ├── Permission → 过滤工具
-  │          ├── Regex → 匹配？（Y: 返回结果 / N: handler(request)）
-  │          ├── Skills → 追加规范
-  │          └── LLM → 推理 → 返回 AIMessage（可能含 tool_calls）
-  │
-  ├─ 2. 如果有 tool_calls:
-  │     ├── 执行工具（httpx → Gateway → 微服务）
-  │     ├── 工具内可能触发 interrupt() → 图暂停 → 等待用户回复
-  │     └── 结果作为 ToolMessage 加入 messages → 回到步骤 1
-  │
-  └─ 3. 如果无 tool_calls:
-        └── 图结束 → SSE 返回最终 AIMessage 给前端
-```
-
-> **总结**：中间件的触发时机不由各自独立决定，而是被 LangGraph Agent 执行循环中的 `model_call` 节点统一触发。`middleware` 列表的顺序就是执行顺序，`handler(request)` 是否被调用决定了请求是否继续流向内层（或 LLM）。
-
-`context_schema=Context` 定义了 Agent 运行时的不可变上下文，通过 LangGraph SDK 的 `context` 参数传入：
-
-```python
-@dataclass
-class Context:
-    """Agent 运行时上下文"""
-    agent_type: str = "customer"     # "customer" or "admin"
-    user_id: str = ""                # 当前用户 ID
-    user_token: str = ""             # JWT Token
-    enable_rag: bool = False         # RAG 开关
-```
-
-**传递链**：
-
-```
-前端 stream.submit(
-    {messages: [...]},                           # input
-    {config: {...}, context: {                   # context
-        agent_type: "customer",
-        user_token: "eyJhbGci...",
-        enable_rag: false
-    }}
-)
-  → LangGraph Runtime 创建 Context(agent_type="customer", user_token="...", ...)
-  → 中间件通过 request.runtime.context 读取
-  → 工具内可通过 context 获取 user_id（AuthMiddleware 注入）
-```
-
-**与 `state_schema` 的区别**：
-
-| | context_schema | state_schema |
-|---|---|---|
-| 生命周期 | 单次 run，不跨调用持久化 | 每次 node 更新，可 checkpoint |
-| 典型用途 | 配置/开关/运行标识（agent_type, user_token） | 对话消息、工具结果、业务数据 |
-| 外部注入 | `stream.submit({}, context=Context(...))` | `stream.submit({messages: [...]})` |
+L1 短路发生时，内层 RAG/Skills/LLM 均不执行——因此「查看秒杀」不会附带知识库调用。若产品希望「带政策的秒杀说明」，应走 L3 或单独话术，而不是期望 L1 自动 RAG。
 
 ---
 
 ## 8. API 设计
 
-### 8.1 LangGraph SDK 端点（前端通信）
+### 8.1 LangGraph SDK 端点
 
-前端通过 `@langchain/langgraph-sdk` 的 `Client` + `useStream`（Vue 中使用 `Client` + 手动 SSE）与后端通信，不使用传统 REST API。
+| 前端操作 | SDK | HTTP | 说明 |
+|---------|-----|------|------|
+| 助手列表 | `assistants.search` | `POST /assistants/search` | customer / admin |
+| 创建线程 | `threads.create` | `POST /threads` | 写入 owner |
+| 线程列表 | `threads.search` | `POST /threads/search` | 按 owner 过滤 |
+| 线程状态 | `threads.getState` | `GET /threads/{id}/state` | messages 等 |
+| 删除线程 | `threads.delete` | `DELETE /threads/{id}` | |
+| **流式对话** | `runs.stream` | `POST /threads/{id}/runs/stream` | SSE |
+| **resume** | `command.resume` | 同上 | interrupt 恢复 |
+| 强制结束 | `command.goto=__end__` | 同上 | |
 
-**SDK 内部实际调用的后端端点**：
-
-| 前端操作 | SDK 方法 | HTTP 端点 | 方法 | 说明 |
-|---------|---------|----------|------|------|
-| 获取助手列表 | `client.assistants.search()` | `/assistants/search` | `POST` | 返回 customer_agent / admin_agent |
-| 获取单个助手 | `client.assistants.get(id)` | `/assistants/{id}` | `GET` | 返回 assistant 配置 |
-| 创建线程 | `client.threads.create()` | `/threads` | `POST` | 创建新对话线程 |
-| 获取线程列表 | `client.threads.search()` | `/threads/search` | `POST` | 分页返回线程列表 |
-| 获取线程状态 | `client.threads.getState(id)` | `/threads/{id}/state` | `GET` | 返回 messages/todos/files |
-| 删除线程 | `client.threads.delete(id)` | `/threads/{id}` | `DELETE` | 删除线程+Checkpoint |
-| **发送消息（流式）** | `stream.submit(input, opts)` | `/threads/{id}/runs/stream` | `POST` | SSE 流式返回 |
-| 停止流式 | `stream.stop()` | （断开 SSE） | — | 中断当前流 |
-| **恢复中断** | `stream.submit(null, {command:{resume}})` | `/threads/{id}/runs/stream` | `POST` | 传入确认值，Agent 恢复 |
-| 标记结束 | `stream.submit(null, {command:{goto:"__end__"}})` | `/threads/{id}/runs/stream` | `POST` | 强制结束 |
-
-### 8.2 submit() 请求体结构
-
-> **注意**：LangGraph 0.6.0+ 禁止同时传递 `configurable` 和 `context`，统一使用 `context` 传递认证信息。`user_token` 仅放在 `context` 中，后端工具通过 `config.runtime.context.user_token` 获取。
+### 8.2 submit / stream 请求体契约
 
 ```json
 {
-  "input": {
-    "messages": [
-      {
-        "id": "uuid",
-        "type": "human",
-        "content": "查看秒杀活动"
-      }
-    ]
-  },
-  "config": {
-    "recursion_limit": 100
-  },
+  "input": { "messages": [{ "type": "human", "content": "查看秒杀活动" }] },
+  "config": { "recursion_limit": 100 },
   "context": {
     "agent_type": "customer",
-    "user_token": "eyJhbGciOiJSUzI1NiJ9...",
+    "user_token": "<JWT>",
     "enable_rag": false
   }
 }
 ```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `input.messages` | `Message[]` | 用户消息列表 |
-| `config.recursion_limit` | `number` | 图执行最大步数（默认 100） |
-| `context.agent_type` | `string` | `"customer"` 或 `"admin"` |
-| `context.user_token` | `string` | JWT Token（双 Token 体系） |
-| `context.enable_rag` | `boolean` | RAG 开关 |
-| `command.resume` | `any` | 中断恢复时传入的确认值 |
-| `command.goto` | `"__end__"` | 强制跳转到图结束 |
-
-> **Token 传递链**（context-only 模式）：前端 `context.user_token` → LangGraph Runtime 创建 `Context(user_token=...)` → `AuthMiddleware` 从 `request.runtime.context` 读取 → 工具内通过 `config.runtime.context.user_token` 获取（`extract_token_from_config` 三层 fallback 的路径 3）。
+| 字段 | 说明 |
+|------|------|
+| `context.agent_type` | `customer` \| `admin` |
+| `context.user_token` | 业务 API 用 JWT |
+| `context.enable_rag` | RAG 动态注入开关 |
+| `command.resume` | interrupt 恢复值 |
+| Headers `Authorization` | Auth + introspect |
 
 ### 8.3 自定义路由
 
-通过 `LANGGRAPH_HTTP` 环境变量挂载自定义 FastAPI 路由：
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| POST | `/api/v1/batch-report` | 触发运营日报编排 |
+| GET | `/api/v1/llm/health` | DashScope 最小 chat 探测（§13） |
 
-```python
-# src/api/batch_report.py
-from fastapi import FastAPI
+挂载方式：`start_server.py` 设置 `LANGGRAPH_HTTP` → FastAPI app（实现见实现说明）。规划中的通知 SSE（Part C）未来亦挂此层。
 
-app = FastAPI()
-
-@app.post("/api/v1/batch-report")
-async def batch_report(request: dict):
-    """批量运营报告（内部调用 AdminAgent）"""
-    # 通过 LangGraph 通用端点调用 admin_agent
-    payload = {
-        "assistant_id": "admin_agent",
-        "input": {"messages": [{"type": "human", "content": "运营日报"}]},
-    }
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "http://localhost:8090/runs/wait",
-            json=payload
-        )
-        return resp.json()
-```
-
-**路由体系**：
+路由分层示意：
 
 ```
-uvicorn 启动 langgraph_api.server:app (port 8090)
-│
-├─ 元路由层
-│   ├─ /ok              → 健康检查
-│   ├─ /docs            → OpenAPI 文档
-│   └─ /ui              → LangGraph Studio 可视化
-│
-├─ 自定义路由层 (LANGGRAPH_HTTP 注入)
-│   └─ POST /api/v1/batch-report  → 批量运营报告
-│
-└─ LangGraph 标准路由层
-    ├─ /assistants/*    → 助手管理
-    ├─ /threads/*       → 线程管理
-    └─ /runs/*          → 图执行
+langgraph_api.server:app (:8090)
+├─ /ok /docs /ui
+├─ 自定义：/api/v1/*
+└─ 标准：/assistants /threads /runs
 ```
+
+### 8.4 SSE 事件语义（设计）
+
+| 事件类型 | 含义 | 前端动作 |
+|----------|------|----------|
+| messages/partial | 流式增量 | 更新同 id 气泡 |
+| messages/complete | 消息完成 | 定稿 |
+| values / 状态快照 | 可选 | 调试或同步 files |
+| interrupt | 人机挂起 | 展示 InterruptActions |
+| error | 失败 | Toast + 结束 loading |
+
+具体 chunk 字段以实现 SDK 为准；本文只定产品语义。
+
+### 8.5 错误与限流（设计期望）
+
+| 情况 | 期望行为 |
+|------|----------|
+| 未认证访问他人 thread | 401/403，无数据泄露 |
+| recursion_limit 耗尽 | 友好提示「步骤过多，请简化问题」 |
+| Gateway 429 | 工具返回限流文案 |
+| LLM 超时 | 健康检查变离线；对话返回降级（规划） |
+
+### 8.6 与外部系统集成的 API 面
+
+| 调用方 | 使用的面 |
+|--------|----------|
+| 浏览器 | SDK threads/runs + llm/health +（规划）notifications |
+| 内部定时任务 | batch-report |
+| 运维 | /ok、Studio /ui |
 
 ---
 
-## 9. 项目结构
+## 9. 项目结构与配置语义
+
+### 9.1 目录结构（设计视图）
 
 ```
 hmall-agent/
-├── start_server.py                    # 服务启动入口（uvicorn + langgraph_api）
-├── graph.json                         # LangGraph 图注册配置（customer_agent / admin_agent）
-├── pyproject.toml                     # uv 项目配置 + 依赖声明
-├── .env.example                       # 环境变量模板
-│
+├── start_server.py              # LangGraph Server 启动；注入 runtime / HTTP / graphs
+├── start_rag_server.py          # RAG MCP 独立进程
+├── graph.json                   # graphs / store / auth / env
+├── pyproject.toml
+├── .env / .env.example          # 全文见实现说明
 ├── src/
-│   ├── agents/
-│   │   ├── customer/                  # 客服 Agent
-│   │   │   ├── agent.py               #   Agent 定义 (create_agent + Context + middleware)
-│   │   │   ├── prompts.py             #   系统提示词 (SYSTEM_PROMPT)
-│   │   │   ├── tools.py               #   工具注册 (get_all_tools, 18 个 @tool)
-│   │   │   └── regex_rules.py         #   L1 正则路由规则 (REGEX_RULES)
-│   │   │
-│   │   └── admin/                     # 管理 Agent
-│   │       ├── agent.py               #   Agent 定义
-│   │       ├── prompts.py             #   系统提示词
-│   │       ├── tools.py               #   工具注册 (10 个 @tool + generate_daily_report)
-│   │       └── regex_rules.py         #   L1 正则路由规则
-│   │
-│   ├── api/
-│   │   ├── batch_report.py            # POST /api/v1/batch-report 自定义路由
-│   │   └── health.py                  # GET /api/v1/llm/health LLM 连通性检查
-│   │
-│   ├── middleware/
-│   │   ├── auth.py                    # AuthMiddleware：双 JWT 认证
-│   │   ├── permission.py              # PermissionMiddleware：工具权限拦截
-│   │   ├── regex_shortcut.py          # RegexShortcutMiddleware：L1 正则快捷路由
-│   │   └── rag_context.py             # RAGMiddleware：RAG 动态控制（预留）
-│   │
-│   ├── mcp_servers/
-│   │   └── rag_server.py              # RAG MCP Server (FastMCP，预留)
-│   │
-│   ├── core/
-│   │   ├── config.py                  # Pydantic Settings (环境变量集中管理)
-│   │   ├── llms.py                    # LLM 实例工厂 (通义千问 qwen-turbo)
-│   │   └── redis_checkpoint.py        # Redis Checkpoint 后端配置
-│   │
-│   ├── tools/
-│   │   ├── customer_api.py            # C 端 18 个 API 代理工具 (@tool 实现)
-│   │   ├── admin_api.py               # 管理端 10 个 API 代理工具 (@tool 实现)
-│   │   └── formatters.py              # 格式化函数（秒杀列表/订单/购物车等）
-│   │
-│   ├── gateway/
-│   │   ├── http_client.py             # 公共 HTTP 客户端（httpx → Gateway :8080）
-│   │   └── auth.py                    # JWT 验证（双 keystore）
-│   │
-│   └── workspace/                     # Agent 工作空间（Skills 文件）
-│       ├── customer/skills/
-│       │   ├── shopping-guide/SKILL.md
-│       │   ├── seckill-order/SKILL.md
-│       │   ├── cart-management/SKILL.md
-│       │   ├── order-management/SKILL.md
-│       │   └── address-management/SKILL.md
-│       └── admin/skills/
-│           ├── daily-report/SKILL.md
-│           ├── data-query/SKILL.md
-│           └── rag-query/SKILL.md
-│
-├── knowledge_base/                    # RAG 知识库文档（预留）
-│   └── admin_knowledge/
-│       ├── seckill_strategy.md
-│       ├── inventory_management.md
-│       ├── order_analysis.md
-│       ├── user_segmentation.md
-│       └── data_interpretation.md
-│
-├── tests/                             # 自动化测试
-├── .env.example
-└── README.md
+│   ├── agents/customer|admin/   # agent / prompts / tools / regex_rules
+│   ├── api/                     # batch_report / health
+│   ├── middleware/              # auth / permission / regex / rag_context
+│   ├── security/auth.py         # LangGraph Auth（owner）
+│   ├── gateway/                 # http_client / introspect / jwt 辅助
+│   ├── mcp_servers/rag_server.py
+│   ├── tools/                   # formatters / rag_loader
+│   ├── user_profile/            # ProfileStore + memory tools
+│   ├── core/                    # config / llms
+│   └── workspace/*/skills/      # SKILL.md
+├── LightRAG/                    # git submodule（独立配置）
+└── .langgraph_api/              # 开发态 Checkpoint/Store 落盘（勿提交密钥）
 ```
 
-### 9.1 关键文件说明
+> 历史文件名 `src/profile/`、`redis_checkpoint.py` 等以仓库现状为准；实现说明含准确路径。
 
-| 文件 | 职责 | 对应 v1.0 |
-|------|------|-----------|
-| `start_server.py` | 启动 LangGraph Server | `app/main.py` |
-| `graph.json` | Agent 注册配置 | 无（v1.0 无图注册） |
-| `src/agents/customer/agent.py` | CustomerAgent 定义 | `agents/customer_agent.py` + `base_agent.py` |
-| `src/agents/customer/tools.py` | 18 个 @tool 工具 | `tools/customer_api.py` |
-| `src/middleware/regex_shortcut.py` | L1 正则路由中间件 | `agents/intent_router.py` |
-| `src/middleware/auth.py` | JWT 认证中间件 | `gateway/auth.py` |
-| `src/middleware/permission.py` | 权限拦截中间件 | `gateway/permissions.py` |
-| `src/core/redis_checkpoint.py` | Redis Checkpoint | `memory/chat_memory.py` |
-| `src/gateway/http_client.py` | HTTP 客户端 | `utils/http_client.py` |
+### 9.2 环境变量语义表（仅语义）
+
+| 变量族 | 语义 | 备注 |
+|--------|------|------|
+| `DASHSCOPE_*` / `LLM_*` | LLM 接入 | |
+| `JAVA_GATEWAY_URL` | 业务 + introspect 入口 | |
+| `JWT_*` / `INTROSPECT_*` | 本地验签开关、缓存 TTL、fallback | 默认走 introspect |
+| `REDIS_*` / `PROFILE_REDIS_DB` | **画像** Redis（db=0） | **不是** Checkpoint |
+| `RAG_*` | LightRAG URL / 账号或 API Key / MCP 端口 | §12 |
+| `LANGGRAPH_RUNTIME_EDITION` | `inmem` | 与落盘目录配合 |
+| `VITE_AGENT_URL`（前端） | Agent Server 基址 | |
+
+完整键值与示例 → [实现说明 · 配置](./hmall_Agent实现说明文档.md)。
+
+### 9.3 graph.json ↔ 启动映射
+
+| graph.json | 启动注入 |
+|------------|----------|
+| `graphs` | `LANGSERVE_GRAPHS` |
+| `auth` | `LANGGRAPH_AUTH` |
+| `store` | `LANGGRAPH_STORE` |
+| （无） | `LANGGRAPH_HTTP` ← start_server |
 
 ---
 
-## 10. 配置设计
+## 10. 前端集成设计（仅通信契约）
 
-### 10.1 graph.json
+> **禁止**在本文粘贴完整 `useLangGraph.ts` / 组件实现。实现细节 → 实现说明 Part I「前端」。
 
-```json
-{
-    "dependencies": ["."],
-    "graphs": {
-        "customer_agent": {
-            "path": "./src/agents/customer/agent.py:agent",
-            "description": "客服助手 Agent：商品浏览、秒杀、购物车、订单、地址全链路自然语言交互"
-        },
-        "admin_agent": {
-            "path": "./src/agents/admin/agent.py:agent",
-            "description": "管理助手 Agent：秒杀管理、订单查询、商品管理、库存查看、运营日报"
-        }
-    },
-    "env": ".env"
-}
-```
+### 10.1 技术选型
 
-### 10.2 pyproject.toml
+- Vue 3 + Element Plus；`@langchain/langgraph-sdk` **1.x**（0.x 会丢弃 `context`/`command`）。
+- C 端 `/portal/chat`、管理端 `/admin/chat` 独立全页；入口分别为浮动按钮 / Header「AI 助手」。
 
-```toml
-[project]
-name = "hmall-agent"
-version = "2.0.0"
-description = "hmall 枫叶商城 AI 智能助手（DeepAgent 架构）"
-requires-python = ">=3.12"
-dependencies = [
-    "deepagents>=0.5.9",
-    "langchain>=1.2.12",
-    "langchain-openai>=0.3.0",
-    "langchain-community>=0.3.0",
-    "langgraph-cli[inmem]>=0.4.26",
-    "langgraph-checkpoint-redis>=1.0.0",
-    "langchain-mcp-adapters>=0.2.1",
-    "fastmcp>=3.2.3",
-    "httpx>=0.27.0",
-    "python-dotenv>=1.0.0",
-    "pydantic>=2.0.0",
-    "redis>=5.0.0",
-]
+### 10.2 组件职责
 
-[dependency-groups]
-dev = [
-    "pytest>=9.0.0",
-]
-```
-
-### 10.3 环境变量
-
-```ini
-# ==================== LLM ====================
-DASHSCOPE_API_KEY=your_api_key
-LLM_MODEL_NAME=qwen-turbo
-LLM_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=2048
-
-# ==================== Redis（Checkpoint 后端） ====================
-REDIS_HOST=192.168.100.128
-REDIS_PORT=6379
-REDIS_PASSWORD=
-REDIS_DB=1                          # db=1 与 hmall 业务数据（db=0）隔离
-
-# ==================== Java 后端 ====================
-JAVA_GATEWAY_URL=http://localhost:8080
-
-# ==================== Agent 服务 ====================
-AGENT_HOST=0.0.0.0
-AGENT_PORT=8090
-LOG_LEVEL=INFO
-
-# ==================== JWT（双 Token 验证） ====================
-JWT_VERIFY_LOCAL=false              # false 时依赖 Gateway 验证
-CUSTOMER_JKS_PATH=keys/hmall.jks   # C 端 RSA 密钥
-ADMIN_JKS_PATH=keys/admin.jks      # 管理端 RSA 密钥（独立）
-
-# ==================== RAG（LightRAG + MCP） ====================
-RAG_BASE_URL=http://localhost:9621       # LightRAG Server 地址
-RAG_USERNAME=admin                       # LightRAG 登录用户名
-RAG_PASSWORD=admin123                    # LightRAG 登录密码
-RAG_SPACE_ID=hmall_space                 # LightRAG 工作空间隔离标识
-RAG_API_KEY=                             # LightRAG API Key（可选，优先于账号密码）
-RAG_AUTH_ENABLED=true                    # 是否启用 LightRAG 认证
-RAG_MCP_PORT=8008                        # RAG MCP Server 监听端口
-```
-
-### 10.4 关键配置说明
-
-| 配置 | 说明 |
+| 组件 | 职责 |
 |------|------|
-| `JAVA_GATEWAY_URL` | hmall Gateway 地址，所有 API 调用经此路由 |
-| `REDIS_DB=1` | 使用 db=1 与 hmall 业务数据（db=0）隔离，作为 LangGraph Checkpoint 后端 |
-| `JWT_VERIFY_LOCAL` | 是否在 Agent 本地验证 JWT（true 时需配置 keystore），false 时依赖 Gateway 验证 |
-| `LLM_API_BASE` | 通义千问 OpenAI 兼容接口地址 |
+| `ChatPanel` | 对话壳：消息列表、输入、快捷语、RAG 开关、打断展示 |
+| `MessageBubble` | AI Markdown / 人类纯文本 |
+| `InterruptActions` | interrupt 批准 / 编辑 / 拒绝 → `resume` |
+| `ChatWidget` / `AdminChat` | 路由入口 |
+| `useLangGraph` | Client、thread、SSE、interrupt 状态 |
+| `useLlmHealth` | 轮询 `/api/v1/llm/health` |
 
-### 10.5 start_server.py
+### 10.3 SSE 与消息契约
 
-```python
-#!/usr/bin/env python3
-"""hmall Agent LangGraph Server 启动入口"""
+- `streamMode` 建议含 `messages`（及所需 `values`）。
+- `messages/partial` → 更新同 `id` 的 AI 气泡；`complete` → 定稿。
+- 出现 interrupt 事件 → 填充 `interruptData`，暂停输入或展示确认卡。
+- 停止：断开 SSE / `stop`；勿丢弃本地已渲染部分除非产品要求回滚。
 
-import os
-import sys
-import json
-from pathlib import Path
+### 10.4 context / Authorization
 
-
-def setup_environment():
-    """配置 LangGraph 运行环境"""
-    # 确保必要目录存在
-    Path(".langgraph_api/ui/public").mkdir(parents=True, exist_ok=True)
-
-    # 添加 src 到 Python 路径
-    src_path = Path(__file__).parent / "src"
-    sys.path.insert(0, str(src_path))
-
-    # 读取 graph.json
-    config_path = Path(__file__).parent / "graph.json"
-    graphs = {}
-    if config_path.exists():
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-            graphs = config.get("graphs", {})
-
-    # 设置环境变量
-    os.environ.update({
-        "DATABASE_URI": ":memory:",
-        "REDIS_URI": os.getenv("REDIS_CHECKPOINT_URI", "fake"),
-        "MIGRATIONS_PATH": "__inmem",
-        "ALLOW_PRIVATE_NETWORK": "true",
-        "LANGGRAPH_UI_BUNDLER": "true",
-        "LANGGRAPH_RUNTIME_EDITION": "inmem",
-        "LANGSMITH_LANGGRAPH_API_VARIANT": "local_dev",
-        "LANGGRAPH_ALLOW_BLOCKING": "true",
-        "LANGGRAPH_API_URL": f"http://localhost:{os.getenv('AGENT_PORT', '8090')}",
-        # Agent 图注册
-        "LANGSERVE_GRAPHS": json.dumps(graphs) if graphs else "{}",
-        # 自定义路由
-        "LANGGRAPH_HTTP": json.dumps({"app": "api.batch_report:app"}),
-        "N_JOBS_PER_WORKER": "3",
-    })
-
-    # 加载 .env
-    env_file = Path(__file__).parent / ".env"
-    if env_file.exists():
-        from dotenv import load_dotenv
-        load_dotenv(env_file)
-
-
-def main():
-    setup_environment()
-    
-    port = int(os.getenv("AGENT_PORT", "8090"))
-    
-    print(f"🚀 Starting hmall Agent Server on port {port}")
-    print(f"📍 API:      http://localhost:{port}")
-    print(f"📚 Docs:     http://localhost:{port}/docs")
-    print(f"🎨 Studio:   http://localhost:{port}/ui")
-    print(f"💚 Health:   http://localhost:{port}/ok")
-
-    import uvicorn
-    uvicorn.run(
-        "langgraph_api.server:app",
-        host="0.0.0.0",
-        port=port,
-        reload=False,
-    )
-
-
-if __name__ == "__main__":
-    main()
-```
-
----
-
-## 11. 工具调用示例
-
-### 11.1 查看秒杀活动（L1 正则路由）
-
-```
-用户: "查看秒杀活动"
-  │
-  ├─ stream.submit({messages: [{type: "human", content: "查看秒杀活动"}]})
-  │
-  ├─ LangGraph 加载 Thread Checkpoint → Agent 图入口
-  │
-  ├─ 中间件链:
-  │   ├─ AuthMiddleware → 验证 JWT（无 Token，允许只读）
-  │   ├─ PermissionMiddleware → customer，不过滤
-  │   ├─ RegexShortcutMiddleware → 匹配 "(?:查看|查询|当前).{0,3}秒杀"
-  │   │   ├── 直接调用 get_seckill_activities_api
-  │   │   ├── httpx GET http://localhost:8080/seckill/activities
-  │   │   ├── 代码格式化输出
-  │   │   └── 返回 AIMessage（无 tool_call）→ 跳过 LLM
-  │   └─ SkillsMiddleware → 未到达（L1 已短路）
-  │
-  └─ 图结束 → SSE 返回:
-      ⚡ 当前秒杀活动
-      ─────────────────────
-      📢 618 专场 [进行中]
-      🕐 10:00场 (10:00-12:00) [抢购中]
-      ├── iPhone 15 | ¥5999 (原价¥6999) | 剩余 45 件
-      └── MacBook Air | ¥8999 (原价¥9999) | 剩余 12 件
-```
-
-### 11.2 秒杀下单（L2 interrupt + 二次确认）
-
-```
-用户: "秒杀iPhone 15"
-  │
-  ├─ stream.submit({messages: [{type: "human", content: "秒杀iPhone 15"}]})
-  │
-  ├─ 中间件链:
-  │   ├─ AuthMiddleware → 验证 JWT → user_id=1001
-  │   ├─ PermissionMiddleware → customer，允许 do_seckill_api
-  │   ├─ RegexShortcutMiddleware → 不匹配（需 LLM 理解"iPhone 15"→relationId）
-  │   └─ SkillsMiddleware → 加载 seckill-order SKILL.md
-  │
-  ├─ LLM 调用（L3 兜底）:
-  │   ├── LLM 理解意图 → 调用 get_seckill_activities_api 查找 iPhone 15
-  │   ├── 找到 relationId=1
-  │   └── LLM 调用 do_seckill_api(relation_id=1)
-  │
-  ├─ 工具内:
-  │   ├── 查询商品详情: iPhone 15, ¥5999, 限购1件, 剩余45件
-  │   ├── interrupt({type: "confirmation", message: "确认秒杀..."})
-  │   └── 图暂停 → Checkpoint 保存到 Redis
-  │
-  ├─ SSE 返回 interrupt 事件:
-  │   {type: "interrupt", value: {message: "确认秒杀以下商品？..."}}
-  │
-  ├─ 前端 InterruptActions 展示确认卡片
-  │
-  ├─ 用户: "确认"
-  │   stream.submit(null, {command: {resume: "确认"}})
-  │
-  ├─ Agent 从 Checkpoint 恢复:
-  │   ├── approval = "确认"
-  │   ├── httpx POST http://localhost:8080/seckill/order/1?quantity=1
-  │   └── 返回结果
-  │
-  └─ 图结束 → SSE 返回:
-      ✅ 秒杀成功！订单号: 123456，请尽快支付。
-```
-
-### 11.3 地址修改（L2 interrupt 多轮）
-
-```
-用户: "修改地址1"
-  │
-  ├─ LLM 调用 update_address_api(address_id=1)
-  │
-  ├─ interrupt #1 (field_selection):
-  │   → "请问要修改地址1的哪个字段？(姓名/手机号/省份/城市/区/详细地址)"
-  │   → 图暂停 → Checkpoint 保存
-  │
-  ├─ 用户: "姓名"
-  │   stream.submit(null, {command: {resume: "姓名"}})
-  │   → Agent 恢复, field = "姓名"
-  │
-  ├─ interrupt #2 (value_input):
-  │   → "请输入新的姓名"
-  │   → 图暂停 → Checkpoint 保存
-  │
-  ├─ 用户: "张三"
-  │   stream.submit(null, {command: {resume: "张三"}})
-  │   → Agent 恢复, new_value = "张三"
-  │
-  ├─ httpx PUT http://localhost:8080/addresses/1
-  │
-  └─ ✅ 地址1的姓名已修改为张三
-```
-
-### 11.4 运营日报（L1 正则 + 多工具编排）
-
-```
-用户: "运营日报"
-  │
-  ├─ RegexShortcutMiddleware 匹配 "(?:运营|生成|帮我做).{0,3}日报"
-  │   ├── 直接调用 generate_daily_report
-  │   ├── 并发调用 5 个查询工具:
-  │   │   ├─ admin_get_order_page_api → 156单/¥89,200
-  │   │   ├─ admin_get_seckill_promotion_page_api → 3场进行中
-  │   │   ├─ admin_get_seckill_relation_page_api → 12件预警
-  │   │   ├─ admin_get_product_page_api → 248件在售
-  │   │   └─ admin_get_user_page_api → 总1,230人
-  │   └── 格式化日报输出
-  │
-  └─ 图结束 → SSE 返回日报
-```
-
----
-
-## 12. 前端集成
-
-### 12.1 技术方案
-
-hmall 前端基于 Vue 3 + Element Plus + Vite，通过 `@langchain/langgraph-sdk` 1.x JavaScript 客户端与 LangGraph Server 通信。基于 `Client` 类封装 Vue Composable。
-
-> **SDK 版本**：`@langchain/langgraph-sdk@^1.0.3`（实际安装 1.9.27）。SDK 1.x 的 `client.runs.stream()` 正确转发 `context` 和 `command` 字段，无需 fetch 绕过。SDK 0.0.10 的 `runs.stream()` 会丢弃这两个字段。
-
-### 12.2 前端组件架构
-
-```
-前端 (Vue 3 + Element Plus)
-│
-├── 路由
-│   ├── /portal/chat  → ChatPage.vue (portal) → ChatPanel (customer_agent)
-│   └── /admin/chat   → ChatPage.vue (admin)  → ChatPanel (admin_agent)
-│
-├── 导航入口
-│   ├── ChatWidget.vue    → C 端浮动按钮 → router-link → /portal/chat
-│   └── AdminChat.vue     → 管理端 header 按钮 → router-link → /admin/chat
-│
-├── 核心组件
-│   ├── ChatPanel.vue     → 可复用全页对话组件（props 配置主题/标题/快捷操作/token）
-│   ├── MessageBubble.vue → 消息气泡（AI 消息 Markdown 渲染 + 人类消息纯文本）
-│   └── InterruptActions.vue → interrupt 确认卡片
-│
-└── Composable
-    └── useLangGraph.ts   → SDK 1.x Client 封装（线程管理 + SSE 流式 + interrupt 恢复）
-```
-
-| 位置 | 组件 | 说明 |
-|------|------|------|
-| C 端独立页面 | `portal/ChatPage.vue` | 全屏对话页，`/portal/chat` 路由，带返回按钮 |
-| 管理端独立页面 | `admin/ChatPage.vue` | 嵌入 AdminLayout 的对话页，`/admin/chat` 路由，含快捷操作 |
-| C 端浮动入口 | `ChatWidget.vue` | 右下角浮动按钮 → `router-link` 跳转 `/portal/chat` |
-| 管理端入口 | `AdminChat.vue` | header "AI助手" 按钮 → `router-link` 跳转 `/admin/chat` |
-| 可复用对话面板 | `ChatPanel.vue` | 全页对话组件，通过 props 配置 agent 类型/主题色/标题/快捷操作 |
-| 消息气泡 | `MessageBubble.vue` | AI 消息用 `marked` 渲染 Markdown；人类消息纯文本；修复溢出 bug |
-
-### 12.3 Vue Composable 封装
-
-```typescript
-// src/composables/useLangGraph.ts
-import { Client } from '@langchain/langgraph-sdk'
-import { ref, type Ref } from 'vue'
-
-export function useLangGraph(options: UseLangGraphOptions) {
-  const client = new Client({ apiUrl: options.apiUrl || 'http://localhost:8090' })
-
-  const messages: Ref<ChatMessage[]> = ref([])
-  const isLoading = ref(false)
-  const interruptData: Ref<InterruptData | null> = ref(null)
-
-  // 发送消息（流式）—— SDK 1.x 正确转发 context 字段
-  async function sendMessage(text: string, context: AgentContext) {
-    // 创建或复用 Thread
-    // 添加用户消息到 UI
-    const streamResponse = client.runs.stream(threadId.value, assistantId, {
-      input: { messages: [{ type: 'human', content: text }] },
-      config: { recursion_limit: 100 },  // 不含 configurable（LangGraph 0.6.0+ 禁止）
-      context,                            // user_token 统一走 context
-      streamMode: ['messages', 'values'],
-    })
-    await _processStream(streamResponse)
-  }
-
-  // 处理 SSE 流
-  async function _processStream(streamResponse: AsyncGenerator<any>) {
-    for await (const chunk of streamResponse) {
-      // messages/partial + messages/complete → 创建/更新 AI 消息
-      if (chunk.event === 'messages/partial' || chunk.event === 'messages/complete') {
-        for (const msg of chunk.data || []) {
-          if (msg.type !== 'ai') continue
-          const content = _extractContent(msg)
-          if (!content) continue
-          // 通过响应式数组索引更新，确保 Vue 检测到变化
-          const idx = messages.value.findIndex(m => m.id === msg.id)
-          if (idx !== -1) {
-            messages.value[idx].content = content  // 经过 Proxy，Vue 检测到
-          } else {
-            messages.value.push({ id: msg.id, type: 'ai', content, timestamp: Date.now() })
-          }
-        }
-      }
-      // values → 检测 __interrupt__
-      if (chunk.event === 'values' && chunk.data?.__interrupt__) {
-        interruptData.value = parseInterrupt(chunk.data.__interrupt__)
-      }
-      // error → 在 UI 中展示错误消息
-      if (chunk.event === 'error') {
-        messages.value.push({ type: 'ai', content: `❌ ${chunk.data?.message}`, ... })
-        break
-      }
-    }
-  }
-
-  // 恢复中断 —— SDK 1.x 正确转发 command + context 字段
-  async function resume(value: string) {
-    client.runs.stream(threadId.value, assistantId, {
-      command: { resume: value },
-      config: { recursion_limit: 100 },
-      context: _currentContext,
-      streamMode: ['messages', 'values'],
-    })
-  }
-
-  return { messages, isLoading, interruptData, threadId, error, sendMessage, resume, rejectInterrupt, clearHistory }
-}
-```
-
-**SSE 事件处理**：
-
-| 事件 | 处理逻辑 |
-|------|---------|
-| `messages/partial` | AI 消息增量更新（流式 token 追加） |
-| `messages/complete` | AI 消息最终完整内容（非流式或流式结束） |
-| `values` | 检测 `__interrupt__`，解析为 `InterruptData` |
-| `error` | 在 UI 中展示错误消息气泡，中断流 |
-| `messages/metadata` | 忽略（消息元数据，不影响显示） |
-
-**Vue 响应式注意事项**：增量更新必须通过 `messages.value[idx].content = content` 修改（经过 Vue Proxy），而非直接修改局部变量 `aiMessage.content`（绕过 Proxy，Vue 检测不到变化）。
-
-### 12.4 MessageBubble.vue（Markdown 渲染 + 溢出修复）
-
-| 特性 | 说明 |
+| 通道 | 内容 |
 |------|------|
-| AI 消息渲染 | 使用 `marked` 库渲染 Markdown（GFM + breaks） |
-| 人类消息 | 纯文本（`whitespace-pre-wrap`） |
-| 溢出修复 | `min-w-0 overflow-hidden overflow-wrap:anywhere`（flex 子项 + 长文本） |
-| Markdown 样式 | 标题/列表/表格/代码块/引用/链接/粗体/斜体/删除线/分割线 |
-| 流式效果 | 最后一条 AI 消息 + `isLoading` 时显示三点跳动动画 |
-| 消息动画 | `messageAppear` 过渡（0.3s） |
+| Headers | `Authorization: Bearer <JWT>`；`X-Hmall-Agent-Type: customer\|admin` |
+| context | `agent_type`、`user_token`、`enable_rag`（及服务端注入的 `user_id`） |
+| 禁止 | 同时传认证用 `configurable` + `context` |
 
----
+### 10.5 interrupt 前端协议
 
-## 13. 部署设计
-
-### 13.1 独立部署（推荐）
-
-Agent 作为独立 Python 服务部署，与 Java 微服务解耦：
-
-```
-hmall-agent (Python :8090, LangGraph Server)
-  ↓ HTTP (httpx)
-hm-gateway (Java :8080)
-  ↓ Feign / 路由
-各微服务 (Java :8081-8090)
-```
-
-### 13.2 启动顺序
-
-```bash
-# 1. 启动基础设施: MySQL / Redis / Nacos / RabbitMQ
-
-# 2. 启动 Java 微服务: item → user → cart → trade → pay → search → admin → gateway
-
-# 3. 启动 Agent 服务
-cd hmall-agent
-uv sync                              # 安装依赖
-uv run python start_server.py        # LangGraph Server (:8090)
-
-# 4. 启动前端
-cd hmall-frontend
-npm install
-npm run dev                          # Vite dev server
-```
-
-### 13.3 服务端口总览
-
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| `start_server.py` | 8090 | LangGraph Agent API + Studio UI |
-| `hm-gateway` | 8080 | Java Gateway（路由+认证） |
-| `item-service` | 8081 | 商品微服务 |
-| `cart-service` | 8082 | 购物车微服务 |
-| `pay-service` | 8083 | 支付微服务 |
-| `user-service` | 8084 | 用户微服务 |
-| `trade-service` | 8085 | 交易微服务 |
-| `search-service` | 8089 | 搜索微服务 |
-| `admin-service` | 8090 | 管理微服务 |
-| `lightrag-server`（预留） | 9621 | RAG API 后端 |
-| `rag_server.py`（预留） | 8008 | RAG MCP 桥接 |
-
----
-
-## 14. 与 nova-mall-agent 的差异适配
-
-| 差异点 | nova-mall-agent | hmall Agent 适配方案 |
-|--------|----------------|---------------------|
-| **Agent 框架** | LangChain Core（自定义 Agent 调度） | DeepAgents (`create_agent`) + LangGraph |
-| **Web 框架** | FastAPI + WebSocket | LangGraph Server (uvicorn + langgraph_api) |
-| **对话记忆** | 自定义 Redis ChatMemory | LangGraph Thread + Redis Checkpoint |
-| **状态机** | 自定义 Redis Key 存储 | LangGraph `interrupt()` 原生支持 |
-| API 调用 | 直连 Portal(8085) + Admin(8080) | 统一经 Gateway(8080) 路由 |
-| 认证 | 单 JWT 共享密钥 | 双 JWT（C 端 RSA + 管理端独立 keystore），通过 `context_schema` 传递 |
-| 优惠券工具 | 5 个（领取/查询/历史） | 移除（hmall 无优惠券系统） |
-| 售后工具 | 4 个（查询/申请/状态/退款） | 移除（hmall 无售后系统） |
-| 秒杀工具 | 2 个（查活动/加购） | 3 个（查活动/查详情/秒杀下单），适配三层防超卖架构，下单用 interrupt 确认 |
-| 管理后台 | 独立 Java Admin | admin-service 微服务 + RBAC，Agent 调 `/admin/**` 代理接口 |
-| 商品搜索 | 数据库 LIKE | ES 全文检索（`/search`），支持品牌/分类/价格多维筛选 |
-| 地址状态机 | 6 字段 | 6 字段（name/phone/province/city/region/detailAddress），用 interrupt 多轮收集 |
-| 订单取消 | `POST /order/cancel` | `POST /orders/batch/close`（批量关闭接口），interrupt 二次确认 |
-| ID 精度 | JS Number | hmall 已有 Long→String 序列化保护，Agent 无需特殊处理 |
-| **正则路由** | 自定义 IntentRouter 调度层 | `RegexShortcutMiddleware` 中间件拦截 model_call |
-| **前端通信** | WebSocket 自定义协议 | LangGraph SDK（SSE 流式 + interrupt 恢复） |
-| **Skills** | 无 | `SkillsMiddleware` + SKILL.md 规范文件 |
-
----
-
-## 15. 后续优化方向
-
-| 方向 | 说明 | 优先级 |
-|------|------|--------|
-| ~~RAG 知识库~~ | ~~运营/商品/秒杀策略知识库，通过 MCP 桥接 LightRAG~~ **已实现（见第 16 章）** | ~~P1~~ |
-| 商品推荐 | 基于用户浏览/购买历史的个性化推荐 | P2 |
-| 优惠券系统 | hmall 实现优惠券后，新增 5 个工具 | P2 |
-| 售后系统 | hmall 实现售后后，新增 4 个工具 | P2 |
-| 多模态 | 支持图片输入（商品图片识别、截图报错），动态模型切换中间件 | P3 |
-| LangSmith 可观测性 | 接入 LangSmith 追踪，监控 LLM 调用链和工具命中率 | P3 |
-| 正则规则动态加载 | 从 Nacos 配置中心加载正则路由规则，无需重启 | P3 |
-| 对话分析 | 对话日志分析，挖掘用户高频问题和痛点，优化 L1 正则规则 | P3 |
-
----
-
-## 16. RAG 知识库集成（LightRAG + MCP）
-
-> 版本：v2.2 补充  
-> 日期：2026-07-20  
-> LightRAG 作为 git submodule 集成，通过 MCP 协议桥接到 Agent
-
-### 16.1 架构概览
-
-```
-前端 ChatPanel.vue
-  │ 用户点击「知识库」开关 → ragEnabled → sessionStorage 持久化
-  │ sendMessage(text, {agent_type, user_token, enable_rag})
-  ▼
-LangGraph Agent（context 透传 enable_rag）
-  │
-  ├─ RAGMiddleware.awrap_model_call()
-  │    │ context.enable_rag = true
-  │    │ → rag_loader.get_rag_tools()  [模块级缓存]
-  │    │ → request.override(tools=[...业务工具, ...RAG 工具])
-  │    │ context.enable_rag = false → 直接放行
-  │    ▼
-  │  LLM 选择 RAG 工具 → MCP Protocol → MCP Server (:8008)
-  │                                       → LightRAGClient → LightRAG API (:9621)
-  │
-  └─ 业务工具（Gateway → Java 微服务）
-```
-
-**三层架构**：
-1. **LightRAG（:9621）**：知识图谱 + 向量检索引擎，作为 git submodule 独立部署
-2. **MCP Server（:8008）**：FastMCP HTTP 服务，封装 LightRAG REST API 为 3 个 MCP 工具
-3. **RAGMiddleware**：Agent 中间件，根据 `enable_rag` 动态注入 MCP 工具
-
-### 16.2 MCP Server 设计（`src/mcp_servers/rag_server.py`）
-
-独立的 FastMCP HTTP 进程，通过 `langchain-mcp-adapters` 的 `MultiServerMCPClient` 连接。
-
-**LightRAGClient**：封装 LightRAG REST API，特性：
-- OAuth2 登录获取 JWT（POST /login），token 缓存 + 401 自动重登录
-- 支持可选 API Key 认证（`RAG_API_KEY`，优先于账号密码）
-- `httpx.AsyncClient` 单例复用连接
-
-**3 个 MCP 工具**：
-
-| 工具 | LightRAG 端点 | 用途 |
-|------|--------------|------|
-| `rag_query(query, mode)` | POST /query | 语义检索，返回答案 + 参考来源 |
-| `rag_query_data(query, mode)` | POST /query/data | 结构化查询，返回 entities/relationships/chunks |
-| `rag_graph_search(query)` | POST /query/data | 图谱搜索，聚合实体关系 |
-
-查询模式（mode）：`mix`（默认，图谱+向量融合）、`hybrid`、`local`、`global`、`naive`、`bypass`
-
-### 16.3 RAGMiddleware 动态工具注入（`src/middleware/rag_context.py`）
-
-```python
-class RAGMiddleware(AgentMiddleware):
-    async def awrap_model_call(self, request, handler):
-        # 1. 检查 context.enable_rag
-        # 2. enable_rag=true → rag_loader.get_rag_tools() 获取 MCP 工具
-        # 3. 追加到 request.tools（避免重复注入同名工具）
-        # 4. MCP Server 不可达 → log warning，不阻塞（降级为无 RAG）
-```
-
-**工具加载器**（`src/tools/rag_loader.py`）：
-- `MultiServerMCPClient` 连接 `http://localhost:8008/mcp`（streamable_http 传输）
-- 模块级缓存工具列表，首次加载后复用，避免每次 model_call 都连接
-- `is_available()` 健康检查，`refresh()` 强制刷新
-
-**降级策略**：MCP Server 不可达时只 log warning 不阻塞，Agent 仍可使用业务工具。与现有降级模式一致（如推荐接口失败时降级提示）。
-
-### 16.4 前端 RAG 开关（`ChatPanel.vue`）
-
-头部右侧新增「知识库」开关按钮：
-- 书本图标 + 状态指示灯（绿色=开启，灰色=关闭）
-- 状态持久化到 `sessionStorage`（key: `rag_enabled`），刷新不丢失
-- `handleSend` / `handleQuickAction` 调用 `sendMessage` 时传入 `enable_rag: ragEnabled.value`
-- 利用 `useLangGraph.ts` 已预留的 `AgentContext.enable_rag` 字段，无需改 composable
-
-### 16.5 Skills 规范
-
-- `src/workspace/admin/skills/rag-query/SKILL.md`：管理端 RAG 技能（运营策略、库存管理指南等）
-- `src/workspace/customer/skills/rag-query/SKILL.md`：C 端 RAG 技能（退换货政策、支付方式等）
-
-两个 Agent 的 SkillsMiddleware sources 均配置 `/skills/rag-query/`。
-
-### 16.6 启动顺序
-
-```bash
-# 1. 启动 LightRAG Server（端口 9621）
-cd LightRAG && lightrag-server
-
-# 2. 启动 RAG MCP Server（端口 8008）
-cd hmall-agent && uv run python start_rag_server.py
-
-# 3. 启动 Agent Server（端口 8090）
-uv run python start_server.py
-
-# 4. 启动前端
-cd hmall-frontend && npm run dev
-```
-
-### 16.7 配置项
-
-| 环境变量 | 默认值 | 说明 |
-|---------|--------|------|
-| `RAG_BASE_URL` | `http://localhost:9621` | LightRAG Server 地址 |
-| `RAG_USERNAME` | `admin` | LightRAG 登录用户名 |
-| `RAG_PASSWORD` | `admin123` | LightRAG 登录密码 |
-| `RAG_API_KEY` | （空） | LightRAG API Key（可选，优先于账号密码） |
-| `RAG_AUTH_ENABLED` | `true` | 是否启用 LightRAG 认证 |
-| `RAG_MCP_PORT` | `8008` | RAG MCP Server 监听端口 |
-
-### 16.8 知识库管理
-
-知识库文档由运营人员通过 LightRAG WebUI（`http://localhost:9621/webui`）上传维护：
-- 支持 PDF / DOCX / TXT / Markdown 等格式
-- LightRAG 自动构建知识图谱 + 向量索引
-- Agent 不负责文档管理，只负责检索
-
-详细部署和使用说明见 `hmall-agent-rag-integration.md`。
-
----
-
-## 17. LLM 健康检查（前端动态在线状态）
-
-> 版本：v2.3 补充
-> 日期：2026-07-20
-> 前端"Agent 在线"状态从写死改为根据 LLM API 远程调用连通性动态显示
-
-### 17.1 问题背景
-
-此前 `ChatPanel.vue` 头部的 `{{ isLoading ? '正在回复...' : '在线' }}` 和
-`AdminLayout.vue` 的 `<el-tag type="success">在线</el-tag>` 均为写死值，
-无论 LLM API（DashScope）是否可达都显示"在线"，无法反映真实服务状态。
-
-### 17.2 架构设计
-
-```
-前端组件（ChatPanel / AdminLayout）
-  │ onMounted → useLlmHealth.start()
-  │ 每 30s 轮询 GET /api/v1/llm/health
-  ▼
-LangGraph Server (:8090)
-  │ 自定义路由层（LANGGRAPH_HTTP 注入）
-  │ src/api/health.py → _ping_llm()
-  ▼
-DashScope API (dashscope.aliyuncs.com)
-  │ POST /compatible-mode/v1/chat/completions
-  │ {model: "qwen-turbo", messages:[{role:"user",content:"ping"}], max_tokens:1}
-  ▼
-返回 {llm_reachable, latency_ms, detail}
-  → 前端 llmStatus = 'online' | 'offline' | 'checking'
-```
-
-### 17.3 后端实现（`src/api/health.py`）
-
-**端点**：`GET /api/v1/llm/health`
-
-**探测方式**：向 DashScope OpenAI 兼容接口发送 `max_tokens=1` 的最小 chat completions 请求，
-验证三项：
-1. API Key 有效性（`DASHSCOPE_API_KEY`）
-2. LLM 服务可达性（网络连通）
-3. 模型可用性（`LLM_MODEL_NAME` 配置正确）
-
-**缓存策略**：模块级缓存 10 秒（`_CACHE_TTL = 10`），避免高频轮询消耗 token。
-缓存命中时返回 `cached: true`。
-
-**响应结构**：
-```json
-{
-  "status": "ok",
-  "llm_reachable": true,
-  "latency_ms": 342,
-  "model": "qwen-turbo",
-  "detail": null,
-  "cached": false,
-  "checked_at": 1721472000.0
-}
-```
-
-**异常兜底**：超时（8s）、连接错误、HTTP 错误码（401/429/5xx）、未配置 API Key 均返回
-`llm_reachable: false` + `detail` 错误说明，不抛异常。
-
-**路由挂载**：在 `src/api/batch_report.py` 中 `app.include_router(health_router)`，
-随 `LANGGRAPH_HTTP` 一起注入 LangGraph Server。
-
-### 17.4 前端实现
-
-#### Composable（`src/composables/useLlmHealth.ts`）
-
-| 特性 | 说明 |
+| 步骤 | 行为 |
 |------|------|
-| 轮询间隔 | 30 秒（`intervalMs` 可配置） |
-| 状态枚举 | `online` / `offline` / `checking` |
-| 派生属性 | `statusText`（在线/离线/检测中）、`statusType`（success/danger/info） |
-| 生命周期 | `onMounted` 自动开始，`onUnmounted` 自动停止 |
-| 手动刷新 | `refresh()` 方法 |
-| API URL | 取 `VITE_AGENT_URL` 环境变量，默认 `http://localhost:8090` |
+| 收到 interrupt | 展示 `value.message`（确认文案 / 字段提示） |
+| 用户确认 | `runs.stream(..., { command: { resume: <值> } })`，**input 可为 null** |
+| 用户拒绝 | resume 非确认值或 goto end（产品约定） |
 
-#### ChatPanel.vue 状态展示
+### 10.6 RAG 开关契约
 
-```vue
-<p class="text-[12px] opacity-80 mt-0.5" :class="agentStatusClass">
-  {{ agentStatusText }}
-</p>
-```
+- UI 开关 → `sessionStorage.rag_enabled`（刷新保持）。
+- `sendMessage` 时传入 `enable_rag: boolean`。
+- 与业务工具并存；MCP 不可达时后端降级，前端无需阻断发送。
 
-- `isLoading=true` → "正在回复..."（不受 LLM 状态影响）
-- `llmStatus=online` → "在线"（白色）
-- `llmStatus=offline` → "离线"（`text-red-200`）
-- `llmStatus=checking` → "检测中"（`text-yellow-200`）
+### 10.7 主题与双端复用
 
-#### AdminLayout.vue 状态标签
+`ChatPanel` 通过 props 区分：
 
-```vue
-<el-tag size="small" :type="llmStatusType">{{ llmStatusText }}</el-tag>
-```
+| Prop 语义 | C 端 | 管理端 |
+|-----------|------|--------|
+| assistantId | customer_agent | admin_agent |
+| agent_type | customer | admin |
+| 快捷语 | 购物 / 推荐 / 订单 | 日报 / 订单 / 秒杀 |
+| 主题色 | 商城品牌色 | 后台中性色 |
 
-- online → `<el-tag type="success">在线</el-tag>`
-- offline → `<el-tag type="danger">离线</el-tag>`
-- checking → `<el-tag type="info">检测中</el-tag>`
+禁止在单一页面混用两套 Token。
 
-### 17.5 设计考量
+### 10.8 会话列表 UX 契约
 
-| 决策 | 理由 |
-|------|------|
-| 用 `max_tokens=1` 的 chat 请求而非 `/models` | OpenAI 兼容接口的 `/models` 在某些提供商不返回认证错误，chat 请求最稳 |
-| 10 秒模块级缓存 | 前端 30 秒轮询 + 可能多组件同时检查，缓存避免重复消耗 token |
-| 前端 30 秒轮询间隔 | 平衡实时性与请求量；LLM 状态不会频繁变化 |
-| `onUnmounted` 自动停止 | 避免组件卸载后继续轮询造成内存泄漏 |
-| 端点不可达也视为离线 | `fetch` 异常时 `llmStatus='offline'`，覆盖 Agent Server 本身宕机的情况 |
+- 列表数据来自 `threads.search`，服务端已按 owner 过滤。  
+- 切换会话 = 切换 `thread_id` 并 `getState` 渲染历史。  
+- 删除需二次确认（前端），调用 `threads.delete`。  
 
+### 10.9 Markdown 与溢出
 
+AI 消息允许 Markdown（列表、粗体、代码块）；人类消息纯文本防注入。气泡容器需处理长 URL / 表格溢出（实现已修历史 bug，设计要求保留）。
+
+### 10.10 前端非目标
+
+本文不规定 CSS 细节、组件库版本锁定策略、e2e 用例；该部分属实现与工程规范。
 
 ---
 
-# 第二部分：个性化推荐设计
+## 11. 工具调用示例（场景级）
 
-> 版本：v1.0
-> 日期：2026-07-16
-> 关联文档：`docs/Agent功能相关文档/hmall-agent-design.md`（v2.1）
->
-> 对应 `hmall-agent-design.md` 第 15 节"后续优化方向"中 P2 项：基于用户浏览/购买历史的个性化推荐。
-
----
-
-## 1. 概述
-
-### 1.1 背景与目标
-
-当前 CustomerAgent 已具备商品浏览、搜索、秒杀、购物车、订单、地址等全链路交互能力（18 个工具），但**商品发现仍依赖用户主动搜索**。用户不会问"有什么推荐"，因为 Agent 没有推荐能力。
-
-本设计为 CustomerAgent 扩展**对话式个性化推荐**能力，核心目标：
-
-- 让 Agent 能基于用户购买/浏览历史主动推荐商品
-- 推荐结果附带**可解释的推荐理由**（"因为您买过 X，所以推荐 Y"）
-- 支持"猜你喜欢""看了又看""购物车凑单"三种对话场景
-- Agent 能自主分析用户偏好并组合工具形成推荐策略
-
-### 1.2 Agent 推荐与传统推荐的本质差异
-
-| 维度 | 传统推荐系统 | Agent 对话式推荐 |
-|------|-------------|-----------------|
-| 触发方式 | 页面加载自动渲染 | 对话中主动触发或用户询问 |
-| 可解释性 | 黑盒算法 | ✅ LLM 生成自然语言推荐理由 |
-| 上下文 | 仅用户行为画像 | ✅ 对话上下文 + 用户偏好 + 实时意图 |
-| 灵活性 | 固定召回-排序管线 | ✅ LLM 可自主组合多工具动态决策 |
-| 冷启动 | 算法层兜底 | ✅ Agent 可降级搜索、主动询问偏好 |
-| 交互闭环 | 单向推送 | ✅ 推荐→用户反馈→再推荐 |
-
-**核心定位**：推荐算法在后端，**推荐策略和交互在 Agent**。Agent 不是推荐算法的薄封装，而是能"理解用户、解释推荐、动态调整"的推荐对话体。
-
-### 1.3 设计原则
-
-| 原则 | 说明 |
-|------|------|
-| **Agent 主导** | 推荐触发、策略选择、理由生成都由 Agent 层完成，后端只提供数据 |
-| **复用现有基建** | 不引入推荐框架/训练平台，复用 `gateway_client`/ES/Redis/RabbitMQ |
-| **演进式落地** | 先用现有 `order_detail` + `item` 表 SQL 聚合，再逐步加入浏览行为 |
-| **优雅降级** | 推荐接口失败→热销兜底；画像为空→Agent 主动询问偏好 |
-| **零侵入交易链路** | 购买行为从 `paySuccessListener` 旁路采集，不侵入订单写库事务 |
-| **可解释性优先** | 每条推荐都附理由，理由由 LLM 结合偏好生成，非后端模板拼接 |
-
----
-
-## 2. 整体架构
-
-### 2.1 系统架构
+### 11.1 查看秒杀（L1）
 
 ```
-用户（C端对话）
-  │
-  │  "有什么推荐" / "帮我选个手机" / 查看商品后
-  ▼
-┌──────────────────────────────────────────────────────────────────┐
-│              Agent Service (LangGraph Server :8090)              │
-│                                                                    │
-│  ┌────────────────────────────────────────────────────────────┐   │
-│  │  中间件层（DeepAgent Middleware Chain）                      │   │
-│  │  ├── AuthMiddleware（introspect 注入 user_id）                 │   │
-│  │  ├── PermissionMiddleware（推荐工具需登录）                    │   │
-│  │  ├── RegexShortcutMiddleware（L1: "推荐/猜你喜欢" 快捷路由）  │   │
-│  │  └── SkillsMiddleware（加载 personalized-recommendation）    │   │
-│  └───────────────────────┬────────────────────────────────────┘   │
-│                          │                                         │
-│  ┌───────────────────────▼────────────────────────────────────┐   │
-│  │  CustomerAgent（扩展后 20 个工具）                            │   │
-│  │                                                               │   │
-│  │  新增工具：                                                    │   │
-│  │  ├── get_recommendations_api(scene, size, item_id)           │   │
-│  │  │     → 调用后端推荐接口，返回商品列表                         │   │
-│  │  └── analyze_user_preferences()                               │   │
-│  │        → 聚合购买历史+购物车，返回偏好画像                       │   │
-│  │                                                               │   │
-│  │  复用工具：                                                    │   │
-│  │  ├── search_items_api（降级搜索 / 偏好驱动搜索）              │   │
-│  │  ├── get_item_detail_api（推荐后查看详情）                     │   │
-│  │  └── add_to_cart_api（推荐后加购）                             │   │
-│  └───────────────────────┬────────────────────────────────────┘   │
-│                          │                                         │
-│  │  LLM 推理层（qwen-turbo）                                    │   │
-│  │  ├── 理解用户推荐意图                                         │   │
-│  │  ├── 选择推荐策略（直接推荐 / 偏好分析再推荐 / 搜索补充）     │   │
-│  │  ├── 结合偏好生成推荐理由                                     │   │
-│  │  └── 主动追问推荐反馈                                         │   │
-│                          │                                         │
-└──────────────────────────┬───────────────────────────────────────┘
-                           │ httpx (异步 HTTP)
-                           ▼
-┌──────────────────────────────────────────────────────────────────┐
-│              hm-gateway (:8080)                                    │
-│  ├── AuthGlobalFilter（JWT → userId 透传）                          │
-│  └── 新增路由：/recommend/**, /behaviors/**                         │
-└──┬────────────────┬────────────────────────────────────────────────┘
-   │                │
-   ▼                ▼
- item-service     trade-service
- :8081            :8085
- ├── /recommend   ├── order_detail（购买历史）
- │   (新增)       └── paySuccessListener（行为旁路）
- ├── /behaviors
- │   (新增)
- └── search-service :8089
-     └── ES 召回（已有）
+用户「查看秒杀活动」
+  → Auth（只读可无 token）→ Permission
+  → Regex 命中 → get_seckill_activities_api → 格式化列表
+  → 跳过 RAG/Skills/LLM → SSE 返回活动场次与库存摘要
 ```
 
-### 2.2 推荐数据流
+### 11.2 秒杀下单（L3 + L2）
 
 ```
-                    ┌─ 数据采集（异步） ─────────────────────────┐
-                    │                                            │
-  前端 ProductDetail ─► POST /behaviors ─► RabbitMQ ─► Consumer  │
-  (浏览埋点)            (type=view)                     │         │
-                                                       ▼         │
-  trade-service paySuccessListener ─► RabbitMQ ─► Consumer        │
-  (购买旁路)            (type=purchase)      │         │           │
-                                              ▼         ▼         │
-                                    ┌── Redis 画像 ──┐             │
-                                    │  up:{uid}:cat  │  (ZSet)    │
-                                    │  up:{uid}:brand│  (ZSet)    │
-                                    │  bh:{uid}:recent│ (ZSet)   │
-                                    └────────────────┘             │
-                    └────────────────────────────────────────────────┘
-                                    │
-                    ┌─ 推荐召回 ────▼──────────────────────────────┐
-                    │                                              │
-  Agent 调用 GET /recommend?scene=home&size=10                     │
-                    │                                              │
-  后端 RecommendService                                             │
-  ├── 1. 取用户偏好（Redis 画像）                                  │
-  ├── 2. Content-Based 召回（ES: 按 category/brand 过滤）         │
-  ├── 3. Item-CF 召回（Redis: 看了又看共现矩阵）                   │
-  ├── 4. 热门兜底（item.sold 倒序，冷启动）                        │
-  ├── 5. 过滤已购 / 已下架                                        │
-  └── 6. 返回商品列表 + 推荐标签                                   │
-                    │                                              │
-  Agent Formatter 格式化                                            │
-                    │                                              │
-  LLM 结合偏好生成推荐理由                                         │
-                    │                                              │
-  返回带理由的推荐话术给用户                                       │
-                    └──────────────────────────────────────────────┘
+用户「秒杀 iPhone 15」
+  → Regex 未命中（需抽 relationId）
+  → Skills(seckill-order) + LLM
+  → 查活动 → do_seckill_api → interrupt 确认
+  → 前端 resume「确认」→ POST 下单 → 返回排队/订单提示
 ```
 
-### 2.3 与现有三级路由的关系
+Checkpoint 保存挂起状态于 **`.langgraph_api`**（非 Redis）。
 
-推荐能力接入现有三级路由体系，不改变路由架构：
+### 11.3 地址修改（多轮 interrupt）
 
 ```
-用户消息
-  │
-  ├─ L1: RegexShortcutMiddleware
-  │   ├── "推荐" / "猜你喜欢" → get_recommendations_api(scene=home)  ← 新增正则
-  │   └── 其他正则规则不变
-  │
-  ├─ L2: interrupt
-  │   └── 推荐不涉及 interrupt（只读操作）
-  │
-  └─ L3: LLM 兜底
-      ├── "帮我选个手机" → LLM 先调 analyze_user_preferences
-      │                    → 再调 search_items_api / get_recommendations_api
-      │                    → 结合偏好生成推荐
-      └── "看了又看" → LLM 从对话上下文提取 item_id
-                       → 调 get_recommendations_api(scene=detail, item_id=xxx)
+「修改地址1」→ update_address_api
+  → interrupt 选字段 → resume
+  → interrupt 输入新值 → resume
+  → PUT /addresses/{id}
+```
+
+### 11.4 运营日报（L1 编排）
+
+```
+「运营日报」→ generate_daily_report
+  → gather 五路只读查询 → 模板输出
+```
+
+### 11.5 猜你喜欢（L1 推荐）
+
+```
+「有什么推荐」→ get_recommendations_api(scene=home)
+  → Gateway /recommend → 列表 + basedOn
 ```
 
 ---
 
-## 3. Agent 侧实现（核心）
+## 12. RAG 知识库（合并原 §16 与原第四部分）
 
-### 3.1 新增工具：`get_recommendations_api`
+> **状态：已实现。** 本章为 RAG 的**唯一权威设计章**；不再另设「第四部分」副本。  
+> 联调命令、验收清单、与设计偏差 → [实现说明](./hmall_Agent实现说明文档.md)。
 
-封装后端推荐接口，Agent 只负责决定何时调用、如何解释结果。
+### 12.1 目标与边界
 
-```python
-# src/agents/customer/tools.py（新增）
+| 端 | 典型问题 |
+|----|----------|
+| Customer | 退换货政策、支付方式、配送说明等 FAQ |
+| Admin | 秒杀策略、库存管理指南、订单分析、指标解读 |
 
-@tool
-async def get_recommendations_api(
-    config: RunnableConfig,
-    scene: str = "home",
-    size: int = 10,
-    item_id: int = 0,
-) -> str:
-    """基于用户浏览/购买历史获取个性化商品推荐。
+**边界**：Agent **不负责**文档上传与索引维护；运营通过 LightRAG WebUI 管理知识。Agent 仅在 `enable_rag=true` 时动态获得检索工具。
 
-    Args:
-        scene: 推荐场景
-            - home: 猜你喜欢（首页推荐，基于用户整体偏好）
-            - detail: 看了又看（基于指定商品找相似）
-            - cart: 购物车凑单推荐
-        size: 返回数量，默认 10
-        item_id: 当前商品 ID（scene=detail 时必填）
-    """
-    token = extract_token_from_config(config)
-    if not token:
-        return "❌ 个性化推荐需要先登录，登录后我可以根据您的偏好推荐商品"
-
-    params = {"scene": scene, "size": size}
-    if item_id:
-        params["itemId"] = item_id
-
-    try:
-        result = await gateway_client.get("/recommend", token=token, params=params)
-        return format_recommendations(result, scene)
-    except GatewayError as e:
-        if e.status_code == 401:
-            return "❌ 登录已过期，请重新登录后获取推荐"
-        # 降级：推荐接口失败时提示用户可手动搜索
-        return f"推荐服务暂时不可用，您可以尝试搜索商品。错误: {e}"
-```
-
-**设计要点**：
-
-| 决策 | 理由 |
-|------|------|
-| `scene` 参数化 | 让 LLM 根据对话上下文判断场景，而非后端猜测 |
-| `item_id` 可选 | "看了又看"需要种子商品，其他场景不需要 |
-| 复用 `extract_token_from_config` | 与现有 18 个工具的认证模式一致（`tools.py:127`） |
-| 降级返回提示 | 推荐非核心链路，失败时引导用户搜索，不阻断对话 |
-| 不含推荐理由 | 理由由 LLM 结合偏好生成，后端只给商品列表 + 标签 |
-
-**后端响应格式**（`GET /recommend` 返回）：
-
-```json
-{
-  "list": [
-    {
-      "id": 1001,
-      "name": "iPhone 15 Pro",
-      "price": 799900,
-      "stock": 45,
-      "brand": "Apple",
-      "category": "手机",
-      "sold": 1200,
-      "recommendTags": ["同类目热销", "您常买的品牌"]
-    }
-  ],
-  "total": 10,
-  "basedOn": {
-    "topCategories": ["手机", "耳机"],
-    "topBrands": ["Apple", "Sony"]
-  }
-}
-```
-
-`recommendTags` 是后端给的商品级标签（如"同类目热销""您常买的品牌"），`basedOn` 是推荐依据摘要——这些都传给 LLM，由 LLM 组织成自然语言推荐理由。
-
-### 3.2 新增工具：`analyze_user_preferences`
-
-这是 Agent 推荐的**差异化工具**——不依赖后端画像服务，直接用现有工具的数据聚合出用户偏好。让 Agent 拥有"看懂用户"的能力。
-
-```python
-# src/agents/customer/tools.py（新增）
-
-@tool
-async def analyze_user_preferences(config: RunnableConfig) -> str:
-    """分析当前用户的购物偏好（基于购买历史和购物车）。
-
-    返回偏好的类目、品牌、价格区间，供推荐和搜索参考。
-    需要登录。
-    """
-    token = extract_token_from_config(config)
-    if not token:
-        return "❌ 偏好分析需要先登录"
-
-    try:
-        # 并发获取购买历史和购物车
-        orders_page, cart_items = await asyncio.gather(
-            gateway_client.get("/orders/page", token=token,
-                               params={"pageNo": 1, "pageSize": 50}),
-            gateway_client.get("/carts", token=token),
-        )
-    except GatewayError as e:
-        return f"❌ 获取用户数据失败: {e}"
-
-    # 聚合分析
-    orders = orders_page.get("list", []) or orders_page.get("records", [])
-    cart = cart_items or []
-
-    category_scores = {}  # category -> 累计分
-    brand_scores = {}     # brand -> 累计分
-    price_points = []     # 所有购买价格
-
-    # 购买历史（权重 5）
-    for order in orders:
-        details = order.get("orderDetails", []) or order.get("details", [])
-        for d in details:
-            _accumulate_preference(
-                category_scores, brand_scores, price_points, d, weight=5
-            )
-
-    # 购物车（权重 3）
-    for item in cart:
-        _accumulate_preference(
-            category_scores, brand_scores, price_points, item, weight=3
-        )
-
-    return format_preferences(category_scores, brand_scores, price_points, orders, cart)
-```
-
-**聚合辅助函数**：
-
-```python
-# src/agents/customer/tools.py（新增，模块级私有函数）
-
-def _accumulate_preference(cat_scores, brand_scores, prices, item, weight):
-    """累加单个商品的偏好分数到聚合字典。"""
-    category = item.get("category", "")
-    brand = item.get("brand", "")
-    price = item.get("price")
-    num = item.get("num", 1)
-
-    if category:
-        cat_scores[category] = cat_scores.get(category, 0) + weight * num
-    if brand:
-        brand_scores[brand] = brand_scores.get(brand, 0) + weight * num
-    if price:
-        prices.append(price)
-```
-
-**设计要点**：
-
-| 决策 | 理由 |
-|------|------|
-| 并发获取订单+购物车 | `asyncio.gather` 并发，复用现有 `get_order_list_api`/`get_cart_list_api` 的 Gateway 路径 |
-| 购买权重 5，购物车权重 3 | 购买是更强信号，购物车是意向信号 |
-| 不依赖后端画像服务 | 直接用现有 `/orders/page` + `/carts` 接口，零后端改动即可启用 |
-| 返回结构化偏好文本 | LLM 拿到偏好后可自主决定后续策略（搜索/推荐/追问） |
-
-**偏好输出格式**：
+### 12.2 架构（单一权威图）
 
 ```
-📊 您的购物偏好分析
-─────────────────────
-基于 5 笔订单 + 3 件购物车商品
-
-偏好类目 Top 3:
-  1. 手机（得分 25）
-  2. 耳机（得分 10）
-  3. 手机壳（得分 5）
-
-偏好品牌 Top 3:
-  1. Apple（得分 30）
-  2. Sony（得分 10）
-
-价格区间:
-  常购价格：¥3,000 ~ ¥8,000
-  平均客单价：¥4,599
-```
-
-### 3.3 新增 Formatter 函数
-
-在 `src/tools/formatters.py` 中新增两个格式化函数，复用现有 `_yuan()`（`formatters.py:10-17`）和 `_status_text()`（`formatters.py:20-24`）辅助函数。
-
-```python
-# src/tools/formatters.py（新增）
-
-# ==================== 个性化推荐 ====================
-
-
-def format_recommendations(page_dto: dict, scene: str = "home") -> str:
-    """格式化推荐商品列表。
-
-    Args:
-        page_dto: 后端 /recommend 返回的数据
-        scene: 推荐场景（home/detail/cart）
-    """
-    if not page_dto:
-        return "暂无推荐商品，您可以尝试搜索看看"
-
-    items = page_dto.get("list", [])
-    total = page_dto.get("total", len(items))
-    based_on = page_dto.get("basedOn", {})
-
-    if not items:
-        return "暂无推荐商品，您可以尝试搜索看看"
-
-    scene_titles = {
-        "home": "猜你喜欢",
-        "detail": "看了又看",
-        "cart": "凑单推荐",
-    }
-    title = scene_titles.get(scene, "为你推荐")
-
-    lines = [f"🎯 {title}（共 {total} 件）", "─" * 30]
-
-    for i, item in enumerate(items, 1):
-        name = item.get("name", "未知商品")
-        price = _yuan(item.get("price"))
-        stock = item.get("stock", 0)
-        item_id = item.get("id", "")
-        tags = item.get("recommendTags", [])
-
-        tag_str = f" [{', '.join(tags)}]" if tags else ""
-        lines.append(f"{i}. {name} | ¥{price} | 库存 {stock} 件 [ID:{item_id}]{tag_str}")
-
-    # 推荐依据摘要
-    if based_on:
-        cats = based_on.get("topCategories", [])
-        brands = based_on.get("topBrands", [])
-        if cats or brands:
-            lines.append("─" * 30)
-            parts = []
-            if cats:
-                parts.append(f"偏好类目: {', '.join(cats[:3])}")
-            if brands:
-                parts.append(f"偏好品牌: {', '.join(brands[:3])}")
-            lines.append("推荐依据: " + " | ".join(parts))
-
-    return "\n".join(lines)
-
-
-def format_preferences(
-    cat_scores: dict,
-    brand_scores: dict,
-    prices: list,
-    orders: list,
-    cart: list,
-) -> str:
-    """格式化用户偏好分析结果。"""
-    order_count = len(orders)
-    cart_count = len(cart)
-
-    if order_count == 0 and cart_count == 0:
-        return "暂无足够的购买/购物车数据来分析偏好，推荐时将使用热门商品兜底"
-
-    lines = [
-        "📊 您的购物偏好分析",
-        "─" * 30,
-        f"基于 {order_count} 笔订单 + {cart_count} 件购物车商品",
-    ]
-
-    # 类目 Top 3
-    if cat_scores:
-        sorted_cats = sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)
-        lines.append("\n偏好类目 Top 3:")
-        for i, (cat, score) in enumerate(sorted_cats[:3], 1):
-            lines.append(f"  {i}. {cat}（得分 {score}）")
-
-    # 品牌 Top 3
-    if brand_scores:
-        sorted_brands = sorted(brand_scores.items(), key=lambda x: x[1], reverse=True)
-        lines.append("\n偏好品牌 Top 3:")
-        for i, (brand, score) in enumerate(sorted_brands[:3], 1):
-            lines.append(f"  {i}. {brand}（得分 {score}）")
-
-    # 价格区间
-    if prices:
-        min_price = _yuan(min(prices))
-        max_price = _yuan(max(prices))
-        avg_price = _yuan(sum(prices) / len(prices))
-        lines.append("\n价格区间:")
-        lines.append(f"  常购价格：¥{min_price} ~ ¥{max_price}")
-        lines.append(f"  平均客单价：¥{avg_price}")
-
-    return "\n".join(lines)
-```
-
-### 3.4 新增 Skill：`personalized-recommendation`
-
-```markdown
-# src/workspace/customer/skills/personalized-recommendation/SKILL.md
-
-# 个性化推荐技能
-
-## 适用场景
-用户想要商品推荐、想看猜你喜欢、浏览商品后想看相关推荐、
-购物车凑单，或表达模糊购物意图（"帮我选""随便看看"）时激活。
-
-## 工作流程
-
-### 场景 1：首页推荐 / 猜你喜欢
-用户说："有什么推荐" / "猜我喜欢什么" / "帮我选个商品"
-1. 调用 get_recommendations_api(scene="home", size=10)
-2. 结合返回的 basedOn 信息，生成推荐理由
-3. 主动询问用户对哪些推荐感兴趣
-
-### 场景 2：看了又看（商品详情后推荐）
-用户查看某商品后，或说："还有类似的吗" / "看了又看"
-1. 从对话上下文提取当前 item_id
-2. 调用 get_recommendations_api(scene="detail", item_id=xxx, size=5)
-3. 说明"与您刚看的 X 相似"并推荐
-
-### 场景 3：购物车凑单
-用户说："购物车还能加点什么" / "凑单推荐"
-1. 调用 get_recommendations_api(scene="cart", size=5)
-2. 说明推荐商品与购物车商品的搭配关系
-
-### 场景 4：偏好驱动推荐（Agent 自主推理）
-用户说："我想换个手机" / "推荐点苹果生态的产品"
-1. 调用 analyze_user_preferences() 获取用户偏好
-2. 根据偏好用 search_items_api 搜索匹配商品
-3. 结合偏好解释推荐理由
-
-## 可用工具
-- `get_recommendations_api(scene, size, item_id)` — 后端推荐召回
-- `analyze_user_preferences()` — 用户偏好分析
-- `search_items_api(keyword)` — 偏好驱动搜索（推荐不足时补充）
-- `get_item_detail_api(item_id)` — 用户对推荐商品感兴趣时查看详情
-- `add_to_cart_api(item_id)` — 推荐后加购
-
-## 推荐理由生成规则
-- 结合 analyze_user_preferences 返回的偏好类目/品牌
-- 结合 get_recommendations_api 返回的 recommendTags 和 basedOn
-- 生成自然语言理由，如："您之前购买过 iPhone 14，可能对这款 iPhone 15 感兴趣"
-- 如无偏好数据，说明是热销推荐："这款是近期热销商品，评价不错"
-
-## 输出格式
-```
-🎯 为你推荐（基于你的购买偏好）
-─────────────────────
-1. iPhone 15 Pro | ¥7999.00 | 库存 45 件 [ID:2001]
-   推荐理由：您常买 Apple 品牌产品，这款是同品类热销款
-2. AirPods Pro | ¥1899.00 | 库存 120 件 [ID:2002]
-   推荐理由：搭配您购物车中的 iPhone 使用，耳机很合适
-
-需要查看详情或加入购物车吗？
-```
-
-## 注意事项
-- 推荐需要登录，未登录时提示用户先登录
-- 推荐接口失败时降级为 search_items_api 搜索热销
-- 新用户无购买历史时，后端返回热销榜，不强行解释推荐理由
-- 推荐后主动询问用户反馈，形成推荐→反馈→再推荐的闭环
-```
-
-**Skill 注册**：在 `agent.py` 的 `sources` 列表中新增：
-
-```python
-# src/agents/customer/agent.py（修改 skills_middleware 配置）
-
-skills_middleware = SkillsMiddleware(
-    backend=skills_backend,
-    sources=[
-        "/skills/shopping-guide/",
-        "/skills/seckill-order/",
-        "/skills/cart-management/",
-        "/skills/order-management/",
-        "/skills/address-management/",
-        "/skills/personalized-recommendation/",  # ← 新增
-    ],
-)
-```
-
-### 3.5 Prompt 增强
-
-在 `src/agents/customer/prompts.py` 的 `SYSTEM_PROMPT` 中扩展能力声明和行为准则：
-
-```python
-# src/agents/customer/prompts.py（修改 SYSTEM_PROMPT）
-
-SYSTEM_PROMPT = """你是枫叶商城（hmall）的 AI 客服助手，帮助用户完成购物全流程操作。
-
-## 你的能力
-1. **商品浏览**：搜索商品、查看商品详情、分页浏览商品列表
-2. **秒杀活动**：查看秒杀活动列表、查看秒杀商品详情、秒杀下单（需二次确认）
-3. **购物车管理**：查看购物车、加入购物车、修改数量、删除商品（需确认）、清空购物车（需确认）
-4. **订单管理**：查看订单列表、查看订单详情、取消订单（需确认）、确认收货（需确认）
-5. **收货地址**：查看地址列表、新增地址（多轮收集）、修改地址（多轮收集）
-6. **个性化推荐**：基于用户购买/浏览历史推荐商品，支持猜你喜欢、看了又看、
-   购物车凑单等场景，推荐时附带推荐理由
-
-## 行为准则
-- 始终使用中文回复，语气友好亲切
-- 查询操作优先使用工具获取实时数据，不编造信息
-- 危险操作（取消订单、删除商品、清空购物车、秒杀下单）必须通过 interrupt 二次确认
-- 修改地址时通过 interrupt 多轮收集要修改的字段和新值
-- 空数据时直接返回固定提示，不生成虚假数据
-- 价格以「元」为单位显示（后端返回的是「分」）
-- 如果用户未登录但请求需要登录的操作，提示用户先登录
-- **当用户表达"随便看看""有什么推荐""帮我选"等模糊购物意图时，主动调用推荐工具**
-- **用户购买/浏览某商品后，可顺势推荐相关商品（看了又看）**
-- **推荐时务必说明推荐理由，让用户理解为何被推荐，理由基于用户偏好生成**
-- **推荐后主动询问用户是否查看详情或加入购物车，形成推荐闭环**
-
-## 输出格式
-- 商品列表：编号. 商品名 | 价格 | 库存 [ID:xxx]
-- 秒杀活动：活动名 [状态] → 场次 → 商品（秒杀价/原价/剩余）
-- 购物车：编号. 商品名 | 单价 × 数量 | 小计
-- 订单：编号. 订单号 | 金额 | 状态 | 日期
-- 地址：编号. 姓名 手机号 [默认] → 完整地址
-- **推荐：编号. 商品名 | 价格 | 库存 [ID:xxx] [推荐标签]**
-- **推荐理由：基于用户偏好的自然语言说明**
-
-## 注意事项
-- 商品 ID、订单 ID、地址 ID 等标识符用 [ID:xxx] 标注，方便用户引用
-- 秒杀下单前必须先展示商品详情和确认提示
-- 不要向用户暴露技术细节（如 API 路径、Token 等）
-"""
-```
-
-### 3.6 L1 正则路由规则
-
-在 `src/agents/customer/regex_rules.py` 中新增推荐意图的快捷路由：
-
-```python
-# src/agents/customer/regex_rules.py（新增规则）
-
-
-def _extract_recommend_scene(m: re.Match) -> dict:
-    """从正则匹配中提取推荐场景。"""
-    keyword = m.group(1) if m.groups() else ""
-    if "凑单" in keyword or "购物车" in keyword:
-        return {"scene": "cart"}
-    return {"scene": "home"}
-
-
-# 在 REGEX_RULES 列表中新增（插入在商品搜索规则之前）：
-
-REGEX_RULES = [
-    # ... 现有规则 ...
-
-    # === 个性化推荐（只读） ===
-    # 首页推荐 / 猜你喜欢
-    (
-        r"(?:推荐|猜你喜欢|有什么好|帮我选|随便看看|给我推荐)",
-        "get_recommendations_api",
-        _extract_recommend_scene,
-    ),
-    # 购物车凑单推荐
-    (
-        r"(?:购物车|凑单).{0,5}(?:推荐|加|添|凑)",
-        "get_recommendations_api",
-        lambda m: {"scene": "cart"},
-    ),
-
-    # ... 现有商品搜索规则 ...
-]
-```
-
-**正则路由规则表（新增部分）**：
-
-| 用户输入示例 | 匹配正则 | 路由工具 | 参数 |
-|-------------|---------|---------|------|
-| `有什么推荐` / `猜你喜欢` | `(?:推荐\|猜你喜欢\|有什么好\|帮我选\|随便看看\|给我推荐)` | `get_recommendations_api` | `scene=home` |
-| `购物车推荐` / `凑单推荐` | `(?:购物车\|凑单).{0,5}(?:推荐\|加\|添\|凑)` | `get_recommendations_api` | `scene=cart` |
-| `看了又看` / `相似商品` | （不拦截，走 L3 LLM） | `get_recommendations_api` | LLM 从上下文提取 `item_id` |
-
-**"看了又看"不走 L1 的原因**：需要从对话上下文提取当前商品 ID，正则无法做到。由 L3 LLM 处理，LLM 能从最近对话历史中推断 `item_id` 并调用 `get_recommendations_api(scene="detail", item_id=xxx)`。
-
-**工具注册更新**：
-
-```python
-# src/agents/customer/tools.py（修改 get_all_tools）
-
-def get_all_tools():
-    """返回 CustomerAgent 所需的全部工具列表。"""
-    return [
-        # 商品浏览
-        search_items_api,
-        get_item_detail_api,
-        get_item_page_api,
-        # 秒杀
-        get_seckill_activities_api,
-        get_seckill_product_api,
-        do_seckill_api,
-        # 购物车
-        get_cart_list_api,
-        add_to_cart_api,
-        update_cart_quantity_api,
-        delete_cart_item_api,
-        clear_cart_api,
-        # 订单
-        get_order_list_api,
-        get_order_detail_api,
-        cancel_order_api,
-        confirm_receive_api,
-        # 地址
-        get_address_list_api,
-        add_address_api,
-        update_address_api,
-        # 个性化推荐（新增）
-        get_recommendations_api,
-        analyze_user_preferences,
-    ]
-```
-
-工具总数从 18 → 20。
-
-### 3.7 工具变更总览
-
-| 变更类型 | 文件 | 改动 |
-|---------|------|------|
-| 新增工具 | `src/agents/customer/tools.py` | `get_recommendations_api` + `analyze_user_preferences` + `_accumulate_preference` |
-| 修改注册 | `src/agents/customer/tools.py` | `get_all_tools()` 新增 2 个工具 |
-| 新增 Formatter | `src/tools/formatters.py` | `format_recommendations` + `format_preferences` |
-| 新增 Skill | `src/workspace/customer/skills/personalized-recommendation/SKILL.md` | 推荐工作流规范 |
-| 修改注册 | `src/agents/customer/agent.py` | `sources` 新增 `/skills/personalized-recommendation/` |
-| 修改 Prompt | `src/agents/customer/prompts.py` | 能力声明 + 行为准则 + 输出格式 |
-| 修改正则 | `src/agents/customer/regex_rules.py` | 新增 2 条推荐匹配规则 + `_extract_recommend_scene` |
-
----
-
-## 4. Agent 推荐的三种触发模式
-
-这是 Agent 推荐区别于传统推荐的核心设计——Agent 能在不同对话时机，以不同策略触发推荐。
-
-### 4.1 模式 A：用户主动请求推荐
-
-```
-用户: "有什么好物推荐吗？"
-  │
-  ├─ L1 正则命中 "(?:推荐|猜你喜欢|有什么好|帮我选|随便看看)"
-  │   → get_recommendations_api(scene="home", size=10)
-  │   → 后端返回商品列表 + basedOn
-  │   → format_recommendations 格式化
-  │
-  └─ 直接返回（跳过 LLM，<5ms）:
-      🎯 猜你喜欢（共 10 件）
-      ─────────────────────
-      1. iPhone 15 Pro | ¥7999.00 | 库存 45 件 [ID:2001] [同类目热销, 您常买的品牌]
-      2. AirPods Pro | ¥1899.00 | 库存 120 件 [ID:2002] [搭配推荐]
-      ...
-      推荐依据: 偏好类目: 手机, 耳机 | 偏好品牌: Apple, Sony
-```
-
-**特点**：L1 正则快捷路由，零 LLM 成本，响应 <5ms。适用于高频的"猜你喜欢"场景。
-
-### 4.2 模式 B：Agent 主动推荐（对话式 Upsell）
-
-```
-用户: "帮我看看 iPhone 15"
-  │
-  ├─ LLM 调用 get_item_detail_api(item_id=2001)
-  ├─ 展示商品详情:
-  │   📦 商品详情 [ID:2001]
-  │   名称: iPhone 15
-  │   价格: ¥5999.00
-  │   ...
-  │
-  ├─ LLM 判断用户有购买兴趣 → 主动调 get_recommendations_api(scene="detail", item_id=2001)
-  │   → 后端返回相似/搭配商品
-  │
-  └─ 追加推荐:
-      您可能还对这些感兴趣：
-      1. AirPods Pro | ¥1899.00 [ID:2002] — 搭配 iPhone 使用
-      2. iPhone 15 手机壳 | ¥99.00 [ID:2003] — 配件推荐
-      需要查看详情或加入购物车吗？
-```
-
-**特点**：LLM 在展示商品后**主动触发**推荐——这是传统推荐系统做不到的对话式 upsell。Prompt 中引导 Agent "用户购买/浏览某商品后，可顺势推荐相关商品"。
-
-### 4.3 模式 C：偏好驱动推荐（Agent 自主推理）
-
-```
-用户: "我最近想换个手机，预算 5000 左右"
-  │
-  ├─ LLM 推理：用户有明确需求但需要个性化建议
-  │
-  ├─ LLM 调用 analyze_user_preferences()
-  │   → 返回偏好: 类目=手机, 品牌=Apple, 价格区间 ¥3000-¥8000
-  │
-  ├─ LLM 结合偏好 + 用户预算 → 调用 search_items_api("iPhone")
-  │   → 搜索结果中筛选符合预算的
-  │
-  └─ 生成带偏好解释的推荐:
-      根据您的购买记录，您偏好 Apple 品牌，之前买过 iPhone 14。
-      在 ¥5000 预算内为您推荐：
-      1. iPhone 15 | ¥4999.00 [ID:2001] — 新款，比您之前用的性能提升 30%
-      2. iPhone 14 Plus | ¥4299.00 [ID:2005] — 大屏体验
-      需要查看详细对比吗？
-```
-
-**特点**：Agent **不完全依赖后端推荐接口**，而是 LLM 基于偏好分析自主决策——先用 `analyze_user_preferences` 理解用户，再用 `search_items_api` 精准搜索，最后结合偏好生成推荐理由。这是 Agent 最灵活的推荐模式。
-
-### 4.4 三种模式对比
-
-| 维度 | 模式 A（主动请求） | 模式 B（主动 Upsell） | 模式 C（偏好驱动） |
-|------|-------------------|---------------------|-------------------|
-| 触发方 | 用户 | Agent（LLM 主动） | Agent（LLM 推理） |
-| 路由层 | L1 正则（<5ms） | L3 LLM（~2s） | L3 LLM（~3s，多工具） |
-| 工具调用 | `get_recommendations_api` | `get_item_detail_api` → `get_recommendations_api` | `analyze_user_preferences` → `search_items_api` |
-| 推荐理由来源 | 后端 `basedOn` + tags | LLM 结合商品 + 相似性 | LLM 结合偏好 + 预算 |
-| 适用场景 | 高频"猜你喜欢" | 商品详情后"看了又看" | 复杂购物咨询 |
-| LLM 成本 | 零 | 1 次推理 | 1-2 次推理 |
-
----
-
-## 5. 冷启动处理（Agent 侧）
-
-| 场景 | Agent 行为 | 后端行为 |
-|------|-----------|---------|
-| 未登录用户 | Prompt 提示"登录后可获个性化推荐" | 接口返回 401 |
-| 新用户（无购买历史） | `analyze_user_preferences` 返回"暂无足够数据" | `get_recommendations_api` 返回热销榜 |
-| 推荐接口失败 | Agent 降级为 `search_items_api` 按热门关键词搜索 | 返回错误 |
-| 画像为空 | LLM 主动询问："您平时喜欢什么类型的商品？我可以帮您推荐" | — |
-
-**冷启动对话示例**：
-
-```
-用户: "有什么推荐"
-  │
-  ├─ get_recommendations_api(scene="home")
-  │   → 后端发现无购买历史 → 返回热销榜 + basedOn=null
-  │
-  ├─ format_recommendations: "🎯 热销推荐（共 10 件）..."
-  │
-  └─ LLM 追加（Prompt 引导）:
-      以上是近期热销商品。登录后我可以根据您的购买历史做更精准的推荐，
-      您也可以告诉我您喜欢什么类型的商品，我来帮您找找。
-```
-
-**Agent 冷启动的优势**：传统推荐系统对新用户只能返回冷冰冰的热销榜。Agent 能**主动追问偏好**，引导用户表达兴趣，快速建立初始画像。
-
----
-
-## 6. 后端 API 需求（最小改动）
-
-Agent 工具通过 Gateway 调用，后端需新增 2 个接口。**推荐策略在后端实现，Agent 不关心算法细节**。
-
-### 6.1 接口 1：`GET /recommend`（推荐召回）
-
-```
-GET /recommend?scene=home&size=10&itemId=1001
-Authorization: <user_jwt>
-```
-
-**请求参数**：
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `scene` | String | 是 | `home` / `detail` / `cart` |
-| `size` | Integer | 否 | 返回数量，默认 10 |
-| `itemId` | Long | 否 | `scene=detail` 时必填，种子商品 ID |
-
-**响应格式**：
-
-```json
-{
-  "list": [
-    {
-      "id": 1001,
-      "name": "iPhone 15 Pro",
-      "price": 799900,
-      "stock": 45,
-      "brand": "Apple",
-      "category": "手机",
-      "sold": 1200,
-      "recommendTags": ["同类目热销", "您常买的品牌"]
-    }
-  ],
-  "total": 10,
-  "basedOn": {
-    "topCategories": ["手机", "耳机"],
-    "topBrands": ["Apple", "Sony"]
-  }
-}
-```
-
-**后端实现策略（演进式）**：
-
-| Phase | 数据源 | 算法 | 基础设施 |
-|-------|--------|------|---------|
-| Phase 1（先跑通） | `order_detail` + `item` 表 | SQL 聚合用户已购类目/品牌 → ES 按类目品牌召回 → 按销量排序 | 仅 SQL + ES（已有） |
-| Phase 2（行为丰富后） | + `user_behavior` 表 | 加入浏览行为权重 + Item-CF 共现矩阵 | + Redis 画像 + 共现矩阵 |
-| Phase 3（可选） | + 向量召回 | ES `dense_vector` 语义相似 | + Embedding 模型 |
-
-**Phase 1 核心逻辑**（纯 SQL + ES，无需新基础设施）：
-
-```sql
--- 1. 获取用户已购类目偏好（Top 3）
-SELECT i.category, SUM(od.num) AS score
-FROM order_detail od
-JOIN `order` o ON od.order_id = o.id
-JOIN item i ON od.item_id = i.id
-WHERE o.user_id = #{userId} AND o.status IN (2,3,4,6)
-GROUP BY i.category
-ORDER BY score DESC
-LIMIT 3;
-
--- 2. ES 按偏好类目召回（复用 SearchServiceImpl 的 BoolQuery 模式）
---    filter: category IN (偏好类目) AND status = 1
---    sort: sold DESC
---    排除用户已购商品
-```
-
-### 6.2 接口 2：`POST /behaviors`（行为采集）
-
-```
-POST /behaviors
-Authorization: <user_jwt>
-Content-Type: application/json
-
-{
-  "itemId": 1001,
-  "type": "view"
-}
-```
-
-**请求参数**：
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `itemId` | Long | 是 | 商品 ID |
-| `type` | String | 是 | `view` / `cart` / `purchase` / `favorite` |
-
-**行为权重**（后端画像计算时使用）：
-
-| 行为类型 | 权重 | 说明 |
-|---------|------|------|
-| `view` | 1 | 浏览（弱信号） |
-| `favorite` | 4 | 收藏（中强信号） |
-| `cart` | 3 | 加购（中信号） |
-| `purchase` | 5 | 购买（强信号） |
-
-**实现要点**：
-
-- 接口只写 MQ，Consumer 异步落库 + 更新画像，保证主流程 <10ms
-- **购买行为不需要前端埋点**：复用 `trade-service` 的 `paySuccessListener`（已有），支付成功时发一条 `purchase` 行为消息
-- 浏览埋点在前端 `ProductDetail.vue` 的 `onMounted` 中上报
-
-### 6.3 新增数据表
-
-```sql
--- 用户行为表
-CREATE TABLE user_behavior (
-    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id     BIGINT NOT NULL COMMENT '用户ID',
-    item_id     BIGINT NOT NULL COMMENT '商品ID',
-    behavior_type VARCHAR(20) NOT NULL COMMENT 'view/cart/purchase/favorite',
-    score       INT DEFAULT 1 COMMENT '行为权重分',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_user_time (user_id, create_time),
-    INDEX idx_item_type (item_id, behavior_type)
-) COMMENT '用户行为记录表';
-```
-
-### 6.4 Redis 画像结构（Phase 2 已实现）
-
-> **Phase 2 实现说明**：原设计使用 `up:` 前缀 + ZSet 结构，实际实现改为 `profile:` 前缀 + Hash/List 结构（详见 [hmall-agent-profile-and-notification-design.md](./hmall-agent-profile-and-notification-design.md) §3.1）。画像由后端 `paySuccessListener`（purchase）和 `CartServiceImpl`（cart）共同写入，Agent 侧仅 `analyze_user_preferences` miss 后回写画像，使用 HINCRBY 原子增量更新。
-
-| Key | 结构 | 说明 | 实现状态 |
-|-----|------|------|---------|
-| `profile:{userId}:events` | List（LPUSH+LTRIM 50，TTL 7d） | 行为流（加购/下单/收货事件） | ✅ Phase 2 已实现 |
-| `profile:{userId}:categories` | Hash（field=category, value=累计得分，TTL 30d） | 用户类目偏好 | ✅ Phase 2 已实现 |
-| `profile:{userId}:brands` | Hash（field=brand, value=累计得分，TTL 30d） | 用户品牌偏好 | ✅ Phase 2 已实现 |
-| `profile:{userId}:prices` | List（LPUSH+LTRIM 20，TTL 30d） | 最近购买价格 | ✅ Phase 2 已实现 |
-| `profile:{userId}:stats` | Hash（purchase_count/cart_count/last_update，TTL 30d） | 统计信息 | ✅ Phase 2 已实现 |
-| `cf:{itemId}` | Hash（field=itemId, value=共现次数） | Item-CF 共现矩阵 | ⏸ Phase 3 |
-| `rec:{userId}:{scene}` | String（JSON 商品列表） | 推荐结果缓存，TTL 5-10min | ⏸ Phase 3 |
-
----
-
-## 7. 前端集成
-
-### 7.1 浏览埋点
-
-在 `ProductDetail.vue` 的 `onMounted` 中上报浏览行为：
-
-```typescript
-// hmall-frontend/src/views/portal/ProductDetail.vue（新增）
-
-onMounted(async () => {
-  // ... 现有逻辑 ...
-
-  // 上报浏览行为（异步，不阻塞页面）
-  if (route.params.id && sessionStorage.getItem('token')) {
-    try {
-      await api.post('/behaviors', {
-        itemId: Number(route.params.id),
-        type: 'view',
-      }, {
-        headers: { authorization: sessionStorage.getItem('token') }
-      })
-    } catch {
-      // 埋点失败静默忽略，不影响页面正常使用
-    }
-  }
-})
-```
-
-### 7.2 对话快捷操作
-
-在 `ChatPanel.vue` 的 `shortcuts` 中新增推荐快捷入口：
-
-```typescript
-// C 端快捷操作（新增推荐相关）
-const shortcuts = [
-  '有什么推荐',
-  '猜你喜欢',
-  '查看秒杀活动',
-  '我的购物车',
-  '我的订单',
-]
-```
-
-### 7.3 推荐商品卡片（可选增强）
-
-`MessageBubble.vue` 的 Markdown 渲染已支持列表格式（`hmall-agent-implementation-report.md` 第 4.4 节）。推荐结果以标准列表格式输出，前端无需特殊处理。
-
-如后续需要商品卡片样式，可在 `MessageBubble.vue` 中解析 `[ID:xxx]` 标记并渲染为可点击链接，点击跳转商品详情页。
-
----
-
-## 8. Agent 推荐闭环设计
-
-推荐不是一次性的，Agent 能形成"推荐→反馈→再推荐"的对话闭环：
-
-```
-推荐商品
-  │
-  ├─ 用户: "第一个不错，详情看看"
-  │   → get_item_detail_api(item_id=2001)
-  │   → 展示详情 → 顺势再推荐搭配（模式 B）
-  │
-  ├─ 用户: "有没有更便宜的同款"
-  │   → LLM 理解意图 → search_items_api(同品牌同类型 + 价格更低)
-  │   → 结合偏好生成新推荐
-  │
-  ├─ 用户: "加购物车吧"
-  │   → add_to_cart_api(item_id=2001)
-  │   → 顺势推荐凑单（scene=cart）
-  │
-  └─ 用户: "不喜欢这个品牌"
-      → LLM 记录用户反馈 → 排除该品牌重新推荐
-      → 或调 search_items_api 搜索其他品牌
-```
-
-**闭环设计要点**：
-
-- Prompt 引导 Agent "推荐后主动询问用户是否查看详情或加入购物车"
-- Agent 能理解用户的偏好反馈（"不喜欢""太贵了""有别的品牌吗"）并调整推荐策略
-- LangGraph Thread 保存对话历史，Agent 能引用之前推荐的商品
-
----
-
-## 9. 技术决策
-
-### 9.1 决策：推荐理由由 LLM 生成而非后端模板拼接
-
-**决策**：后端只返回 `recommendTags`（商品级标签）和 `basedOn`（推荐依据摘要），推荐理由由 LLM 结合用户偏好生成。
-
-**理由**：
-- 后端模板拼接的理由生硬（"推荐理由：同类目热销"），缺乏个性化
-- LLM 能结合偏好生成自然语言（"您常买 Apple 品牌产品，这款是同品类热销款"）
-- LLM 能结合对话上下文调整话术（用户刚看了 iPhone → "与您刚看的 iPhone 相似"）
-- 后端标签作为结构化数据给 LLM 参考，LLM 负责组织成自然语言
-
-### 9.2 决策：`analyze_user_preferences` 不依赖后端画像服务
-
-**决策**：偏好分析工具直接调用现有 `/orders/page` + `/carts` 接口，在 Agent 侧聚合。
-
-**理由**：
-- 零后端改动即可启用偏好分析能力
-- 现有 `get_order_list_api` 和 `get_cart_list_api` 已验证可用
-- Phase 1 无需后端画像服务，Phase 2 画像丰富后可切换为调用画像接口
-- Agent 侧聚合逻辑简单（类目/品牌分数累加），无需复杂算法
-
-### 9.3 决策：推荐工具需登录，商品浏览工具不需要
-
-**决策**：`get_recommendations_api` 和 `analyze_user_preferences` 都需要登录（`token` 检查），而 `search_items_api`/`get_item_page_api` 不需要。
-
-**理由**：
-- 推荐基于用户个人数据（购买/浏览历史），必须认证
-- 未登录用户访问推荐时，提示"登录后可获个性化推荐"，降级为搜索
-- 与现有 `get_cart_list_api`/`get_order_list_api` 的认证模式一致
-
-### 9.4 决策："猜你喜欢"走 L1 正则，"看了又看"走 L3 LLM
-
-**决策**：首页"猜你喜欢"通过 L1 正则快捷路由（<5ms），"看了又看"由 L3 LLM 处理。
-
-**理由**：
-- "猜你喜欢"是高频场景，参数固定（scene=home），适合正则拦截
-- "看了又看"需要从对话上下文提取 `item_id`，正则无法做到
-- LLM 能从最近对话历史中推断当前商品 ID，虽然慢 ~2s 但更准确
-
-### 9.5 决策：Phase 1 不引入 Item-CF 和向量召回
-
-**决策**：Phase 1 仅用 SQL 聚合 + ES 按类目品牌召回 + 销量排序。
-
-**理由**：
-- P2 优先级，投入产出需平衡
-- 商品/用户规模小时，Item-CF 共现矩阵稀疏，效果不佳
-- Content-Based（类目/品牌匹配）+ 热销兜底已能覆盖基本场景
-- Phase 2 行为数据积累后，再引入 Item-CF 和向量召回
-
-### 9.6 决策：购买行为从 paySuccessListener 旁路采集
-
-**决策**：不在 Agent 层采集购买行为，而是在 `trade-service` 的 `paySuccessListener` 中旁路发送行为消息。
-
-**理由**：
-- 支付成功是确定的购买信号，Agent 层无法感知
-- `paySuccessListener` 已有（`trade-service` 现有代码），只需新增一行发消息逻辑
-- 不侵入交易主链路，消息发送失败不影响支付流程
-- 浏览行为由前端埋点采集，加购行为可从购物车变更推断
-
----
-
-## 10. 实现优先级
-
-### 10.1 分步实施
-
-| 步骤 | 改动点 | 工作量 | 价值 | 阶段 | 状态 |
-|------|--------|--------|------|------|------|
-| 1 | Agent 新增 `get_recommendations_api` 工具 | 小 | 核心 | Phase 1 | ✅ 已完成 |
-| 2 | Agent 新增 `analyze_user_preferences` 工具 | 中 | 差异化 | Phase 1 | ✅ 已完成 |
-| 3 | Agent 新增 `format_recommendations` + `format_preferences` | 小 | 输出规范 | Phase 1 | ✅ 已完成 |
-| 4 | Agent 新增 `personalized-recommendation` Skill | 小 | 工作流 | Phase 1 | ✅ 已完成 |
-| 5 | Agent 修改 Prompt + 正则路由 + 工具注册 | 小 | 触发 | Phase 1 | ✅ 已完成 |
-| 6 | 后端 `GET /recommend` 接口（Phase 1: SQL+ES） | 中 | 数据供给 | Phase 1 | ✅ 已完成 |
-| 7 | 行为采集写入画像（后端 `paySuccessListener` 写 purchase + `CartServiceImpl` 写 cart） | 中 | 数据采集 | Phase 2 | ✅ 已完成（实现方式调整：后端直接写 Redis 而非 POST /behaviors + MQ，覆盖 Agent + 前端 UI 全路径） |
-| 8 | 前端 `ProductDetail.vue` 浏览埋点 | 小 | 数据积累 | Phase 2 | ⏸ 待实施 |
-| 9 | Redis 画像计算（`ProfileStore` HINCRBY 增量更新 + `RecommendServiceImpl` 共享读取） | 中 | 画像精度 | Phase 2 | ✅ 已完成 |
-| 10 | 后端 Item-CF 共现矩阵（定时任务） | 中 | 召回质量 | Phase 2 | ⏸ 待实施 |
-
-### 10.2 Phase 1 交付物（Agent 侧优先）
-
-Phase 1 只需完成步骤 1-6，即可让 Agent 具备完整推荐对话能力：
-
-- **Agent 侧**（步骤 1-5）：2 个新工具 + 1 个 Skill + Prompt/正则增强
-- **后端侧**（步骤 6）：1 个 `/recommend` 接口，纯 SQL + ES 实现
-
-Phase 1 不需要行为采集（步骤 7-8）和画像服务（步骤 9-10），因为 `analyze_user_preferences` 直接用现有订单/购物车接口聚合，`get_recommendations_api` 后端 Phase 1 也用 `order_detail` 表聚合。
-
-### 10.3 测试验证
-
-| 测试场景 | 验证点 |
-|---------|--------|
-| L1 正则命中"推荐" | <5ms 返回推荐列表，不走 LLM |
-| 未登录访问推荐 | 返回"需要先登录"提示 |
-| 新用户推荐（无订单） | 后端返回热销榜，Agent 不强行解释理由 |
-| 模式 A：用户说"猜你喜欢" | L1 正则 → 推荐列表 + 推荐依据 |
-| 模式 B：查看商品后主动推荐 | LLM 在详情后追加"看了又看" |
-| 模式 C：偏好驱动推荐 | LLM 先调 analyze_user_preferences 再搜索 |
-| 推荐接口失败 | Agent 降级为搜索提示 |
-| 推荐后加购 | 形成推荐→加购→凑单推荐闭环 |
-| Formatter 空数据 | 返回友好提示，不报错 |
-| analyze_user_preferences 并发 | 订单+购物车并发获取无阻塞 |
-
----
-
-## 11. 风险与规避
-
-| 风险 | 影响 | 规避 |
-|------|------|------|
-| 数据稀疏（用户/商品少） | Content-Based 召回不足 | 热销榜兜底 + Agent 主动询问偏好 |
-| 推荐接口延迟 | 对话体验差 | 后端 Redis 缓存（5-10min TTL）+ Agent 降级搜索 |
-| LLM 生成推荐理由不准 | 用户信任度下降 | 后端 `recommendTags` 作为结构化约束，LLM 基于标签生成 |
-| 埋点性能影响页面 | 用户体验差 | 埋点接口只写 MQ，前端 `catch` 静默忽略错误 |
-| 画像更新延迟 | 推荐不够实时 | 购买行为实时更新画像，浏览行为近线更新（秒级延迟可接受） |
-
----
-
-## 12. 与现有文档的关联
-
-| 文档 | 关系 |
-|------|------|
-| `docs/Agent功能相关文档/hmall-agent-design.md` | **父文档**：Agent 整体设计，第 15 节列出"商品推荐 P2"为本设计来源 |
-| `docs/Agent功能相关文档/hmall-agent-implementation-report.md` | **关联**：实现说明文档，本文档的实现将更新该报告 |
-| `hmall-agent/src/agents/customer/tools.py` | **修改**：新增 2 个工具 + 修改 `get_all_tools()` |
-| `hmall-agent/src/agents/customer/prompts.py` | **修改**：SYSTEM_PROMPT 新增推荐能力声明 |
-| `hmall-agent/src/agents/customer/regex_rules.py` | **修改**：新增 2 条推荐正则规则 |
-| `hmall-agent/src/agents/customer/agent.py` | **修改**：Skills sources 新增 `personalized-recommendation` |
-| `hmall-agent/src/tools/formatters.py` | **修改**：新增 2 个格式化函数 |
-| `hmall-agent/src/workspace/customer/skills/personalized-recommendation/SKILL.md` | **新增**：推荐工作流规范 |
-| `hmall/item-service/src/main/java/com/hmall/item/controller/ItemController.java` | **修改**：新增 `/recommend` + `/behaviors` 接口 |
-| `hmall/search-service/src/main/java/com/hmall/search/service/impl/SearchServiceImpl.java` | **参考**：ES 召回逻辑复用其 BoolQuery 模式 |
-| `hmall/trade-service/src/main/java/com/hmall/trade/Listener/paySuccessListener.java` | **修改**：支付成功后 `StringRedisTemplate` HINCRBY 写入 purchase 画像 |
-| `hmall/cart-service/src/main/java/com/hmall/cart/service/impl/CartServiceImpl.java` | **修改**：加购成功后 `StringRedisTemplate` HINCRBY 写入 cart 画像（覆盖 Agent + 前端 UI 全路径） |
-
----
-
-## 13. 后续优化方向
-
-| 方向 | 说明 | 优先级 |
-|------|------|--------|
-| 向量召回 | ES `dense_vector` 语义相似商品推荐，提升"看了又看"质量 | P3（等 P1 语义搜索一起上） |
-| 实时推荐反馈 | 用户对推荐的点击/加购行为反馈到画像，调整推荐策略 | P3 |
-| 多模态推荐 | 支持图片输入推荐（"推荐类似这张图的商品"） | P3（等多模态支持后） |
-| A/B 测试 | 推荐算法效果对比，不同召回策略转化率分析 | P3 |
-| AdminAgent 推荐分析 | 管理助手查看推荐效果数据（点击率/转化率/收入贡献） | P3 |
-| 正则规则动态加载 | 推荐相关正则从 Nacos 动态加载，无需重启 | P3（与整体正则动态加载一起做） |
-
----
-
-> **设计完成度**：本文档覆盖了 Agent 个性化推荐能力的完整设计，包括 2 个新工具、1 个 Skill、Prompt/正则/Formatter 增强、3 种推荐触发模式、冷启动处理、后端最小接口需求、前端埋点、推荐闭环设计、6 项技术决策和分步实施计划。Phase 1（步骤 1-6）可在不引入新基础设施的前提下，让 Agent 具备完整的对话式推荐能力。
-
-
----
-
-# 第三部分：用户画像与主动通知设计
-
-> 版本：v2.0
-> 日期：2026-07-29
->
-> **前置文档**：[agent-personalized-recommendation-design.md](./agent-personalized-recommendation-design.md)（推荐设计）
-> [agent-personalized-recommendation-implementation-report.md](./agent-personalized-recommendation-implementation-report.md)（Phase 1 实现报告）
->
-> 本文档定义两个 Agent 核心能力扩展的详细设计方案，承接个性化推荐 Phase 1 实现报告中"第十章 后续优化方向"的内容：
-> - **用户画像持久化**：Phase 2 核心项，落地"Redis 画像计算 + 行为采集 + 推荐结果缓存"，将 Phase 1 的"两端重复计算"统一为"共享增量画像"
-> - **主动通知**：差异化竞争力，从"被动应答"升级为"事件驱动主动推送"
-
----
-
-## 第一部分：用户画像持久化
-
-### 1. 概述
-
-#### 1.1 背景：Phase 1 实现现状与遗留问题
-
-个性化推荐 Phase 1 已落地两套独立的偏好计算链路，彼此互不知晓，每次均全量重算：
-
-```
-Phase 1 现状（双重计算）
-
-用户说 "有什么推荐"
-  │
-  ├─ L1 正则命中 → get_recommendations_api(scene="home")
-  │     │
-  │     └─ Gateway → item-service RecommendController
-  │           │
-  │           └─ RecommendServiceImpl.recommend()          ① 后端侧重算
-  │                ├─ Feign → trade-service 取已购商品
-  │                ├─ 查 item 表补充 category/brand
-  │                ├─ 按购买数量加权聚合偏好 Top3
-  │                └─ Feign → search-service ES 召回
-  │
-  └─ 用户追问 "为什么推荐这些？" → LLM 可能调 analyze_user_preferences
+前端 ChatPanel「知识库」开关
+  → sessionStorage.rag_enabled
+  → sendMessage(..., enable_rag)
         │
-        └─ analyze_user_preferences()                     ② Agent 侧重算
-             ├─ 并发 Gateway 查 /orders/page + /carts
-             ├─ 批量 Gateway 查 /items?ids= 补充 category/brand
-             └─ 购买权重 5 + 购物车权重 3 聚合
-```
-
-**核心问题**：
-
-| 位置 | 计算方式 | 触发频率 | 问题 |
-|------|---------|---------|------|
-| 后端 `RecommendServiceImpl.recommend()` | Feign 取已购→查 item 表补 category/brand→加权 Top3 | **每次推荐请求** | 每次 ~2-3 次 Feign 调用 |
-| Agent `analyze_user_preferences` 工具 | 并发 Gateway 查订单(50条)+购物车+批量查商品→加权聚合 | **LLM 自主决定**（低频） | 每次 ~3-5 次 Gateway 往返；与后端逻辑重复 |
-| Agent `Context` dataclass | 单次 run 不持久化 | 每次对话 | 跨会话无记忆 |
-
-**遗留的 Phase 2 待办项**（来源：[agent-personalized-recommendation-implementation-report.md](./agent-personalized-recommendation-implementation-report.md) 第十章）：
-
-| 优化项 | 说明 | 本设计对应 |
-|--------|------|-----------|
-| 行为采集 `POST /behaviors` | 浏览/收藏/加购行为上报，MQ 异步落库 | → Layer 1 行为流（Agent 侧直写 Redis，零后端改动） |
-| Redis 画像计算 | Consumer 更新 `up:{uid}:cat` / `up:{uid}:brand` ZSet | → Layer 2 聚合画像（HINCRBY 增量更新） |
-| 推荐结果缓存 | `rec:{userId}:{scene}` String，TTL 5-10min | → 方案 5 工具结果缓存（见前序文档） |
-| 购买行为旁路采集 | `paySuccessListener` 发 purchase 行为消息 | → Agent 写操作工具直接 `record_event`（不走 MQ，更直接） |
-
-#### 1.2 目标
-
-- **消除重复计算**：`analyze_user_preferences` 优先读 Redis 画像（命中时 0 次 Gateway 调用），`RecommendServiceImpl` 后续也可共享同一份画像
-- **增量更新**：Agent 写操作（加购/下单/确认收货）成功后直接写入画像，不触发全量重算
-- **承接 Phase 1**：不删除 Phase 1 的任何代码，ProfileStore 作为缓存加速层叠加在现有接口之上
-- **降级容错**：画像 miss 时降级为 Phase 1 实时计算逻辑，计算完成后异步回写画像
-
-### 2. 设计：Phase 1 → Phase 2 演进
-
-#### 2.1 演进架构
-
-```
-Phase 1（已实现）                        Phase 2（本次扩展）
-─────────────────────                   ─────────────────────
-get_recommendations_api                get_recommendations_api
-  │                                      │
-  └─ Gateway → /recommend               └─ Gateway → /recommend ─── 不变，后端仍全量算
-       │                                                        （后端改造可选）
-       └─ RecommendServiceImpl                                    │
-            recomment() ← 每次重算          profile_store ←───────┤ Phase 2 新增
-                                                         HINCRBY │ 增量写入
-analyze_user_preferences               analyze_user_preferences
-  │                                      │
-  ├─ /orders/page (Gateway #1)           ├─ profile_store.get_profile() ← Phase 2 优先路径
-  ├─ /carts       (Gateway #2)           │   ├─ 命中 → 直接返回（0 次 Gateway）
-  ├─ /items?ids=  (Gateway #3)           │   └─ miss → 降级 Phase 1 原有逻辑
-  └─ 聚合后返回                           │        └─ 聚合完 → 异步回写 profile_store
-                                         │
- add_to_cart_api / create_order_api      add_to_cart_api / create_order_api
-  │                                      │
-  └─ 仅写业务数据（无画像感知）            └─ 写业务数据 + record_event() ← Phase 2 新增
-```
-
-#### 2.2 三层画像体系
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Layer 1: 实时行为流（Redis List，最近 50 条）               │
-│  加购/下单/确认收货事件实时追加，TTL 7 天                    │
-│  用途：回溯分析、画像修正                                    │
-│  来源：Agent 写操作工具成功后直接写入（不依赖后端 MQ）        │
-├──────────────────────────────────────────────────────────────┤
-│  Layer 2: 聚合画像（Redis Hash，增量更新）                   │
-│  category_scores / brand_scores / price_stats                │
-│  由事件流 HINCRBY 增量聚合，TTL 30 天                        │
-│  用途：analyze_user_preferences 优先读取（Agent 侧）         │
-│         RecommendServiceImpl 后续可共享（后端侧，可选）      │
-├──────────────────────────────────────────────────────────────┤
-│  Layer 3: 对话记忆（LangGraph Store，跨会话）                │
-│  "上次想买 iPhone 但没下单"、"偏好数码类" 等语义记忆        │
-│  用途：Agent 跨会话个性化对话上下文                          │
-│  与 Layer 1/2 互补：结构化画像回答"是什么"，语义记忆回答     │
-│  "为什么"——二者共同支撑推荐闭环                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-Layer 1+2 是结构化画像（Agent 直接读写，后端可选共享），Layer 3 是语义记忆（仅 Agent 使用）。
-
-### 3. Layer 1+2：Redis 画像存储
-
-#### 3.1 Redis Key 设计
-
-复用 hmall Redis（db=1，与 Checkpoint 同库），通过 `profile:` 前缀隔离：
-
-```
-Key: profile:{user_id}:events       → List   （行为流，LPUSH + LTRIM 50，TTL 7d）
-Key: profile:{user_id}:categories   → Hash   （category → 累计得分，TTL 30d）
-Key: profile:{user_id}:brands       → Hash   （brand → 累计得分，TTL 30d）
-Key: profile:{user_id}:prices       → List   （最近购买价格，LTRIM 20，TTL 30d）
-Key: profile:{user_id}:stats        → Hash   （order_count, cart_count, avg_price, last_update，TTL 30d）
-```
-
-#### 3.2 行为权重（与 Phase 1 `_accumulate_preference` 保持一致）
-
-Phase 1 已在 `tools.py:576-584` 定义了偏好聚合权重：购买权重 5、购物车权重 3。Phase 2 的画像增量更新使用相同的权重体系：
-
-| 行为 | 事件类型 | 权重 | 来源（Phase 2 新增） |
-|------|---------|------|---------------------|
-| 购买 | `purchase` | 5 | `create_order_api`（方案 1 新增）、`confirm_receive_api`（Phase 1 已有）成功后触发 |
-| 加购 | `cart` | 3 | `add_to_cart_api`（Phase 1 已有）成功后触发 |
-| 浏览 | `view` | 1 | `get_item_detail_api`（Phase 1 已有）触发，可选开关控制 |
-
-> **设计说明**：权重值与 `tools.py:701,713` 中 `_accumulate_preference` 的参数 `weight=5`/`weight=3` 保持一致。这意味着画像 miss 时实时计算的聚合结果，与画像命中时增量累加的结果，用同一套权重体系——保证"画像命中"和"降级实时计算"两条路径返回的偏好结果**数学等价**。
-
-#### 3.3 与 Phase 1 现有工具的集成关系
-
-下表描述 ProfileStore 与 Phase 1 每个已有工具的具体集成方式（**只扩展不替换**）：
-
-| Phase 1 工具 | 当前行为 | Phase 2 扩展 | 变更方式 |
-|-------------|---------|-------------|---------|
-| `analyze_user_preferences` | 每次全量重算（3-5 次 Gateway 调用） | **优先读 ProfileStore**，miss 降级原逻辑；写完画像后异步回写 | 在工具函数开头插入 `profile_store.get_profile()` 检查 |
-| `get_recommendations_api` | 每次调后端 `/recommend`，后端全量重算聚合 | **不变**（Phase 2 不改造此工具）。后端聚合优化在后端 `RecommendServiceImpl` 中独立进行（可选） | 无变更 |
-| `add_to_cart_api` | 仅调 `POST /carts` | 成功后追加 `profile_store.record_event("cart", ...)` | 在 `return` 前追加 5 行 |
-| `update_cart_quantity_api` | 仅调 `PUT /carts/{itemId}` | 成功后追加 `profile_store.record_event("cart", ...)` | 同上 |
-| `confirm_receive_api` | 仅调 `PUT /orders/{id}` | 成功后追加 `profile_store.record_event("purchase", ...)` | 同上 |
-| `cancel_order_api` | 仅取消订单 | 可追加负向信号（扣减偏好权重），属于后续优化 | 暂不实施 |
-| `get_item_detail_api` | 查商品详情 | 可选追加 `profile_store.record_event("view", ...)`，通过环境变量开关控制 | 可在配置中加 `PROFILE_TRACK_VIEW=false` |
-
-> **关键设计原则**：Phase 1 的所有工具**内部逻辑完全不变**，仅在其成功返回前追加一行 `record_event` 调用。`record_event` 失败时 catch 异常不抛，保证画像写入失败不影响业务主流程。这意味着即使 ProfileStore 不可用（Redis 宕机），Agent 的核心购物功能完全不受影响。
-
-#### 3.4 画像服务核心实现
-
-新增 `src/profile/store.py`，提供 `ProfileStore` 类：
-
-```python
-class ProfileStore:
-    """用户画像存储，支持增量更新和读取降级。"""
-
-    async def record_event(
-        self, user_id: str,
-        event_type: str,             # purchase / cart / view
-        item_id: int,
-        category: str = "",
-        brand: str = "",
-        price: int = 0,             # 分
-        num: int = 1,
-    ) -> None:
-        """记录行为事件并增量更新聚合画像。"""
-        weight = WEIGHTS.get(event_type, 1)
-        pipe = self._redis.pipeline()
-
-        # Layer 1: 行为流
-        event = json.dumps({"type": event_type, "itemId": item_id,
-            "category": category, "brand": brand, "price": price,
-            "num": num, "ts": int(time.time())})
-        pipe.lpush(f"{_PREFIX}:{user_id}:events", event)
-        pipe.ltrim(f"{_PREFIX}:{user_id}:events", 0, 49)
-        pipe.expire(f"{_PREFIX}:{user_id}:events", _EVENT_TTL)
-
-        # Layer 2: 增量聚合 —— HINCRBY 而非全量重算
-        score = weight * num
-        if category:
-            pipe.hincrby(f"{_PREFIX}:{user_id}:categories", category, score)
-            pipe.expire(f"{_PREFIX}:{user_id}:categories", _PROFILE_TTL)
-        if brand:
-            pipe.hincrby(f"{_PREFIX}:{user_id}:brands", brand, score)
-            pipe.expire(f"{_PREFIX}:{user_id}:brands", _PROFILE_TTL)
-        if price:
-            pipe.lpush(f"{_PREFIX}:{user_id}:prices", price)
-            pipe.ltrim(f"{_PREFIX}:{user_id}:prices", 0, 19)
-            pipe.expire(f"{_PREFIX}:{user_id}:prices", _PROFILE_TTL)
-
-        pipe.hincrby(f"{_PREFIX}:{user_id}:stats", f"{event_type}_count", 1)
-        pipe.hset(f"{_PREFIX}:{user_id}:stats", "last_update", int(time.time()))
-        pipe.expire(f"{_PREFIX}:{user_id}:stats", _PROFILE_TTL)
-
-        await pipe.execute()
-
-    async def get_profile(self, user_id: str) -> dict:
-        """读取聚合画像。不存在时返回空 dict（调用方降级到实时计算）。"""
-
-    async def top_categories(self, user_id: str, n: int = 3) -> list[str]:
-        """Top N 偏好类目（后端推荐服务可共享调用）。"""
-
-    async def top_brands(self, user_id: str, n: int = 3) -> list[str]:
-        """Top N 偏好品牌。"""
-
-    async def invalidate(self, user_id: str) -> None:
-        """清除用户画像（用户请求或数据修正时调用）。"""
-```
-
-#### 3.5 降级策略（承接 Phase 1 实时计算兜底）
-
-```
-用户请求 analyze_user_preferences
-  │
-  ├─ ProfileStore.get_profile(user_id) 命中？
-  │   ├─ 是 → format_preferences 直接格式化返回
-  │   │       （0 次 Gateway 调用，~2ms Redis 读取）
-  │   │
-  │   └─ 否 → 降级 Phase 1 实时计算逻辑（tools.py:645-714 原逻辑复用）
-  │           ├─ asyncio.gather → /orders/page + /carts（Phase 1 已有）
-  │           ├─ 批量查 /items?ids= 补充 category/brand（Phase 1 已有）
-  │           ├─ _accumulate_preference(weight=5) + (weight=3)（Phase 1 已有）
-  │           └─ 聚合完成后，异步回写 ProfileStore（不阻塞响应）
-  │               ↓
-  │           format_preferences 返回
-```
-
-实现上，将现有 `analyze_user_preferences` 重构为三步：
-
-```python
-@tool
-async def analyze_user_preferences(config: RunnableConfig) -> str:
-    token = extract_token_from_config(config)
-    if not token:
-        return "❌ 偏好分析需要先登录"
-
-    user_id = _extract_user_id(config)
-
-    # ====== Phase 2 新增：画像优先 ======
-    if user_id:
-        profile = await profile_store.get_profile(user_id)
-        if profile:
-            return format_preferences(
-                profile["categories"], profile["brands"], profile["prices"],
-                orders=[], cart=[],  # 画像模式不展示原始列表
-            )
-    # ====== Phase 2 结束 ======
-
-    # ====== Phase 1 原有逻辑：降级实时计算 ======
-    try:
-        orders_page, cart_items = await asyncio.gather(
-            gateway_client.get("/orders/page", token=token, params={"pageNo": 1, "pageSize": 50}),
-            gateway_client.get("/carts", token=token),
-        )
-    except GatewayError as e:
-        return f"❌ 获取用户数据失败: {e}"
-
-    # ...（Phase 1 现有聚合逻辑保持不变，tools.py:656-714）...
-
-    # ====== Phase 2 新增：异步回写画像 ======
-    if user_id and category_scores:
-        asyncio.create_task(_backfill_profile(user_id, category_scores, brand_scores, price_points))
-    # ====== Phase 2 结束 ======
-
-    return format_preferences(category_scores, brand_scores, price_points, orders, cart)
-```
-
-> **设计说明**：Phase 1 代码（`tools.py:645-714`）完整保留作为降级路径。新增的 `if profile:` 检查在最前面，画像命中时跳过后续所有 Gateway 调用。`_backfill_profile` 用 `asyncio.create_task` 异步执行，不阻塞当前请求的响应返回。
-
-#### 3.5 实现示例：`add_to_cart_api` 的画像集成
-
-Phase 1 的 `add_to_cart_api`（`tools.py:200-217`）仅调 `POST /carts`。Phase 2 在成功后追加画像写入，改动极小：
-
-```python
-# tools.py 原代码 + Phase 2 追加（标 ★ 部分）
-
-@tool
-async def add_to_cart_api(item_id: int, config: RunnableConfig) -> str:
-    token = extract_token_from_config(config)
-    if not token:
-        return "❌ 加入购物车需要先登录"
-    try:
-        await gateway_client.post(                       # Phase 1 原逻辑
-            "/carts", token=token,
-            json={"itemId": item_id, "num": 1},
-        )
-
-        # ★ Phase 2 新增：增量更新画像
-        user_id = _extract_user_id(config)
-        if user_id:
-            try:
-                item = await gateway_client.get(f"/items/{item_id}")
-                await profile_store.record_event(
-                    user_id, "cart", item_id,
-                    category=item.get("category", ""),
-                    brand=item.get("brand", ""),
-                    price=item.get("price", 0),
-                )
-            except Exception:
-                pass  # 画像写入失败不影响主流程
-
-        return f"✅ 商品 {item_id} 已加入购物车"         # Phase 1 原返回
-    except GatewayError as e:
-        return f"❌ 加入购物车失败: {e}"
-```
-
-其他工具（`confirm_receive_api`、`update_cart_quantity_api` 等）遵循相同的追加模式。完整集成关系见 §3.3 表格。
-
-> **`_extract_user_id(config)` 实现**：从 `config.configurable.user_id` 或 `config.configurable.context.user_id` 提取（与 `extract_token_from_config` 同源，`http_client.py:150-187` 的 `user_token` 提取逻辑可直接复用，仅改为取 `user_id`）。如果当前 config 中没有 `user_id` 字段，可在 `AuthMiddleware` 解析 JWT 时写入 `context.user_id`。
-
-### 4. Layer 3：对话记忆（LangGraph Store）
-
-LangGraph Store 提供跨会话的持久化 KV 存储。与 Layer 1/2 的 Redis 结构化画像互补：Layer 1/2 存储"用户喜欢什么类目/品牌"（数值型得分），Layer 3 存储"用户说过什么"（语义记忆），二者共同支撑推荐闭环。
-
-#### 4.1 记忆服务（作为 Agent 工具暴露）
-
-新增 `src/profile/memory.py`，将记忆读写封装为 Agent 工具（使用 `@tool` 装饰器，LLM 可在对话中自主调用）：
-
-```python
-from langgraph.store.base import BaseStore
-
-MEMORY_NAMESPACE = "user_memory"
-
-@tool
-async def save_memory(key: str, value: str, config: RunnableConfig) -> str:
-    """保存一条对话记忆到长期存储。
-
-    当用户表达购物意图但未完成时调用。例如：
-    - 用户说"想买手机但再看看" → key="shopping_intent", value="正在挑选手机，预算约 5000"
-    - 用户频繁看某个品牌 → key="brand_preference", value="对 Apple 产品感兴趣"
-
-    Args:
-        key: 记忆标识（如 shopping_intent / price_sensitivity / last_viewed）
-        value: 记忆内容
-    """
-    store = config.get("configurable", {}).get("store")
-    if not store:
-        return "记忆服务未启用"
-    user_id = _extract_user_id(config)
-    await store.aput(
-        namespace=(MEMORY_NAMESPACE, user_id),
-        key=key,
-        value={"content": value, "ts": int(time.time())},
-    )
-    return f"已记住: {key}"
-
-
-@tool
-async def get_memories(config: RunnableConfig) -> str:
-    """读取当前用户的历史对话记忆。
-
-    在对话开始时或推荐商品前调用，了解用户之前的购物意图和偏好。
-    返回 JSON 格式的记忆列表。
-    """
-    store = config.get("configurable", {}).get("store")
-    if not store:
-        return "记忆服务未启用"
-    user_id = _extract_user_id(config)
-    items = await store.asearch(
-        namespace=(MEMORY_NAMESPACE, user_id),
-        limit=20,
-    )
-    if not items:
-        return "暂无历史记忆"
-    memories = [{"key": item.key, "content": item.value.get("content", "")}
-                for item in items]
-    return json.dumps(memories, ensure_ascii=False)
-```
-
-这两个工具注册到 `get_all_tools()`，与 Phase 1 的 18 个已有工具并列（当前总计 20 个，新增后变为 22 个）。
-
-#### 4.2 System Prompt 引导（在 Phase 1 基础上扩展）
-
-Phase 1 的 `prompts.py` 第 13 行已声明"个性化推荐"能力。Phase 2 在现有 SYSTEM_PROMPT 末尾追加用户记忆相关的行为准则：
-
-```
-## 用户记忆（Phase 2 新增）
-- 每次对话开始时，自动调用 get_memories 读取历史记忆，在首次回复中自然融入
-  （如"欢迎回来！上次您在看手机类商品，今天新到了一些热门款"）
-- 当用户明确表达购物意图但未完成（如"想买手机但再看看""先收藏改天再说"），
-  调用 save_memory 保存意图
-- 当用户完成购买或明确表示不再感兴趣，调用 delete_memory 清理过时记忆
-- 不要生硬复述记忆内容给用户，要自然地融入对话（像老朋友记住你的喜好一样）
-```
-
-### 5. 后端推荐服务共享画像（可选项，Phase 2 第二阶段）
-
-#### 5.1 改造背景
-
-Phase 1 的 `RecommendServiceImpl.recommend()`（实施报告 §3.4.4）每次推荐请求都走完整三步管线：Feign 取已购 → item 表补 category/brand → 加权聚合 Top3。Agent 侧 `ProfileStore` 落地后，后端的偏好聚合逻辑可**直接读同一份 Redis 画像**，将三步管线缩减为两步。
-
-> **注意**：此项为可选优化。Agent 侧的画像持久化独立生效（`analyze_user_preferences` 优先读画像），后端不改造不影响核心功能。此项对应实施报告第十章"推荐结果缓存"项的具体落地。
-
-后端 `RecommendServiceImpl.recommend()` 的偏好聚合逻辑改为**优先读 Redis 画像**：
-
-```java
-// recomment() 方法中偏好聚合部分
-
-// 原逻辑：每次 Feign 取已购 + 查 item 表 + 聚合 Top3
-// 新逻辑：优先读 Redis 画像
-
-if (userId != null) {
-    String catKey = "profile:" + userId + ":categories";
-    Map<Object, Object> catScores = redisService.hgetall(catKey);
-
-    if (catScores != null && !catScores.isEmpty()) {
-        // 画像命中：0 次 Feign 调用
-        categories = topNFromStringMap(catScores, 3);
-        String brandKey = "profile:" + userId + ":brands";
-        Map<Object, Object> brandScores = redisService.hgetall(brandKey);
-        topBrands = topNFromStringMap(brandScores, 3);
-        // excludeIds 仍需 Feign（已购列表不存画像）
-        excludeIds = safeQueryPurchasedItemIds();
-    } else {
-        // 画像 miss：降级原全量聚合逻辑（现有代码不变）
-        List<OrderDetailDTO> purchasedItems = safeQueryPurchasedItems();
-        // ...（现有聚合逻辑保持不变）...
-    }
-}
-```
-
-#### 5.2 画像写入链路
-
-后端同样通过行为事件写入画像——在订单创建/支付成功的业务逻辑中追加 Redis 写入：
-
-```
-用户下单 → trade-service.createOrder()
-         → 异步写 profile:{userId}:categories/brands/prices（Redis）
-         → Agent / 推荐服务下次查询时直接命中
-```
-
-### 6. 改动清单
-
-> **约定**：表中标注"Phase 1 已有"的文件已在推荐实现报告中落地，Phase 2 仅在其基础上追加内容（不删除不重写）。
-
-| 文件 | 改动 | 阶段 | 说明 |
-|------|------|------|------|
-| `src/profile/store.py` | **新增** | Phase 2 | `ProfileStore` — Redis 画像 CRUD + 增量更新 |
-| `src/profile/memory.py` | **新增** | Phase 2 | `save_memory` / `get_memories`（`@tool` 装饰，注册到 `get_all_tools()`） |
-| `src/agents/customer/tools.py` | **修改** | Phase 1 已有 → Phase 2 扩展 | `analyze_user_preferences`（第 634 行）前插画像优先路径；写操作工具成功后追加 `record_event`；注册 2 个新记忆工具 |
-| `src/agents/customer/prompts.py` | **修改** | Phase 1 已有 → Phase 2 扩展 | `SYSTEM_PROMPT`（第 3 行）末尾追加"用户记忆"行为准则 |
-| `src/agents/customer/agent.py` | **修改** | Phase 1 已有 → Phase 2 扩展 | `create_agent()` 注入 `store` 参数 |
-| `src/core/config.py` | **修改** | Phase 1 已有 → Phase 2 扩展 | 新增 `LANGGRAPH_STORE_URI`（复用 hmall Redis db=1） |
-| `src/tools/formatters.py` | **修改** | Phase 1 已有 → Phase 2 扩展 | `format_preferences`（第 408 行）适配画像直读模式（无原始列表时仅展示聚合数据） |
-| `src/gateway/http_client.py` | **修改** | Phase 1 已有 → Phase 2 扩展 | 新增 `_extract_user_id()` 函数（与现有 `extract_token_from_config` 同源） |
-| `pyproject.toml` | **修改** | — | 加 `redis[hiredis]` 异步依赖 |
-| `RecommendServiceImpl.java` | **修改**（可选） | Phase 1 已有 → Phase 2 扩展 | `recomment()` 优先读 Redis 画像，miss 降级原逻辑（即实施报告第十章"推荐结果缓存"项） |
-
-### 7. 注意事项
-
-1. **Phase 1 代码完整保留**：`tools.py` 中 `analyze_user_preferences` 的 `asyncio.gather` + `_accumulate_preference` 聚合逻辑（第 645-714 行）完整保留作为降级路径。新增的 `if profile:` 检查在最前面，画像命中时跳过后续所有 Gateway 调用。
-2. **增量 vs 全量**：Layer 2 用 `HINCRBY` 增量更新，避免全量重算。首次冷启动降级全量计算并异步回写。
-3. **画像一致性**：Agent 侧（`record_event`）和后端侧（订单创建后异步写 Redis）共享同一份画像。双方均写入事件驱动的增量数据，保证最终一致。两端写入操作均使用 `HINCRBY` 原子操作，并发安全无覆盖风险。
-3. **冷启动**：新用户画像不存在 → `get_profile` 返回空 dict → 降级实时计算 → 异步回写画像 → 下次命中。
-4. **隐私**：画像仅存聚合数据（类目/品牌得分），不存原始订单明细。用户可请求 `invalidate` 清除画像。
-5. **Redis 连接复用**：`ProfileStore` 用独立连接池（`max_connections=20`），与 `RedisSaver`（Checkpoint）隔离。
-6. **后端改造优先级**：即使后端不改，Agent 侧画像持久化也独立生效。后端改造为锦上添花，消除推荐服务的重复计算。
-
-### 8. 实现状态（2026-07-29 更新）
-
-> 第一部分"用户画像持久化"已全部实现，以下为实际实现与设计文档的偏差说明。
-
-**已实现清单**：
-
-| 设计项 | 实现状态 | 说明 |
-|--------|---------|------|
-| Layer 1+2 Redis 画像存储 | ✅ 已实现 | `src/profile/store.py` — `ProfileStore` 类，`profile:` 前缀 + Hash/List 结构 |
-| `analyze_user_preferences` 画像优先 | ✅ 已实现 | 命中时 0 次 Gateway，miss 降级 Phase 1 + 异步回写 |
-| 写操作工具画像集成 | ✅ 已实现 | 加购画像由后端 `CartServiceImpl` 写入（覆盖 Agent + 前端 UI 全路径）；`update_cart_quantity_api`/`confirm_receive_api` 不再重复记录（避免双重记录） |
-| Layer 3 对话记忆 | ✅ 已实现 | `src/profile/memory.py` — `save_memory`/`get_memories`，graph.json 配置 InMemoryStore |
-| 后端行为事件写入画像 | ✅ 已实现 | `paySuccessListener` 支付成功写 purchase 画像；`CartServiceImpl` 加购成功写 cart 画像（均用 `StringRedisTemplate` HINCRBY） |
-| 后端推荐服务共享画像 | ✅ 已实现 | `RecommendServiceImpl.recommend()` 优先读 Redis 画像，miss 降级 |
-| `_extract_user_id` | ✅ 已实现 | 复用 `extract_token_from_config` 三级优先级 + JWT 兜底解码 |
-| `format_preferences` 适配 | ✅ 已实现 | orders/cart 参数改为可选，画像直读模式跳过统计行 |
-
-**关键实现偏差**：
-
-1. **后端 Redis 序列化兼容性**：现有 `RedisService` 的 Hash 操作使用 `redisTemplate`（Jackson 序列化），会将 hash field/value 序列化为 JSON（如 `"手机"` → `"\"手机\""`），与 Agent 侧 `redis.asyncio`（plain string `"手机"`）不兼容。**解决方案**：后端 `paySuccessListener`、`CartServiceImpl` 和 `RecommendServiceImpl` 直接注入 `StringRedisTemplate` 进行画像读写，不使用 `RedisService`。
-2. **行为采集方式**：设计文档 §1.1 提到"Layer 1 行为流（Agent 侧直写 Redis，零后端改动）"，实际实现中 Agent 侧仅 `analyze_user_preferences` miss 后回写画像（`backfill_profile`），行为事件画像写入全部移至后端（`paySuccessListener` 写 purchase + `CartServiceImpl` 写 cart），覆盖 Agent + 前端 UI 全部行为路径，无需新增 `POST /behaviors` API 或 MQ Consumer。
-3. **LangGraph Store 配置**：设计文档 §6 提到 `agent.py` 注入 store 参数，实际通过 `graph.json` 的 `"store": {"type": "in_memory"}` 配置，LangGraph Platform 自动注入到 `config.configurable.store`，无需修改 `create_agent()` 调用。
-4. **画像写入归属调整**：加购画像从 Agent 侧 `add_to_cart_api` 移至后端 `CartServiceImpl`（覆盖前端 UI 直接加购路径）；确认收货画像从 `confirm_receive_api` 移至 `paySuccessListener`（覆盖所有支付路径）；`update_cart_quantity_api` 不再记录 cart 事件（修改数量不改变偏好方向）。调整目的：避免双重记录 + 覆盖非 Agent 入口的行为。
-
----
-
-## 第二部分：主动通知
-
-### 8. 概述
-
-#### 8.1 背景
-
-当前 hmall Agent 纯被动应答——用户不发消息，Agent 永远沉默。但电商有大量"该主动找用户"的场景：
-
-| 场景 | 事件源 | 当前状态 | 用户价值 |
-|------|--------|---------|---------|
-| 支付成功 | `pay.direct` / `pay.success` | ❌ 无通知 | 用户安心感，减少"我付款了吗"的焦虑 |
-| 订单超时取消 | `trade.delay.direct` / `delay.order` | ❌ 无通知 | 避免用户不知道订单已取消 |
-| 秒杀开抢提醒 | 定时：场次 `startTime` | ❌ 无通知 | 提升秒杀参与率和转化率 |
-| 物流状态变更 | 需新增物流事件源 | ❌ 无通知 | 电商用户最高频诉求 |
-| 收藏商品降价 | 需新增价格监控 | ❌ 无通知 | 促进转化 |
-
-后端已有 RabbitMQ 事件基础设施（`pay.direct`、`trade.delay.direct`、`seckill.topic` 等），Agent 侧只需新增**事件监听 + 推送通道**。
-
-#### 8.2 设计原则
-
-| 原则 | 说明 |
-|------|------|
-| **独立通道** | 通知走独立 SSE 通道，不往 Agent 对话 Thread 里塞系统消息，避免污染对话状态 |
-| **双模式通知** | 模式 A（模板化轻量通知）用于支付/物流等确定性场景；模式 B（LLM 智能通知）用于秒杀/降价等营销场景 |
-| **离线可恢复** | 用户不在线时通知暂存 Redis，上线后 SSE 连接建立即补发 |
-| **幂等去重** | MQ 重投递场景下，`SETNX` 幂等去重防止重复推送 |
-| **频率限制** | 每用户每小时通知上限，避免轰炸 |
-
-### 9. 架构设计
-
-```
-┌──────────────┐         ┌───────────────────────┐         ┌──────────────┐
-│  Java 后端   │── MQ ──►│ Agent 通知服务         │── SSE ─►│  前端通知UI  │
-│ (事件生产者) │         │                       │         │              │
-└──────────────┘         │ 1. EventConsumer      │         │ 1. 铃铛角标  │
-                         │    监听 RabbitMQ      │         │ 2. 通知面板  │
-                         │ 2. EVENT_HANDLERS     │         │ 3. 点击动作  │
-                         │    事件→通知映射      │         │              │
-                         │ 3. Notification       │         └──────────────┘
-                         │    Dispatcher         │
-                         │    SSE 推送+离线暂存  │
-                         ├───────────────────────┤
-                         │ Redis                 │
-                         │ notify:offline:{uid}  │
-                         │ notify:sent:{id}      │
-                         └───────────────────────┘
-```
-
-### 10. 双模式通知机制
-
-#### 10.1 模式 A：轻量通知（模板化，不走 LLM）
-
-适用场景：支付成功、订单超时取消、物流状态变更等**确定性高、文案模板化**的通知。
-
-- **延迟**：MQ 消费 + Redis 查询 + SSE 推送，总耗时 < 200ms
-- **成本**：0 LLM Token
-- **示例**："您的订单 `12345` 已支付成功（¥5999.00），商家正在备货"
-
-```python
-async def handle_pay_success(event: dict, dispatcher) -> None:
-    """支付成功 → 轻量通知。"""
-    order_id = event.get("orderId")
-    order = await gateway_client.get(f"/orders/{order_id}")
-    user_id = str(order.get("userId", ""))
-    amount = f"{float(order.get('totalFee', 0)) / 100:.2f}"
-
-    notification = Notification(
-        user_id=user_id,
-        type="payment_success",
-        title="💳 支付成功",
-        body=f"您的订单 `{order_id}` 已支付成功（¥{amount}），商家正在备货，请耐心等待发货。",
-        action={"label": "查看订单", "order_id": order_id},
-        priority="normal",
-    )
-    await dispatcher.dispatch(notification)
-```
-
-#### 10.2 模式 B：智能通知（LLM 个性化文案）
-
-适用场景：秒杀开抢提醒、降价提醒等**需要结合用户画像生成个性化文案**的营销通知。
-
-- **延迟**：MQ 消费 + LLM 推理 + SSE 推送，总耗时 ~2-3s
-- **成本**：每次 ~200-500 Token（qwen-turbo）
-- **示例**："您关注的数码类秒杀即将开始！iPhone 15 秒杀价 ¥4999（比您上次买的价格低 ¥1000）"
-
-```python
-async def _generate_and_dispatch(
-    self, user_id: str, notification_type: str, context: dict
-) -> None:
-    """模式 B：结合用户画像生成个性化通知文案。"""
-    from src.profile.store import profile_store
-    profile = await profile_store.get_profile(user_id)
-    top_cats = list(profile.get("categories", {}).keys())[:3]
-
-    prompt = f"""你是一个友好的商城助手，请为用户生成一条简洁的通知。
-用户偏好类目: {", ".join(top_cats) if top_cats else "暂无数据"}
-通知类型: {notification_type}
-上下文: {json.dumps(context, ensure_ascii=False)}
-
-要求：1. 不超过 80 字 2. 语气亲切 3. 结合用户偏好自然融入"""
-
-    try:
-        response = await qwen_model.ainvoke(prompt)
-        body = response.content.strip()
-    except Exception:
-        body = self._fallback_text(notification_type, context)  # LLM 失败降级模板
-```
-
-#### 10.3 模式选择规则
-
-| 通知类型 | 模式 | 原因 |
-|---------|------|------|
-| 支付成功 | A | 模板化，确定性高 |
-| 订单超时取消 | A | 模板化，确定性高 |
-| 物流状态变更 | A | 模板化，确定性高 |
-| 秒杀开抢提醒 | B | 需结合用户偏好，个性化提升点击率 |
-| 收藏降价 | B | 需结合用户历史价格感知 |
-| 运营推送 | B | 营销场景，A/B 测试文案效果 |
-
-### 11. 事件消费者
-
-新增 `src/notification/consumer.py`，基于 `aio-pika` 监听 RabbitMQ：
-
-```python
-class EventConsumer:
-    """RabbitMQ 事件消费者。
-
-    监听后端业务事件，按事件类型分发到对应处理器。
-    """
-
-    async def start(self) -> None:
-        """启动消费者，为每个已注册事件声明队列并绑定。"""
-        self._connection = await aio_pika.connect_robust(_RABBIT_URL)
-        self._channel = await self._connection.channel()
-        await self._channel.set_qos(prefetch_count=10)
-
-        for event_type, handler in EVENT_HANDLERS.items():
-            queue = await self._channel.declare_queue(
-                handler["queue"], durable=True
-            )
-            await queue.bind(
-                exchange=handler["exchange"],
-                routing_key=handler["routing_key"],
-            )
-            await queue.consume(self._make_callback(event_type, handler))
-
-        logger.info("通知事件消费服务启动完成，监听 %d 类事件", len(EVENT_HANDLERS))
-
-    async def stop(self) -> None:
-        """优雅停止：关闭 channel → connection。"""
-```
-
-#### 11.1 事件注册表
-
-| 事件类型 | 对应 RabbitMQ | 处理函数 | 模式 |
-|---------|--------------|---------|------|
-| `pay_success` | `pay.direct` / `pay.success` | `handle_pay_success` | A |
-| `order_timeout` | `trade.delay.direct` / `delay.order` | `handle_order_timeout` | A |
-| `seckill_start` | `seckill.topic` / `seckill.start`（需后端新增） | `handle_seckill_start` | B |
-| `logistics_update` | 需后端新增 | `handle_logistics_update` | A |
-| `price_drop` | 需后端新增 | `handle_price_drop` | B |
-
-### 12. SSE 推送通道
-
-#### 12.1 通知分发器
-
-新增 `src/notification/dispatcher.py`：
-
-```python
-class NotificationDispatcher:
-    """通知分发器。
-
-    维护 per-user 的 SSE 连接队列。
-    在线用户实时推送，离线用户暂存 Redis。
-    """
-
-    def __init__(self):
-        self._queues: dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
-        self._connected: set[str] = set()
-
-    def register(self, user_id: str) -> asyncio.Queue:
-        """用户建立 SSE 连接时注册。"""
-        self._connected.add(user_id)
-        return self._queues[user_id]
-
-    def unregister(self, user_id: str) -> None:
-        """用户断开时注销。"""
-        self._connected.discard(user_id)
-        self._queues.pop(user_id, None)
-
-    async def dispatch(self, notification: Notification) -> None:
-        """推送通知。在线实时推送，离线暂存 Redis。"""
-        if notification.user_id in self._connected:
-            await self._queues[notification.user_id].put(notification)
-        else:
-            await self._store_offline(notification)
-
-    async def flush_offline(self, user_id: str) -> list[dict]:
-        """用户上线时补发离线通知并清理。"""
-
-    async def dispatch_batch_smart(
-        self, user_ids: list[str],
-        notification_type: str, context: dict,
-    ) -> None:
-        """批量生成智能通知（模式 B — 走 LLM 个性化文案）。"""
-        tasks = [
-            self._generate_and_dispatch(uid, notification_type, context)
-            for uid in user_ids
-        ]
-        await asyncio.gather(*tasks, return_exceptions=True)
-```
-
-#### 12.2 SSE API 端点
-
-新增 `src/notification/api.py`，注册到 LangGraph Server 的 FastAPI app：
-
-```python
-router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
-
-@router.get("/stream")
-async def notification_stream(user_id: str = Query(...)):
-    """SSE 长连接 — 用户上线后建立，接收实时通知推送。
-
-    建立连接时自动补发离线期间通知。
-    """
-    offline = await dispatcher.flush_offline(user_id)
-    queue = dispatcher.register(user_id)
-
-    async def event_generator():
-        # 先补发离线通知
-        for item in offline:
-            yield {"event": "notification", "data": json.dumps(item, ...)}
-
-        # 持续推送实时通知
-        try:
-            while True:
-                notification = await queue.get()
-                yield {"event": "notification",
-                       "data": json.dumps(notification.to_dict(), ...)}
-        except asyncio.CancelledError:
-            pass
-        finally:
-            dispatcher.unregister(user_id)
-
-    return EventSourceResponse(event_generator())
-```
-
-#### 12.3 启动集成
-
-```python
-# start_server.py 改动
-
-# 注册通知 API 路由
-from src.notification.api import router as notification_router
-langgraph_app.include_router(notification_router)
-
-# 启动通知事件消费者（后台任务）
-from src.notification.consumer import EventConsumer
-from src.notification.dispatcher import dispatcher
-
-consumer = EventConsumer(dispatcher)
-
-@langgraph_app.on_event("startup")
-async def _start_consumer():
-    await consumer.start()
-
-@langgraph_app.on_event("shutdown")
-async def _stop_consumer():
-    await consumer.stop()
-```
-
-### 13. 前端集成
-
-#### 13.1 通知 Composable
-
-新增 `hmall-frontend/src/composables/useNotifications.ts`：
-
-```typescript
-export function useNotifications(userId: Ref<string>) {
-  const notifications = ref<AppNotification[]>([])
-  const unreadCount = ref(0)
-  let _eventSource: EventSource | null = null
-
-  function connect() {
-    if (!userId.value) return
-    const apiUrl = import.meta.env.VITE_AGENT_URL || 'http://localhost:8090'
-    _eventSource = new EventSource(
-      `${apiUrl}/api/v1/notifications/stream?user_id=${userId.value}`
-    )
-
-    _eventSource.addEventListener('notification', (e: MessageEvent) => {
-      const notification = JSON.parse(e.data)
-      notifications.value.unshift(notification)
-      unreadCount.value++
-    })
-
-    // 断线自动重连（5s 退避）
-    _eventSource.onerror = () => {
-      _eventSource?.close()
-      setTimeout(connect, 5000)
-    }
-  }
-
-  return { notifications, unreadCount, connect, disconnect, markAllRead }
-}
-```
-
-#### 13.2 通知 UI
-
-前端在对话页面**顶部导航栏**增加通知铃铛组件：
-
-- 未读红点角标（`unreadCount`）
-- 点击弹出通知面板（最近 20 条）
-- 每条通知可点击 `action` 执行跳转（如"查看订单"→ 跳转订单详情页）
-- 消息卡片形式：icon + title + body + 时间
-
-### 14. 改动清单
-
-| 文件 | 改动 | 说明 |
-|------|------|------|
-| `src/notification/models.py` | **新增** | `Notification` dataclass |
-| `src/notification/consumer.py` | **新增** | RabbitMQ 事件消费者（aio-pika） |
-| `src/notification/rules.py` | **新增** | 事件→通知映射规则 + 处理器函数 |
-| `src/notification/dispatcher.py` | **新增** | SSE 推送 + 离线暂存 + 批量智能通知 |
-| `src/notification/api.py` | **新增** | SSE 端点 `/api/v1/notifications/stream` |
-| `start_server.py` | **修改** | 注册路由 + 启动事件消费者 |
-| `src/core/config.py` | **修改** | 新增 `RABBIT_HOST/PORT/USER/PASSWORD` |
-| `pyproject.toml` | **修改** | 加 `aio-pika`、`sse-starlette` |
-| `src/composables/useNotifications.ts` | **新增** | 前端通知 SSE composable |
-| 前端通知 UI 组件 | **新增** | 铃铛角标 + 通知下拉面板 |
-| 后端 `trade-service` | **新增**（可选） | 秒杀场次开始时发送 `seckill.start` 事件 |
-| 后端物流服务 | **新增**（可选） | 物流状态变更时发送 `logistics.update` 事件 |
-
-### 15. 注意事项
-
-1. **独立通道 vs Agent Thread**：通知走独立 SSE 通道，不往 Agent 对话 Thread 里塞消息。原因：Agent Thread 是用户主动发起的对话上下文，塞系统通知会污染对话状态、影响 LLM 推理。通知是独立信息流，前端在对话面板外展示（铃铛角标 + 通知面板）。
-
-2. **幂等去重**：同一事件可能因 MQ 重投递被消费多次。在 `dispatch` 前用 Redis `SETNX notify:sent:{event_type}:{event_id}` 做幂等去重（24h TTL）。
-
-3. **通知频率控制**：per-user 每小时通知上限（默认 10 条），超限丢弃低优先级通知（priority=normal）。秒杀开抢等高优先级（priority=high）不受限。防止 MQ 异常时消息轰炸。
-
-4. **离线通知**：用户不在线时通知暂存 Redis 列表（TTL 7 天），上线时 SSE 连接建立即补发。避免"用户没开 App 就错过支付成功通知"。
-
-5. **SSE 连接管理**：`dispatcher` 维护 `user_id → Queue` 映射。断线由前端重连（5s 退避），服务端 `CancelledError` 捕获断开并 `unregister`。
-
-6. **安全性**：生产环境应从 JWT 提取 `user_id` 而非前端传参，防止横向越权监听他人通知。
-
-7. **后端事件补充**：当前后端有 `pay.success`（支付成功）和 `delay.order`（订单超时取消）。秒杀开抢需后端新增定时任务发 `seckill.start`；物流变更需对接物流 API 后发事件。这两项为渐进式扩展，Agent 侧事件注册表已预留接口。
-
-8. **与方案 4（画像）的依赖**：模式 B 智能通知需读取用户画像生成个性化文案。因此方案 4 应先于方案 9 中的模式 B 功能落地。模式 A 轻量通知可独立先行。
-
----
-
-## 推进计划
-
-| 阶段 | 内容 | 依赖 | 预估工作量 |
-|------|------|------|-----------|
-| 阶段 1 | 方案 4 — Layer 1+2 Redis 画像存储 + Agent 侧读写 | 无 | 3-5 人天 |
-| 阶段 2 | 方案 4 — Layer 3 LangGraph Store 语义记忆 | 阶段 1 | 1-2 人天 |
-| 阶段 3 | 方案 4 — 后端 `RecommendServiceImpl` 共享画像（可选） | 阶段 1 | 1-2 人天 |
-| 阶段 4 | 方案 9 — 模式 A 轻量通知（支付成功 + 超时取消） | 无 | 2-3 人天 |
-| 阶段 5 | 方案 9 — 模式 B 智能通知（秒杀开抢提醒） | 阶段 1 + 阶段 4 | 2-3 人天 |
-| 阶段 6 | 方案 9 — 前端通知 UI 组件 | 阶段 4 | 1 人天 |
-| 阶段 7 | 方案 9 — 后端新增事件（秒杀/物流） | 阶段 4 | 待定（后端团队） |
-
-总预估纯 Agent 侧工作量：**10-16 人天**（不含后端协作部分）。
-
-
----
-
-# 第四部分：RAG 知识库集成
-
-> 版本：v1.0  
-> 日期：2026-07-20  
-> LightRAG + MCP 桥接集成方案
-
----
-
-## 1. 概述
-
-hmall Agent 通过 MCP（Model Context Protocol）协议集成 LightRAG 知识检索引擎，为 CustomerAgent 和 AdminAgent 提供基于知识库的问答能力。
-
-**核心能力**：
-- AdminAgent：回答运营策略、库存管理指南、订单分析方法等专业知识问题
-- CustomerAgent：回答退换货政策、支付方式、配送说明等商城常见问题
-
-**技术栈**：
-- LightRAG（git submodule）：知识图谱 + 向量检索引擎
-- FastMCP：MCP Server 框架
-- langchain-mcp-adapters：MCP Client，连接 MCP Server 加载工具
-- httpx：异步 HTTP 客户端，调用 LightRAG REST API
-
----
-
-## 2. 架构设计
-
-### 2.1 整体架构
-
-```
-前端 ChatPanel.vue
-  │ 用户点击「知识库」开关 → enable_rag 字段
-  ▼
+        ▼
 LangGraph Agent (:8090)
-  │
-  ├─ RAGMiddleware（检查 context.enable_rag）
-  │    │ enable_rag=true
-  │    ▼
-  │  rag_loader.py → MultiServerMCPClient
-  │    │ MCP Protocol (HTTP)
-  │    ▼
-  │  RAG MCP Server (:8008) — rag_server.py
-  │    │ httpx
-  │    ▼
-  │  LightRAG Server (:9621)
-  │    ├─ POST /query       → rag_query 工具
-  │    ├─ POST /query/data  → rag_query_data 工具
-  │    └─ POST /query/data  → rag_graph_search 工具
-  │
-  └─ 业务工具（Gateway → Java 微服务）
+  RAGMiddleware.awrap_model_call
+    enable_rag=true  → rag_loader.get_rag_tools() 追加 MCP 工具
+    enable_rag=false → 放行（仅业务工具）
+        │
+        │ MCP (streamable_http)
+        ▼
+RAG MCP Server (:8008)  FastMCP + LightRAGClient
+        │ httpx + OAuth2/API Key
+        ▼
+LightRAG Server (:9621)  知识图谱 + 向量检索
 ```
 
-### 2.2 三层架构
+**三层职责**：
 
 | 层 | 组件 | 端口 | 职责 |
 |----|------|------|------|
-| 知识引擎 | LightRAG Server | 9621 | 知识图谱构建 + 向量检索 + LLM 生成 |
-| MCP 桥接 | RAG MCP Server | 8008 | 封装 LightRAG API 为 MCP 工具 |
-| Agent | hmall Agent | 8090 | RAGMiddleware 动态注入 RAG 工具 |
+| 知识引擎 | LightRAG | 9621 | 建图谱 / 向量索引 / query API |
+| MCP 桥接 | `rag_server.py` | 8008 | 将 REST 封装为 3 个 MCP 工具 |
+| Agent | `RAGMiddleware` + Skills `rag-query` | 8090 | 按开关注入；LLM 选题调用 |
 
-### 2.3 数据流
+数据流：开关 → context → 中间件注入 → LLM 选 `rag_*` → MCP → LightRAG → 片段回灌 LLM → 用户可见回答。
 
-1. 用户在前端点击「知识库」开关，`ragEnabled` 状态持久化到 sessionStorage
-2. 用户发送消息，`sendMessage` 传入 `enable_rag: ragEnabled.value`
-3. LangGraph Agent 接收 context，RAGMiddleware 检查 `enable_rag`
-4. `enable_rag=true` 时，`rag_loader` 连接 MCP Server 加载 RAG 工具
-5. RAG 工具追加到 Agent 的工具列表
-6. LLM 根据问题选择 RAG 工具，通过 MCP 协议调用 MCP Server
-7. MCP Server 的 LightRAGClient 调用 LightRAG REST API
-8. 检索结果返回给 LLM，LLM 整合后回复用户
+### 12.3 MCP Server 设计
 
----
+独立进程（`start_rag_server.py`），与 Agent Server 解耦，避免拖垮对话主进程。
 
-## 3. 部署指南
+**LightRAGClient 要点**：
 
-### 3.1 前置条件
+- 认证：`RAG_API_KEY` 优先；否则用户名密码 `POST /login`，JWT 缓存，401 自动重登
+- 连接：`httpx.AsyncClient` 单例
+- 失败：向上抛给工具层；Middleware 层对「整站不可达」只 warning 不阻断业务工具
 
-- Python >= 3.12
-- uv（Python 包管理工具）
-- LightRAG 已作为 git submodule 拉取（`d:/Code/hmall/LightRAG`）
+**工具规格**：
 
-### 3.2 启动 LightRAG Server
+| MCP 工具 | LightRAG 端点 | 用途 |
+|----------|---------------|------|
+| `rag_query(query, mode)` | `POST /query` | 语义问答 + 参考来源 |
+| `rag_query_data(query, mode)` | `POST /query/data` | 结构化：entities / relationships / chunks |
+| `rag_graph_search(query)` | `POST /query/data` | 图谱向聚合 |
 
-```bash
-# 1. 配置 LightRAG 环境
-cd LightRAG
-cp env.example .env
-# 编辑 .env，配置 LLM 和 Embedding 模型：
-#   LLM_BINDING=openai
-#   LLM_MODEL=qwen-turbo
-#   LLM_BINDING_HOST=https://dashscope.aliyuncs.com/compatible-mode/v1
-#   LLM_BINDING_API_KEY=your_dashscope_key
-#   EMBEDDING_BINDING=ollama  # 或 openai
-#   EMBEDDING_MODEL=bge-m3:latest
-#   EMBEDDING_DIM=1024
+查询模式 `mode`：`mix`（默认，图谱+向量）、`hybrid`、`local`、`global`、`naive`、`bypass`。
 
-# 2. 安装依赖（推荐 uv）
-uv sync --extra api
+### 12.4 RAGMiddleware 与加载器
 
-# 3. 启动 LightRAG Server（端口 9621）
-lightrag-server
-```
-
-验证：访问 `http://localhost:9621/health` 返回 200。
-
-### 3.3 启动 RAG MCP Server
-
-```bash
-cd hmall-agent
-
-# 确保 .env 中 RAG 配置正确
-# RAG_BASE_URL=http://localhost:9621
-# RAG_USERNAME=admin
-# RAG_PASSWORD=admin123
-# RAG_MCP_PORT=8008
-
-# 启动 MCP Server（端口 8008）
-uv run python start_rag_server.py
-```
-
-验证：查看日志输出 `🚀 Starting RAG MCP Server on port 8008`。
-
-### 3.4 启动 Agent Server
-
-```bash
-cd hmall-agent
-uv run python start_server.py
-```
-
-### 3.5 启动前端
-
-```bash
-cd hmall-frontend
-npm run dev
-```
-
-### 3.6 完整启动顺序
-
-```bash
-# 1. 启动 LightRAG Server（端口 9621）
-cd LightRAG && lightrag-server
-
-# 2. 启动 RAG MCP Server（端口 8008）
-cd hmall-agent && uv run python start_rag_server.py
-
-# 3. 启动 Agent Server（端口 8090）
-uv run python start_server.py
-
-# 4. 启动前端
-cd hmall-frontend && npm run dev
-```
-
-> LightRAG Server 和 RAG MCP Server 是可选组件。未启动时 Agent 仍可正常工作，只是不提供 RAG 检索能力。
-
----
-
-## 4. 使用指南
-
-### 4.1 前端 RAG 开关
-
-在 ChatPanel.vue 头部右侧有「知识库」按钮：
-- **灰色指示灯**：RAG 关闭（默认），Agent 只使用业务工具
-- **绿色指示灯**：RAG 开启，Agent 可使用 RAG 工具检索知识库
-
-点击按钮切换开关状态，状态持久化到 sessionStorage（刷新不丢失，关闭浏览器标签页后失效）。
-
-### 4.2 知识库管理
-
-通过 LightRAG WebUI 管理知识库文档：
-
-1. 访问 `http://localhost:9621/webui`
-2. 登录（账号密码见 LightRAG 的 `.env` 中 `AUTH_ACCOUNTS`）
-3. 上传文档（支持 PDF / DOCX / TXT / Markdown）
-4. LightRAG 自动构建知识图谱 + 向量索引
-5. 索引完成后即可在 Agent 对话中使用
-
-### 4.3 查询模式
-
-RAG 工具支持多种查询模式（`mode` 参数）：
-
-| 模式 | 说明 | 适用场景 |
-|------|------|---------|
-| `mix`（默认） | 融合知识图谱 + 向量检索 | 大多数问题（效果最佳） |
-| `hybrid` | 混合 local + global 检索 | 需要兼顾细节和全局 |
-| `local` | 聚焦具体实体及其关系 | 查询特定实体的信息 |
-| `global` | 提供更宽泛的上下文 | 查询宏观趋势/关系 |
-| `naive` | 简单向量相似度搜索 | 快速原型验证 |
-| `bypass` | 绕过 RAG 直接用 LLM | 对比测试 |
-
----
-
-## 5. 配置说明
-
-### 5.1 hmall-agent .env 配置
-
-```bash
-# RAG（LightRAG + MCP）
-RAG_BASE_URL=http://localhost:9621       # LightRAG Server 地址
-RAG_USERNAME=admin                       # LightRAG 登录用户名
-RAG_PASSWORD=admin123                    # LightRAG 登录密码
-RAG_SPACE_ID=hmall_space                 # LightRAG 工作空间隔离标识
-RAG_API_KEY=                             # LightRAG API Key（可选，优先于账号密码）
-RAG_AUTH_ENABLED=true                    # 是否启用 LightRAG 认证
-RAG_MCP_PORT=8008                        # RAG MCP Server 监听端口
-```
-
-### 5.2 LightRAG .env 配置（关键项）
-
-```bash
-# Server
-PORT=9621
-AUTH_ACCOUNTS='admin:admin123'           # 与 hmall-agent 的 RAG_USERNAME/RAG_PASSWORD 一致
-TOKEN_SECRET=your-token-secret
-
-# LLM
-LLM_BINDING=openai
-LLM_MODEL=qwen-turbo
-LLM_BINDING_HOST=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_BINDING_API_KEY=your_dashscope_key
-
-# Embedding（注意：embedding 模型确定后不可更改，需重新索引）
-EMBEDDING_BINDING=ollama
-EMBEDDING_MODEL=bge-m3:latest
-EMBEDDING_DIM=1024
-
-# Storage（开发环境用 JSON，生产环境建议 PostgreSQL）
-LIGHTRAG_KV_STORAGE=JsonKVStorage
-LIGHTRAG_DOC_STATUS_STORAGE=JsonDocStatusStorage
-LIGHTRAG_GRAPH_STORAGE=NetworkXStorage
-LIGHTRAG_VECTOR_STORAGE=NanoVectorDBStorage
-```
-
-### 5.3 认证方式
-
-LightRAG 支持两种认证方式（二选一）：
-
-1. **账号密码（JWT）**：配置 `RAG_USERNAME` / `RAG_PASSWORD`，LightRAGClient 调用 `/login` 获取 JWT token
-2. **API Key**：配置 `RAG_API_KEY`，请求头带 `X-API-Key`
-
-> 如果 LightRAG 未配置认证（`AUTH_ACCOUNTS` 为空），LightRAGClient 会收到 guest token，仍可正常工作。
-
----
-
-## 6. MCP 工具说明
-
-### 6.1 rag_query
-
-```python
-rag_query(query: str, mode: str = "mix") -> str
-```
-
-语义检索知识库，返回基于知识库生成的答案和参考来源。
-
-**适用场景**：运营策略咨询、商品知识问答、退换货政策咨询
-
-**返回格式**：
-```
-知识库生成的答案内容...
-
-**参考来源：**
-1. /documents/seckill_strategy.md
-2. /documents/inventory_guide.md
-```
-
-### 6.2 rag_query_data
-
-```python
-rag_query_data(query: str, mode: str = "mix") -> str
-```
-
-结构化数据查询，返回知识图谱中的实体、关系和文本块（不生成最终答案）。
-
-**适用场景**：查看知识库中具体实体定义、实体间关系、原始文本片段
-
-**返回格式**：
-```
-**检索结果**（3 实体 / 2 关系 / 5 文本块）
-
-**相关实体：**
-1. [策略] 秒杀活动：限时限量折扣促销...
-2. [商品] 库存：商品可用数量...
-
-**实体关系：**
-1. 秒杀活动 → 库存（权重 0.8）：秒杀活动消耗库存...
-
-**相关文本块：**
-1. [seckill_strategy.md] 秒杀活动策划指南...
-```
-
-### 6.3 rag_graph_search
-
-```python
-rag_graph_search(query: str) -> str
-```
-
-知识图谱搜索，基于查询提取相关实体和关系。
-
-**适用场景**：探索知识库中实体间的关联关系
-
----
-
-## 7. 故障排查
-
-### 7.1 RAG 工具不可用
-
-**现象**：前端开启「知识库」开关后，Agent 回复"知识库检索暂不可用"或未使用 RAG 工具。
-
-**排查步骤**：
-
-1. **检查 LightRAG Server**：
-   ```bash
-   curl http://localhost:9621/health
-   ```
-   预期返回 200。如果失败，启动 LightRAG Server。
-
-2. **检查 RAG MCP Server**：
-   ```bash
-   # 查看 MCP Server 日志是否有错误
-   # 确认端口 8008 已监听
-   ```
-   如果未启动，运行 `uv run python start_rag_server.py`。
-
-3. **检查 Agent 日志**：
-   - 搜索 `RAG MCP 工具加载失败` — MCP Server 不可达
-   - 搜索 `RAG 已启用但无可用工具` — 工具加载失败
-   - 搜索 `RAG 工具注入成功` — 正常工作
-
-4. **检查 .env 配置**：
-   - `RAG_BASE_URL` 指向正确的 LightRAG 地址
-   - `RAG_USERNAME` / `RAG_PASSWORD` 与 LightRAG 的 `AUTH_ACCOUNTS` 一致
-
-### 7.2 知识库无检索结果
-
-**现象**：RAG 工具可用但返回空结果或"未找到相关信息"。
-
-**排查步骤**：
-
-1. **检查知识库是否已导入文档**：访问 LightRAG WebUI 查看文档列表
-2. **检查文档索引状态**：文档状态应为 `processed`，非 `pending` 或 `failed`
-3. **尝试直接查询 LightRAG**：
-   ```bash
-   curl -X POST http://localhost:9621/query \
-     -H "Content-Type: application/json" \
-     -d '{"query": "测试查询", "mode": "mix"}'
-   ```
-
-### 7.3 LightRAG 登录失败
-
-**现象**：MCP Server 日志报 `LightRAG 登录失败`。
-
-**排查步骤**：
-
-1. 检查 LightRAG `.env` 中 `AUTH_ACCOUNTS` 配置格式：`admin:admin123`（明文密码）
-2. 确认 hmall-agent `.env` 中 `RAG_USERNAME` / `RAG_PASSWORD` 与之一致
-3. 如果 LightRAG 未配置认证，确保 `AUTH_ACCOUNTS` 为空或注释掉
-
-### 7.4 降级行为
-
-当 RAG MCP Server 不可达时：
-- RAGMiddleware 只 log warning，不阻塞 Agent
-- Agent 正常使用业务工具，用户无感知
-- 用户开启「知识库」开关但 RAG 不可用时，Agent 回复降级提示
-
----
-
-## 8. 文件清单
-
-### 新增文件
-| 文件 | 说明 |
+| 行为 | 设计 |
 |------|------|
-| `hmall-agent/src/tools/rag_loader.py` | MCP 工具加载器（MultiServerMCPClient 封装 + 缓存） |
-| `hmall-agent/start_rag_server.py` | RAG MCP Server 独立启动入口 |
-| `hmall-agent/src/workspace/customer/skills/rag-query/SKILL.md` | C 端 RAG 技能规范 |
-| `docs/Agent功能相关文档/hmall-agent-rag-integration.md` | 本文档 |
+| 注入条件 | `context.enable_rag is True` |
+| 去重 | 按工具名避免重复 append |
+| 缓存 | `rag_loader` 模块级缓存工具列表；`refresh()` 强制重连 |
+| 降级 | MCP 不可达 → 日志 warning，本轮无 RAG 工具，业务继续 |
 
-### 修改文件
-| 文件 | 说明 |
+与推荐降级同哲学：**可选能力失败不得拖垮主购物链路**。
+
+### 12.5 前端开关与 Skills
+
+- UI：书本图标 + 指示灯；状态进 `sessionStorage`
+- Skills：`workspace/customer|admin/skills/rag-query/SKILL.md` 均已挂入 sources
+- Prompt：引导「政策/指南类优先 rag_query，勿臆造」
+
+### 12.6 配置项语义
+
+| 变量 | 默认语义 |
+|------|----------|
+| `RAG_BASE_URL` | LightRAG，如 `http://localhost:9621` |
+| `RAG_USERNAME` / `RAG_PASSWORD` | 账号密码登录 |
+| `RAG_API_KEY` | 可选，优先于账号密码 |
+| `RAG_AUTH_ENABLED` | 是否启用 LightRAG 认证 |
+| `RAG_MCP_PORT` | MCP 监听，默认 8008 |
+
+全文样例 → 实现说明。
+
+### 12.7 LightRAG 独立配置要点
+
+LightRAG 子模块自有 `.env`（与 hmall-agent 分离）：
+
+| 类别 | 要点 |
 |------|------|
-| `hmall-agent/src/mcp_servers/rag_server.py` | 从预留桩替换为完整 FastMCP Server 实现 |
-| `hmall-agent/src/middleware/rag_context.py` | 从预留桩替换为完整 RAGMiddleware 实现 |
-| `hmall-agent/src/core/config.py` | 新增 RAG_API_KEY / RAG_AUTH_ENABLED / RAG_MCP_PORT 配置 |
-| `hmall-agent/src/agents/admin/agent.py` | 中间件链加入 RAGMiddleware |
-| `hmall-agent/src/agents/customer/agent.py` | 中间件链加入 RAGMiddleware + Skills sources 加 rag-query |
-| `hmall-agent/src/agents/admin/prompts.py` | system prompt 补充 RAG 能力说明 |
-| `hmall-agent/src/agents/customer/prompts.py` | system prompt 补充 RAG 能力说明 |
-| `hmall-agent/src/workspace/admin/skills/rag-query/SKILL.md` | 移除预留标记，描述实际工具用法 |
-| `hmall-agent/.env.example` | 补充 RAG 配置项 |
-| `hmall-frontend/src/components/chat/ChatPanel.vue` | 头部新增 RAG 开关按钮 + sendMessage 传入 enable_rag |
+| Server | 端口 9621、WebUI 路径 |
+| LLM | 建议与 Agent 同用 DashScope 兼容接口（模型名可不同） |
+| Embedding | **一经选定不可随意更换**；更换需全量重建索引 |
+| Storage | 开发可用 JSON/本地；生产建议 PostgreSQL 等 |
+
+知识管理：WebUI 上传 PDF/DOCX/TXT/Markdown；自动构图+向量化。
+
+### 12.8 部署顺序（简）
+
+1. LightRAG `:9621`  
+2. RAG MCP `:8008`（`uv run python start_rag_server.py`）  
+3. Agent `:8090`  
+4. 前端  
+
+逐步命令与检查清单 → 实现说明。勿在本文复制长 bash。
+
+### 12.9 使用与查询模式建议
+
+| 场景 | 建议 mode | 说明 |
+|------|-----------|------|
+| 综合 FAQ | `mix` | 默认，覆盖面最好 |
+| 明确段落检索 | `naive` / `local` | 偏向量局部 |
+| 需要实体关系 | `rag_graph_search` 或 `global` | 运营策略类 |
+
+### 12.10 故障排查（设计层）
+
+| 现象 | 排查方向 |
+|------|----------|
+| 工具列表无 rag_* | 开关是否 true；MCP 是否监听；loader 缓存是否脏 |
+| 有工具无结果 | LightRAG 是否已索引文档；mode 是否过窄 |
+| 登录失败 | `RAG_*` 凭证 / API Key；LightRAG 认证开关 |
+| 仅业务可用 | **预期降级**：查 MCP/LightRAG 日志，不必先重启 Agent |
+
+### 12.11 文件清单（设计视图）
+
+| 路径 | 角色 |
+|------|------|
+| `src/mcp_servers/rag_server.py` | MCP 工具实现 |
+| `src/tools/rag_loader.py` | Agent 侧 MCP Client |
+| `src/middleware/rag_context.py` | 动态注入 |
+| `start_rag_server.py` | 进程入口 |
+| `workspace/*/skills/rag-query/` | 技能规范 |
+
+### 12.12 知识分层与安全（设计）
+
+| 层级 | 示例 | 可见范围建议 |
+|------|------|--------------|
+| 对客 FAQ | 退换货、运费 | Customer + 可对 Admin |
+| 运营内部 | 选品策略、指标口径 | **仅 Admin 知识库或权限** |
+| 敏感 | 成本、供应商条款 | 默认不进 RAG |
+
+若 LightRAG 单库混布，需运营流程保证「不对客文档」不入库，或分实例。Agent 开关不能替代文档 ACL。
+
+### 12.13 RAG 与业务工具冲突消解
+
+| 用户问题 | 优先 |
+|----------|------|
+| 「我的订单呢」 | 业务工具（实时数据） |
+| 「七天无理由怎么算」 | RAG（政策） |
+| 「推荐手机」 | 推荐工具，而非 RAG |
+| 「库存预警怎么定」 | Admin RAG + 可读业务只读查询 |
+
+Skill 应写明优先级，避免 LLM 用过期文档回答实时订单。
+
+### 12.14 可用性目标
+
+| 指标 | 目标（设计） |
+|------|--------------|
+| MCP 挂掉 | 主对话可用 |
+| LightRAG 慢 | 工具超时返回错误文案，不卡死整图 |
+| 开关默认 | false，降低无意耗时与成本 |
+
+---
+
+## 13. LLM 健康检查（设计层）
+
+### 13.1 问题
+
+前端「在线」若写死，无法反映 DashScope / API Key / 模型配置真实可达性。
+
+### 13.2 架构
+
+```
+ChatPanel / AdminLayout
+  → useLlmHealth：约 30s 轮询 GET /api/v1/llm/health
+        │
+        ▼
+Agent 自定义路由 health.py
+  → 最小 chat completions（max_tokens=1）探测 DashScope
+  → 模块级缓存约 10s，减少重复耗 token
+        │
+        ▼
+返回 { llm_reachable, latency_ms, model, detail, cached, ... }
+  → 前端 online | offline | checking
+```
+
+### 13.3 设计决策
+
+| 决策 | 理由 |
+|------|------|
+| 用 chat 而非仅 `/models` | 部分兼容实现 `/models` 不验 Key |
+| 服务端短缓存 | 多组件同时轮询时合并探测 |
+| 前端 30s | 状态低频变化，平衡流量 |
+| 端点不可达也算离线 | 覆盖 Agent 进程宕机 |
+| 异常不抛 500 | 始终 JSON，便于 UI 绑定 |
+
+实现与组件绑定 → 实现说明。
+
+---
+
+## 14. 部署设计
+
+### 14.1 原则
+
+| 原则 | 说明 |
+|------|------|
+| Agent 独立进程 | 与 Java 微服务解耦；经 Gateway 访问业务 |
+| 可选能力可关 | RAG / 画像 Redis 故障时主对话仍可用（降级） |
+| 配置外置 | 密钥只在 `.env`，不进镜像层明文文档 |
+| 开发态落盘 | `.langgraph_api/` 本地可恢复；生产换托管 Checkpoint |
+
+### 14.2 逻辑启动顺序
+
+1. 基础设施：MySQL / Redis / Nacos / RabbitMQ  
+2. Java 微服务（含 Gateway、`GET /users/me`）  
+3. （可选）LightRAG → RAG MCP  
+4. Agent Server  
+5. 前端  
+
+逐步命令、健康检查 URL、验收表 → 实现说明「部署指引」。
+
+### 14.3 端口总览
+
+| 服务 | 端口 | 备注 |
+|------|------|------|
+| hm-gateway | 8080 | 业务 + introspect |
+| item / cart / user / pay / trade / search / … | 8081+ | 以仓库配置为准 |
+| Agent（LangGraph） | 8090 | |
+| LightRAG | 9621 | 可选 |
+| RAG MCP | 8008 | 可选 |
+| 前端 Vite | 5173（常见） | 以前端配置为准 |
+
+### 14.4 环境分级建议
+
+| 环境 | Checkpoint | RAG | 画像 Redis |
+|------|------------|-----|------------|
+| 本地开发 | inmem 落盘 | 可选 | 共用开发 Redis db=0 |
+| 联调 | 同上 | 建议开 | 与后端同实例 |
+| 生产 | 托管 DB（规划） | 独立资源 | 高可用 Redis；注意前缀 |
+
+### 14.5 依赖健康依赖链
+
+```
+前端在线 ≠ LLM 在线 ≠ Gateway 在线 ≠ RAG 在线
+```
+
+产品展示可分层：Agent 进程存活、LLM 可达、知识库可达。当前实现以 LLM health 为主信号；RAG 失败静默降级。
+
+### 14.6 回滚与兼容
+
+- Agent 版本应相对 Java API **向后兼容**（只增工具不改旧语义）。  
+- `graph` 名 `customer_agent` / `admin_agent` 视为外部契约，前端写死依赖。  
+- 废止 Redis Checkpoint 后，勿再要求运维开通 db=1 会话库。
+
+---
+
+## 15. 与 nova-mall-agent 的差异适配
+
+| 维度 | nova-mall-agent（对标） | hmall 适配 |
+|------|-------------------------|------------|
+| 商城 API | nova 自有网关与路径 | 一律映射 hmall Gateway 路径 |
+| 优惠券 / 售后 | 常有完整工具集 | **暂无**；工具表更短 |
+| 管理端 | 可能含写操作 | **强制只读** + PermissionMiddleware |
+| 认证 | 单 Token 或不同 claim | **双 JWT** + introspect 双路径 |
+| 推荐 / 画像 | 视版本 | hmall 已落推荐 + Redis 画像共享 |
+| Checkpoint | 视部署 | hmall 开发态 inmem 落盘 |
+
+适配策略：**保留 DeepAgent 三级路由与 Skills 模式**，替换工具 API 与鉴权，删除不存在的业务域工具，而不是 fork 整套调度器。
+
+---
+
+## 16. 演进路线与状态表
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| 三级路由 + 双 Agent | ✅ | Customer / Admin |
+| 双 JWT + introspect + owner 多租户 | ✅ | |
+| Checkpoint inmem + `.langgraph_api` | ✅ | 废止 Redis Checkpoint 表述 |
+| 个性化推荐 Phase 1 | ✅ | 工具 + Skill + `/recommend` |
+| 用户画像 Phase 2 | ✅ | Redis `profile:`；后端写入端对齐 |
+| RAG（LightRAG + MCP） | ✅ | §12 |
+| LLM 健康检查 | ✅ | §13 |
+| Layer 3 语义记忆工具 | ✅ | Store |
+| 前端浏览埋点 `POST /behaviors` | ⏸ | 规划 |
+| Item-CF / 向量召回 | ⏸ | Phase 3 向 |
+| **主动通知** | ⏸ **规划中** | Part C2 |
+| 优惠券 / 售后工具 | ⏸ | 依赖业务上线 |
+| 正则规则 Nacos 动态加载 | ⏸ | |
+| LangSmith 全链路 | ⏸ 可选 | |
+| LLM 降级固定文案 | ⏸ | 实现说明已知问题 |
+
+---
+
+# Part B　个性化推荐设计
+
+> 技术决策与模式以本文为权威。工具函数体、Formatter、SKILL 全文 → [实现说明 Part II](./hmall_Agent实现说明文档.md)。
+
+## B1. 目标与差异定位
+
+当前 Customer 已具备交易链路工具，但商品发现仍偏「用户会搜才找得到」。对话式推荐目标：
+
+- 基于购买 / 加购等信号做个性化列表  
+- **可解释理由**（LLM 组织，后端给 tags / basedOn）  
+- 覆盖「猜你喜欢 / 看了又看 / 凑单」等对话场景  
+- Agent 可组合偏好分析 + 搜索，而不仅是推荐 API 薄封装  
+
+| 维度 | 传统推荐 | Agent 对话式推荐 |
+|------|----------|------------------|
+| 触发 | 页面自动 | 用户问 / Agent 顺势 / 偏好推理 |
+| 解释 | 常黑盒 | 自然语言理由 |
+| 上下文 | 行为画像 | 对话 + 画像 + 实时意图 |
+| 冷启动 | 热销兜底 | 热销 + **主动追问偏好** |
+| 闭环 | 单向 | 推荐→反馈→再推荐 |
+
+**原则**：算法在后端，**策略与交互在 Agent**；优雅降级；购买信号旁路采集不侵入支付事务。
+
+## B2. 架构与数据流
+
+```
+对话「有什么推荐」/ 详情后 upsell / 预算咨询
+        │
+CustomerAgent
+  · get_recommendations_api → GET /recommend
+  · analyze_user_preferences → 画像优先，miss 则订单+购物车聚合
+  · search_items_api（降级 / 偏好驱动）
+        │
+hm-gateway
+        ├─ item-service /recommend（偏好→ES 召回→销量排序 / 热销兜底）
+        └─（画像）Redis db=0 profile:{uid}:*
+              ▲
+              │ HINCRBY
+        CartServiceImpl（cart） / paySuccessListener（purchase）
+```
+
+与三级路由关系：高频「猜你喜欢」走 **L1**；需上下文 `item_id` 的「看了又看」走 **L3**；复杂预算咨询走 **偏好工具 + 搜索**。
+
+### B2.1 后端推荐管线（逻辑步骤）
+
+1. 解析 `userId`（Gateway 已认证）与 scene。  
+2. 取偏好：Redis 画像 TopN → miss 则 Feign 已购聚合。  
+3. 召回：ES 按类目/品牌过滤，status 上架，排除已购。  
+4. 排序：销量等业务分。  
+5. 附 `recommendTags` / `basedOn`。  
+6. 失败：MySQL/ES 热销兜底或错误码给 Agent 降级。
+
+### B2.2 Agent 不做什么
+
+- 不自己算 Item-CF 矩阵。  
+- 不直连 ES。  
+- 不在 Prompt 里写死商品 ID 列表冒充推荐。  
+
+## B3. Agent 侧规格（非源码）
+
+| 项 | 规格 |
+|----|------|
+| `get_recommendations_api` | 参数 scene / size / item_id；需登录；格式化列表 + basedOn |
+| `analyze_user_preferences` | 需登录；命中画像 0 次 Gateway；miss 降级实时聚合并回写 |
+| Formatter | `format_recommendations` / `format_preferences` |
+| Skill | `personalized-recommendation`：四类场景工作流 + 理由规则 |
+| Prompt | 能力声明、upsell 引导、冷启动追问 |
+| 正则 | 「推荐\|猜你喜欢\|有什么好\|帮我选」等 → scene=home |
+
+实现与注册表 → 实现说明 Part II。
+
+## B4. 三种触发模式
+
+### 模式 A：用户主动请求
+
+L1 命中 → `get_recommendations_api(home)` → 列表（可含后端 tags）。零 LLM 成本。
+
+### 模式 B：Agent 主动 Upsell
+
+用户看详情后，LLM 按 Skill/Prompt **顺势**调 `get_recommendations_api(detail, item_id)`，附加搭配话术。
+
+### 模式 C：偏好驱动
+
+LLM 先 `analyze_user_preferences`，再结合预算等调 `search_items_api`，生成解释性推荐——**不完全依赖** `/recommend`。
+
+| 维度 | A | B | C |
+|------|---|---|---|
+| 触发 | 用户 | Agent | Agent 推理 |
+| 层 | L1 | L3 | L3 多工具 |
+| 成本 | 零 LLM | 1 次推理 | 1–2 次 |
+
+## B5. 冷启动
+
+| 场景 | Agent | 后端 |
+|------|-------|------|
+| 未登录 | 提示登录后个性化 | 401 |
+| 无历史 | 展示热销 + 追问喜好 | 热销榜 / basedOn 空 |
+| 接口失败 | 降级搜索提示 | 错误 |
+| 画像空 | 同无历史 | miss 路径 |
+
+## B6. 后端 API 需求
+
+### `GET /recommend`
+
+| 参数 | 说明 |
+|------|------|
+| scene | home / detail / cart |
+| size | 默认 10 |
+| itemId | detail 时种子商品 |
+
+响应需含商品列表字段（id/name/price/stock/brand/category/sold/recommendTags）及可选 `basedOn.topCategories/topBrands`。
+
+**演进**：Phase1 Feign 聚合已购 → ES 召回 → 销量排序；Phase2 优先读 Redis 画像；Phase3 Item-CF / 向量。
+
+> 实现偏差：跨库不可 SQL JOIN，改为 trade Feign `purchased-items` + item 侧补全。权威偏差说明见实现说明。
+
+### `POST /behaviors`（规划）
+
+原设计：浏览埋点写 MQ。现行 **加购/购买已由后端直写画像**；浏览埋点仍可选。不必再为 cart/purchase 强制 MQ。
+
+### Redis 画像（与 Part C 一致）
+
+`profile:{uid}:events|categories|brands|prices|stats`；`cf:` / `rec:` 缓存仍为后续。
+
+## B7. 前端（契约级）
+
+| 项 | 设计 |
+|----|------|
+| 快捷语 | 「有什么推荐」「猜你喜欢」 |
+| 浏览埋点 | ProductDetail onMounted → 规划 |
+| 卡片 | 列表 Markdown 即可；`[ID:xxx]` 可后续做跳转增强 |
+
+## B8. 推荐闭环
+
+推荐 → 看详情 → 再 upsell；或「更便宜」→ 搜索；或加购 → scene=cart 凑单；或「不喜欢该品牌」→ 排除重推。Thread 历史支撑指代消解。
+
+## B9. 技术决策（权威，保留）
+
+### B9.1 理由由 LLM 生成而非后端模板
+
+后端模板「同类目热销」生硬；LLM 可结合对话（刚看过的型号、预算）组织句子。后端 tags 作为硬约束，减少幻觉。
+
+### B9.2 偏好分析不强制独立画像 HTTP
+
+Agent 读 Redis / 降级聚合即可；减少服务个数。后端推荐服务直接读同一 Redis，而不是再暴露 `/profile`（可后续加）。
+
+### B9.3 推荐需登录
+
+个性化依赖用户数据；未登录引导登录或走搜索，避免「匿名伪个性化」。
+
+### B9.4 L1 vs L3 分流
+
+home 场景参数稳定适合正则；detail 依赖上下文 item_id，正则脆弱，交给 LLM。
+
+### B9.5 Phase1 算法克制
+
+SKU/用户少时 CF 稀疏；Content-Based + 热销已够验证对话闭环。
+
+### B9.6 行为写入后端化
+
+支付与加购是确定性业务事件，放在 Java 旁路最稳，且覆盖非 Agent 入口；Agent 双写会导致得分翻倍。
+
+### B9.7 决策一览表
+
+| # | 决策 | 状态 |
+|---|------|------|
+| 1 | LLM 生成理由 | ✅ 采纳 |
+| 2 | 画像优先分析 | ✅ 采纳 |
+| 3 | 推荐需登录 | ✅ 采纳 |
+| 4 | home→L1 / detail→L3 | ✅ 采纳 |
+| 5 | Phase1 无 CF/向量 | ✅ 采纳 |
+| 6 | 后端写 purchase/cart | ✅ 采纳（相对早期 MQ 方案的实现对齐） |
+
+## B10. Phase 与风险
+
+| 步骤 | 内容 | 状态 |
+|------|------|------|
+| 1–6 | Agent 工具/Skill/Prompt/正则 + GET /recommend | ✅ |
+| 7 | 后端写 purchase/cart 画像 | ✅（直写 Redis，非 MQ） |
+| 8 | 前端 view 埋点 | ⏸ |
+| 9 | 画像共享读 | ✅ |
+| 10 | Item-CF | ⏸ |
+
+| 风险 | 规避 |
+|------|------|
+| 数据稀疏 | 热销 + 追问 |
+| 接口延迟 | 缓存 / 降级搜索 |
+| 理由不准 | tags 约束 |
+| 埋点影响页 | 异步 + 静默失败 |
+
+---
+
+# Part C　用户画像与主动通知
+
+## C1. 用户画像 Layer 1–3（权威设计）
+
+> **状态：Phase 2 已落地。** 早期「Agent 写操作直写 + MQ 旁路」已与实现对齐为：**后端 CartService + paySuccessListener 写入**；Agent 负责读加速与 miss 回写。
+
+### C1.1 背景：Phase 1 双重计算问题
+
+Phase 1 存在两端互不知晓的全量重算：
+
+- 后端 `RecommendServiceImpl`：每次推荐 Feign 取已购再聚合  
+- Agent `analyze_user_preferences`：每次拉订单+购物车再聚合  
+
+目标：共享增量画像，命中时偏好分析 **0 次 Gateway**；推荐服务可选同读。
+
+### C1.2 三层体系
+
+```
+Layer 1  实时行为流   Redis List   最近 50 条，TTL 7d     回溯 / 修正
+Layer 2  聚合画像     Redis Hash   类目/品牌得分等 TTL 30d  推荐与偏好读取
+Layer 3  语义记忆     LangGraph Store  跨会话意图文案       对话个性化
+```
+
+结构化画像回答「喜欢什么」；语义记忆回答「说过要买什么」。
+
+### C1.3 Redis Key（db=0，前缀 profile:）
+
+| Key | 结构 | 说明 |
+|-----|------|------|
+| `profile:{uid}:events` | List | 行为流 |
+| `profile:{uid}:categories` | Hash | 类目 → 得分 |
+| `profile:{uid}:brands` | Hash | 品牌 → 得分 |
+| `profile:{uid}:prices` | List | 最近价格 |
+| `profile:{uid}:stats` | Hash | 计数与 last_update |
+
+> **注意**：画像在 **db=0**，与 Checkpoint **无关**。旧文「与 Checkpoint 同库 db=1」作废。
+
+### C1.4 权重（与 Phase 1 聚合一致）
+
+| 行为 | 权重 | 现行写入端 |
+|------|------|------------|
+| purchase | 5 | `paySuccessListener`（支付成功） |
+| cart | 3 | `CartServiceImpl.addItem2Cart` |
+| view | 1 | 规划（前端埋点） |
+
+数学要求：画像命中路径与 miss 实时聚合路径权重一致，保证结果可对齐。
+
+### C1.5 读写路径（对齐实现）
+
+```
+analyze_user_preferences
+  → get_profile 命中？ → 直接 format
+  → miss → Phase1 聚合 → 异步 backfill_profile
+
+加购（任意入口）→ CartService → HINCRBY cart
+支付成功 → paySuccessListener → HINCRBY purchase
+
+Agent 工具不再对 cart/purchase 重复 record_event（防双写）
+```
+
+**Java 侧约束**：使用 `StringRedisTemplate` 明文 field，避免与 Agent `redis.asyncio` 的 Jackson 序列化不兼容。
+
+### C1.6 ProfileStore API（规格）
+
+| 方法 | 语义 |
+|------|------|
+| `record_event(...)` | Layer1+2 增量（管道 + TTL） |
+| `get_profile` | 聚合读取；空则调用方降级 |
+| `top_categories` / `top_brands` | TopN |
+| `invalidate` | 用户清除 / 修正 |
+| `backfill_profile` | miss 后回写 |
+
+### C1.7 Layer 3 记忆工具
+
+| 工具 | 语义 |
+|------|------|
+| `save_memory(key, value)` | Store namespace `user_memory` + user_id |
+| `get_memories` | 检索近期记忆供 LLM 自然融入 |
+
+Store 类型由 `graph.json` `in_memory` 配置；开发态随 `.langgraph_api` 落盘策略由运行时管理。Prompt 要求：开场可读记忆、未完成意图要存、完成或放弃要清理、禁止生硬复述。
+
+### C1.8 后端推荐共享
+
+`RecommendServiceImpl.recommend()`：**优先 HGETALL 画像**，miss 降级原 Feign 聚合。排除已购列表仍可走 Feign（画像不存明细）。
+
+### C1.9 实现偏差摘要（设计已知）
+
+1. 写入端从「Agent 直写」改为「后端双入口」，覆盖 UI 加购。  
+2. 取消强制 `POST /behaviors` + MQ 作为 purchase/cart 主路径。  
+3. Store 经 graph.json 注入，不必改 `create_agent(store=)`。  
+4. `update_cart_quantity` / 确认收货不写偏好（防噪声与双记）。  
+
+细节 → 实现说明。
+
+### C1.10 一致性与并发
+
+- 使用 `HINCRBY` 保证并发加购/支付下得分不互相覆盖。  
+- Agent backfill 与后端增量可能短暂并存：可接受最终近似；必要时 `invalidate` 后重建。  
+- TTL 滑动刷新：有写入即续期，避免活跃用户画像突然消失。
+
+### C1.11 隐私与合规设计
+
+| 要求 | 做法 |
+|------|------|
+| 最小化 | 只存聚合，不存完整地址/支付账号 |
+| 可清除 | `invalidate` + 产品入口（规划） |
+| 隔离 | Key 含 userId；禁止管理端工具直接扫全库画像 |
+| 日志 | 不对齐输出完整偏好 JSON 到公开日志 |
+
+### C1.12 画像命中率与容量
+
+| 议题 | 设计看法 |
+|------|----------|
+| 冷用户 | miss 降级，不阻塞 |
+| 大 Hash | TopN 读取即可；不必一次拉全历史事件做推荐 |
+| Redis 内存 | TTL + LTRIM 限制 List 长度 |
+
+### C1.13 端到端时序：加购后推荐
+
+```
+用户加购（UI 或 Agent）
+  → CartService 写 profile cart 权重
+  → 用户：「根据购物车推荐」
+  → get_recommendations_api(scene=cart) 或 analyze + search
+  → 后端读 categories/brands → ES 召回
+  → LLM（若 L3）解释理由
+```
+
+### C1.14 端到端时序：支付后偏好变化
+
+```
+支付成功 MQ → paySuccessListener
+  → HINCRBY purchase 权重 5
+  → 下次 analyze_user_preferences 命中即反映新类目/品牌
+```
+
+无需等 Agent 会话仍在线。
+
+---
+
+## C2. 主动通知（规划中）
+
+> **状态：规划中，尚未落地。** 以下保留设计，供后续排期；实现时以独立 SSE 通道为准，并回写状态表。
+
+### C2.1 背景与原则
+
+纯被动对话无法覆盖支付成功安心感、超时取消告知、秒杀提醒等。后端已有 RabbitMQ 事件时，Agent 侧补 **消费 + 推送**。
+
+| 原则 | 说明 |
+|------|------|
+| 独立通道 | **不**写入对话 Thread，避免污染 LLM 上下文 |
+| 双模式 | A 模板轻量；B LLM 个性化（依赖画像） |
+| 离线可恢复 | Redis 暂存，上线补发 |
+| 幂等 | `SETNX notify:sent:{type}:{id}` |
+| 频控 | 每用户每小时上限；high 优先 |
+
+### C2.2 架构
+
+```
+Java 业务事件 ──MQ──► EventConsumer ──► NotificationDispatcher
+                                            │ 在线 SSE
+                                            │ 离线 Redis list
+                                            ▼
+                                       前端铃铛 / 面板
+```
+
+### C2.3 双模式
+
+| 模式 | 场景 | 延迟 / 成本 |
+|------|------|-------------|
+| A 模板 | 支付成功、超时取消、物流 | <200ms / 0 token |
+| B LLM | 秒杀提醒、降价、运营推送 | ~2–3s / 少量 token；失败降级模板 |
+
+### C2.4 事件注册表（规划）
+
+| 事件 | MQ（示例） | 模式 |
+|------|------------|------|
+| pay_success | pay.direct / pay.success | A |
+| order_timeout | trade.delay / delay.order | A |
+| seckill_start | 需后端新增 | B |
+| logistics_update | 需新增 | A |
+| price_drop | 需新增 | B |
+
+### C2.5 SSE 契约（规划）
+
+- `GET /api/v1/notifications/stream`（生产应从 JWT 解析 user，禁止仅 query 传 uid）  
+- 连接时 `flush_offline` → 持续推送 `event: notification`  
+- 前端 `EventSource` + 断线退避重连；铃铛未读数 + 面板 action 跳转  
+
+### C2.6 模块规划清单
+
+`notification/{models,consumer,rules,dispatcher,api}.py`；`start_server` 注册路由与 consumer 生命周期；依赖 `aio-pika` / `sse-starlette`；前端 `useNotifications`。
+
+### C2.7 注意事项
+
+1. 与 Thread 严格分离。  
+2. 幂等与频控必备。  
+3. 模式 B 依赖 Part C1 画像，可先交模式 A。  
+4. 安全：禁止横向订阅他人通知流。  
+
+### C2.8 推进计划（相对）
+
+| 阶段 | 内容 | 依赖 |
+|------|------|------|
+| 已完成 | 画像 Layer1–3 + 推荐共享 | — |
+| 规划 | 通知模式 A（支付/超时） | MQ |
+| 规划 | SSE + 前端铃铛 | 模式 A |
+| 规划 | 模式 B + 新事件 | 画像 + 后端事件 |
+
+### C2.9 通知数据模型（规划）
+
+| 字段 | 含义 |
+|------|------|
+| id | 全局唯一，幂等键组成部分 |
+| user_id | 接收者 |
+| type | payment_success / order_timeout / … |
+| title / body | 展示文案 |
+| action | 可选跳转（order_id 等） |
+| priority | normal / high |
+| created_at | 排序与过期 |
+
+### C2.10 Redis 键规划（通知）
+
+| Key | 用途 |
+|-----|------|
+| `notify:offline:{uid}` | 离线列表 |
+| `notify:sent:{type}:{id}` | 幂等 |
+| `notify:rate:{uid}` | 小时频控计数 |
+
+与 `profile:` 前缀隔离；同属 db=0 时务必前缀分开。
+
+### C2.11 为何不把通知写入 Thread
+
+1. 系统消息会改变 LLM 上下文，导致「答非所问」或泄露模板口吻。  
+2. interrupt 状态机与通知异步到达交织，难测。  
+3. 用户可能在无会话时也需要支付成功提醒。  
+
+### C2.12 模式 B 提示词约束（规划）
+
+- 不超过约定字数。  
+- 不得编造未在 context 中的价格/库存。  
+- 画像缺失时退回模板。  
+- 营销合规：避免绝对化承诺。  
+
+### C2.13 测试场景（规划验收）
+
+| 场景 | 期望 |
+|------|------|
+| 在线支付成功 | <1s 内铃铛+1 |
+| 离线后上线 | 补发且不重复 |
+| MQ 重投 | 仅一条通知 |
+| 超频 | normal 丢弃，high 保留 |
+| 伪造 user_id 订阅 | 拒绝 |
+
+### C2.14 与现有 batch-report / health 的关系
+
+通知 API 与 health、batch-report 同属自定义 HTTP 层，但**生命周期**更重（常驻 consumer）。启动失败策略需明确：通知模块挂掉是否阻断 Agent——建议 **可降级启动**（对话优先）。
+
+---
 
 
+---
+
+#
+## 附录 A. 文档修订说明（v2.3）
+
+| 动作 | 说明 |
+|------|------|
+| 合并 RAG | 删除原「第四部分」全文副本，并入 Part A §12 |
+| 压缩实现粘贴 | 去掉大段 tools/SKILL/Composable/.env/bash |
+| 修正 Checkpoint | inmem + `.langgraph_api`；废止 Redis db=1 会话说 |
+| 修正数量 | Customer ~20 业务+记忆 / Skills 7；Admin 11 / Skills 3 |
+| 修正状态 | 推荐、RAG、画像已实现；主动通知规划中 |
+| 交叉引用 | How → 实现说明；入门 → 项目说明 |
+
+## 附录 B. 相关路径速查
+
+| 主题 | 设计（本文） | 实现 |
+|------|--------------|------|
+| 系统架构 | Part A §2 | 实现说明 Part I |
+| 推荐 | Part B | 实现说明 Part II |
+| 画像 | Part C1 | 实现说明画像章节 |
+| 通知 | Part C2（规划） | — |
+| RAG | Part A §12 | 实现说明 RAG 节 |
+| 入门 | — | 项目说明 |
+
+---
+
+## 附录 C. 横切设计专题（补充）
+
+> 本章补充 Part A–C 未展开但对评审有用的横切议题，仍保持「设计层」表述。
+
+### C-1. 超时、重试与幂等矩阵
+
+| 调用 | 超时建议 | 重试 | 幂等关键 |
+|------|----------|------|----------|
+| Gateway 只读 | 短（数秒） | 可有限重试 | 是 |
+| Gateway 写 | 短 | **默认不自动重试** | 依赖业务幂等 + interrupt 单次确认 |
+| introspect | 更短 | 可重试 + 缓存 | 是 |
+| LightRAG query | 中 | 有限 | 是 |
+| LLM | 中长 | 框架层 | N/A |
+| MQ 消费（规划） | — | 重投 | 必须 SETNX |
+
+### C-2. 日志与隐私字段
+
+| 可记 | 不可记 |
+|------|--------|
+| tool 名、耗时、status code | JWT 全文 |
+| user_id（或哈希） | 完整收货地址 |
+| thread_id 前缀 | 支付敏感号 |
+| enable_rag 布尔 | RAG 原文若含内部策略（管理端日志分级） |
+
+### C-3. 配置变更热更新边界
+
+| 可变（期望） | 需重启 |
+|--------------|--------|
+| 正则规则进 Nacos（规划） | graph 注册名变更 |
+| 部分 TTL | LLM 模型名（视加载方式） |
+| RAG 开关（每请求 context） | MCP 端口 |
+
+### C-4. 多实例部署含义
+
+开发态 inmem Checkpoint **不能**跨多 worker 共享内存；多副本时必须换共享 Checkpointer（Postgres 等），否则 interrupt 会丢。画像 Redis 天然可共享。MCP/LightRAG 可水平扩展，Agent 侧 loader 缓存需考虑失效。
+
+### C-5. 国际化与文案
+
+当前产品文案以中文为主；设计要求错误提示在工具层固定语言，避免 LLM 切换语言导致前端正则/确认词失效（如确认词「确认」）。若未来 i18n，interrupt `expected_response` 需同步本地化。
+
+### C-6. 测试金字塔（设计期望）
+
+| 层 | 内容 |
+|----|------|
+| 单位 | Formatter、正则、权重聚合 |
+| 契约 | Gateway 路径与 R\<T\> 解包 |
+| 集成 | introspect、推荐 miss/hit、RAG 降级 |
+| 端到端 | L1 秒杀列表、L2 确认、推荐闭环 |
+
+具体用例表见实现说明测试节。
+
+### C-7. 性能预算（经验目标）
+
+| 路径 | 预算 |
+|------|------|
+| L1 只读 | 毫秒～数十毫秒级（不含下游 Java） |
+| 含 Gateway | 视 Java P99 |
+| L3 单轮 | 秒级（模型） |
+| 推荐 L1 | 接近只读 + /recommend |
+| RAG | 高于纯业务，故默认关 |
+
+### C-8. 降级总表
+
+| 依赖失败 | 降级 |
+|----------|------|
+| LLM | 健康检查离线；固定文案（规划） |
+| Gateway | 工具错误提示 |
+| 画像 Redis | miss 路径实时聚合 |
+| `/recommend` | 搜索提示 / 热销 |
+| MCP/LightRAG | 去掉 RAG 工具 |
+| Checkpointer 盘满 | 运维告警；拒绝新会话优于静默丢确认 |
+
+### C-9. 版本兼容策略
+
+- 前端 SDK 大版本升级需回归 context/command。  
+- 新增 context 字段必须带默认值。  
+- 废弃工具先 Skill/Prompt 停止引导，再移除注册。  
+
+### C-10. 文档自身维护规则
+
+1. 改架构 / 契约 → 改本文。  
+2. 改文件路径 / 命令 / 偏差 → 改实现说明。  
+3. 改「项目是什么」叙事 → 改项目说明。  
+4. 状态变更 → 更新 Part A §16。  
+
+---
+
+## 附录 D. 场景设计册（扩展）
+
+### D1. 新用户首购
+
+1. 未登录浏览 → 搜索/详情无需 token。  
+2. 询问推荐 → 提示登录。  
+3. 登录后猜你喜欢 → 热销 + 追问偏好。  
+4. 加购 → CartService 写画像。  
+5. 支付 → purchase 权重写入。  
+6. 再次推荐 → 个性化增强。  
+
+### D2. 老用户指代消解
+
+用户：「把上次那个地址的电话改了」。依赖 Thread 历史 + 地址列表工具；必要时 Store 中的意图记忆辅助。设计上不要求模型一次猜对 address_id，应列表确认。
+
+### D3. 秒杀高峰
+
+- L1 查活动减轻 LLM 压力。  
+- 下单必须 interrupt，防止误触。  
+- Gateway 限流错误应原样可读返回。  
+- 不做 Agent 侧库存预扣。  
+
+### D4. 运营早会
+
+管理员打开管理端对话 → 「运营日报」L1 编排 → 对异常库存追问 → 可选 RAG 查「预警阈值建议」→ 全程无写。
+
+### D5. 政策咨询与下单穿插
+
+开启知识库 → 问退货政策（RAG）→ 再「查看订单」应走业务工具。Skill 优先级保证实时数据不被文档覆盖。
+
+### D6. 推荐闭环驳回
+
+用户连续「不要 Apple」。设计期望：LLM 在本 thread 内排除品牌；不必立刻改 Redis 画像（避免负反馈误伤），除非后续做显式负向事件。
+
+### D7. interrupt 中途离开
+
+用户确认框卡住离开。线程保持挂起；下次进入同 thread 应仍可见待确认，或产品选择超时取消。前端需能渲染历史 interrupt 状态（依赖 getState）。
+
+### D8. Token 过期
+
+introspect 失败 → 会话写操作拒绝；前端跳转登录；旧 thread 仍在但需新 Token 才能 run。
+
+### D9. 管理端误用 C 端话术
+
+即使用户说「帮我下单」，Admin Permission 下无下单工具，模型应拒绝并说明只读。
+
+### D10. RAG 未建索引
+
+工具可调用但空结果 → 提示「知识库暂无资料」，运营去 WebUI 上传，而不是 Agent 编造。
+
+---
+
+## 附录 E. 接口契约速查（设计）
+
+### E1. introspect 响应（逻辑字段）
+
+| 端 | 关键字段 |
+|----|----------|
+| `/users/me` | userId，agentType=customer |
+| `/admin/info` | id 或 userId，管理员身份 |
+
+### E2. `/recommend` 逻辑字段
+
+list[]：id, name, price, stock, brand, category, sold, recommendTags  
+basedOn：topCategories, topBrands  
+
+价格单位与商城一致（分或元）——前后端约定以现网为准，Formatter 负责展示。
+
+### E3. context 字段全集（现行）
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| agent_type | 是 | customer/admin |
+| user_token | 业务需要时 | JWT |
+| user_id | 常由中间件填 | 权威来自 introspect |
+| enable_rag | 否 | 默认 false |
+
+### E4. interrupt payload 逻辑字段
+
+| 字段 | 说明 |
+|------|------|
+| type | confirmation / field_selection / value_input … |
+| message | 展示文案 |
+| expected_response | 可选，辅助前端 |
+
+---
+
+## 附录 F. 风险登记册（总册）
+
+| ID | 风险 | 影响 | 缓解 | 状态 |
+|----|------|------|------|------|
+| R1 | 会话越权 | 高 | owner Auth | ✅ |
+| R2 | Admin 写穿透 | 高 | Permission | ✅ |
+| R3 | 画像双写加倍 | 中 | 后端唯一写入 | ✅ |
+| R4 | Checkpoint 多副本内存分裂 | 高 | 单工人开发 / 生产换存储 | 设计已知 |
+| R5 | RAG 幻觉政策 | 中 | Skill+来源；关键以官网为准 | 持续 |
+| R6 | 推荐稀疏 | 中 | 热销+追问 | ✅ |
+| R7 | 通知轰炸（规划） | 中 | 频控+幂等 | 规划 |
+| R8 | 日志泄密 | 中 | 字段红线 | 持续 |
+| R9 | SDK 0.x 丢 context | 高 | 锁定 1.x | ✅ |
+| R10 | Redis 序列化不兼容 | 高 | StringRedisTemplate | ✅ |
+
+---
+
+## 附录 G. Phase 总图
+
+```
+已完成
+  ├─ 核心 Agent / 安全 / 前端契约
+  ├─ 推荐 Phase1
+  ├─ 画像 Phase2（后端写入对齐）
+  ├─ RAG
+  └─ LLM Health
+
+进行中 / 近顶
+  └─（无强制）
+
+规划
+  ├─ 主动通知
+  ├─ 浏览埋点
+  ├─ Item-CF / 向量
+  ├─ 优惠券/售后工具
+  ├─ 正则 Nacos 化
+  └─ 生产级 Checkpoint
+```
+
+---
+
+## 附录 H. 术语表
+
+| 术语 | 含义 |
+|------|------|
+| L1/L2/L3 | 正则 / interrupt / LLM 三级路由 |
+| owner | `{agent_type}:{user_id}` 会话归属 |
+| introspect | 经 Gateway/Admin 权威身份探查 |
+| Checkpointer | 图状态持久化组件 |
+| Store | 跨线程 KV（语义记忆） |
+| Skill | SKILL.md 场景规范 |
+| MCP | 模型上下文协议，此处桥接 LightRAG |
+| basedOn | 推荐依据摘要 |
+| interrupt | 图挂起等待人类输入 |
+| profile: | 画像 Redis 前缀 |
+
+---
+
+## 附录 I. 评审常见问题（FAQ）
+
+**Q1：为什么不把 Agent 挂到 Gateway 后面？**  
+A：LangGraph Server 有独立鉴权与 SSE 模型；业务仍经 Gateway。introspect 对齐身份。
+
+**Q2：为什么开发态不用 Redis Checkpoint？**  
+A：inmem+落盘更简单；画像才用 Redis。生产再选托管存储。
+
+**Q3：Customer 到底多少工具？**  
+A：约 20 业务 + 记忆工具；以 `get_all_tools()` 为准。Skills 7。
+
+**Q4：画像为什么必须后端写加购？**  
+A：覆盖商城 UI 加购；避免仅 Agent 加购才有画像；并防双写。
+
+**Q5：RAG 默认为何关闭？**  
+A：降低延迟与费用；政策场景由用户显式打开。
+
+**Q6：主动通知为何独立 SSE？**  
+A：避免污染 Thread 与 LLM 上下文；支持无会话推送。
+
+**Q7：设计文档和实现说明冲突听谁？**  
+A：短期听代码+实现说明；并回写设计状态表。
+
+**Q8：Admin 能否「仅 Prompt 禁止写入」？**  
+A：不能。必须 Permission 剔工具，Defense in depth。
+
+---
+
+## 附录 J. 变更记录（文档）
+
+| 日期 | 版本 | 摘要 |
+|------|------|------|
+| 2026-06 | v2.0 | DeepAgent 体系首版设计合并 |
+| 2026-07 | v2.1–v2.2 | SDK1.x、推荐、画像、RAG、introspect |
+| 2026-09 | v2.3 | 职责收敛、去重、RAG 单章、权威事实校正、废止第四部分副本 |
+
+---
+
+## 附录 K. 设计原则再声明（结语）
+
+hmall Agent 的设计收敛为四句话：
+
+1. **编排在 Python，业务在 Java**——Agent 零业务库。  
+2. **快路正则，险路 interrupt，难路 LLM**——三级路由。  
+3. **身份看 Gateway，会话看 owner，偏好看 profile**——三源各司其职。  
+4. **可选能力可降级**——推荐、RAG、通知（规划）均不得绑架主交易对话。  
+
+实现细节、命令与偏差清单，请移步 [hmall_Agent实现说明文档.md](./hmall_Agent实现说明文档.md)；入门叙事请见 [hmall_Agent项目说明文档.md](./hmall_Agent项目说明文档.md)。
+
+---
+
+
+## 附录 L. 对照表：旧表述 → 现行权威
+
+| 旧文档常见表述 | 现行权威 |
+|----------------|----------|
+| Redis Checkpoint db=1 | inmem + `.langgraph_api/` 落盘 |
+| Customer 18 工具 / Skills 5 | ~20 业务 + 记忆；Skills 7 |
+| Admin 10 工具 | 11（含日报编排） |
+| RAG 规划中 / 预留 | **已实现** |
+| 商品推荐 P2 未做 | **已实现**（Phase1+画像） |
+| 画像 Agent 直写 + MQ | 后端 CartService + paySuccessListener |
+| 画像与 Checkpoint 同库 | 画像 **db=0**；Checkpoint 非 Redis |
+| 第四部分 RAG 独立长文 | 仅 Part A §12 |
+| 完整 .env / bash 手册在设计文档 | 迁出至实现说明 |
+
+---
+
+## 附录 M. 组件职责矩阵
+
+| 组件 | 负责 | 不负责 |
+|------|------|--------|
+| CustomerAgent | 对话编排、工具选择、interrupt | 库存扣减真相源 |
+| AdminAgent | 只读查询、日报 | 任何写库 |
+| Gateway | 验签、路由、限流 | LLM 推理 |
+| item-service | 商品与推荐召回 | 对话状态 |
+| cart-service | 购物车 + cart 画像写入 | 会话 Thread |
+| trade-service | 订单 + purchase 画像写入 | RAG 索引 |
+| LightRAG | 知识检索 | 实时订单 |
+| 前端 | SSE 展示、开关、确认 UI | 业务校验终局 |
+
+---
+
+## 附录 N. 中间件 × 场景矩阵
+
+| 场景 | Auth | Permission | Regex | RAG | Skills | LLM |
+|------|:----:|:----------:|:-----:|:---:|:------:|:---:|
+| 未登录看秒杀 | ○ | ○ | 短路 | — | — | — |
+| 登录猜你喜欢 | ○ | ○ | 短路 | — | — | — |
+| 秒杀下单确认 | ○ | ○ | — | ○? | ○ | ○ |
+| 政策问答（开库） | ○ | ○ | — | 注入 | ○ | ○ |
+| 运营日报 | ○ | 剔写 | 短路 | — | — | — |
+| Admin 被诱导下单 | ○ | 剔写 | — | ○? | ○ | ○（无工具） |
+
+○=经过；短路=Regex 直接返回；—=未到达或无关。
+
+---
+
+## 附录 O. 数据归属一览
+
+| 数据 | 主存 | 权威写入者 | 读者 |
+|------|------|------------|------|
+| 订单 | MySQL(trade) | trade-service | Agent 工具 |
+| 购物车 | MySQL/Redis(cart) | cart-service | Agent 工具 |
+| 会话消息 | Checkpointer | LangGraph | 前端/Agent |
+| 语义记忆 | Store | Agent memory 工具 | Agent |
+| 偏好得分 | Redis profile | Java 监听/服务 | Agent+Recommend |
+| 知识切片 | LightRAG 存储 | 运营 WebUI | RAG 工具 |
+| JWT | 客户端持有 | user/admin 登录 | Auth+Gateway |
+
+---
+
+## 附录 P. 设计约束清单（不可轻易打破）
+
+1. Agent 不直连业务 MySQL。  
+2. Admin 工具集不含写。  
+3. 危险写必须 interrupt。  
+4. userId 不以本地 JWT 解码为权威（默认）。  
+5. threads 必须 owner 隔离。  
+6. context-only 认证，禁用 configurable 并存。  
+7. 画像 purchase/cart 不在 Agent 重复计分。  
+8. RAG 失败不得阻断业务工具。  
+9. 通知（规划）不得写入对话 Thread。  
+10. 设计文档不承载完整部署命令与 .env 全文。  
+
+---
+
+## 附录 Q. 与项目说明 / 实现说明的边界示例
+
+| 问题 | 该查 |
+|------|------|
+| 为什么用三级路由？ | 项目说明 / 本文 §2 |
+| Regex 某条 pattern 原文？ | 实现说明 / 代码 |
+| introspect 路径？ | 本文 §6（权威）+ 实现 |
+| `.env` 全部键？ | 实现说明 |
+| 如何 uv run 启动？ | 实现说明 |
+| 推荐三种模式？ | 本文 Part B |
+| Formatter 函数体？ | 实现说明 |
+| 主动通知是否已做？ | 本文 §16 / C2（规划中） |
+
+---
+
+## 附录 R. Customer 工具分组与登录矩阵（完整规格）
+
+### R.1 商品
+
+| 工具 | 登录 | L1 候选 | interrupt |
+|------|:----:|:-------:|:---------:|
+| search_items_api | 否 | 是 | 否 |
+| get_item_detail_api | 否 | 否 | 否 |
+| get_item_page_api | 否 | 是 | 否 |
+
+### R.2 秒杀
+
+| 工具 | 登录 | L1 候选 | interrupt |
+|------|:----:|:-------:|:---------:|
+| get_seckill_activities_api | 否 | 是 | 否 |
+| get_seckill_product_api | 否 | 否 | 否 |
+| do_seckill_api | 是 | 否 | **是** |
+
+### R.3 购物车
+
+| 工具 | 登录 | L1 候选 | interrupt | 画像副作用 |
+|------|:----:|:-------:|:---------:|------------|
+| get_cart_list_api | 是 | 是 | 否 | 无 |
+| add_to_cart_api | 是 | 否 | 否 | 后端 cart |
+| update_cart_quantity_api | 是 | 否 | 否 | 无 |
+| delete_cart_item_api | 是 | 否 | **是** | 无 |
+| clear_cart_api | 是 | 否 | **是** | 无 |
+
+### R.4 订单
+
+| 工具 | 登录 | L1 候选 | interrupt | 画像副作用 |
+|------|:----:|:-------:|:---------:|------------|
+| get_order_list_api | 是 | 是 | 否 | 无 |
+| get_order_detail_api | 是 | 条件 | 否 | 无 |
+| cancel_order_api | 是 | 否 | **是** | 无 |
+| confirm_receive_api | 是 | 否 | **是** | 购买记在支付监听 |
+
+### R.5 地址
+
+| 工具 | 登录 | L1 候选 | interrupt |
+|------|:----:|:-------:|:---------:|
+| get_address_list_api | 是 | 是 | 否 |
+| add_address_api | 是 | 否 | **多轮** |
+| update_address_api | 是 | 否 | **多轮** |
+
+### R.6 推荐与记忆
+
+| 工具 | 登录 | L1 候选 | 说明 |
+|------|:----:|:-------:|------|
+| get_recommendations_api | 是 | home 是 | Part B |
+| analyze_user_preferences | 是 | 否 | 画像优先 |
+| save_memory | 是 | 否 | Store |
+| get_memories | 是 | 否 | Store |
+
+### R.7 动态 RAG（非 get_all_tools 静态表）
+
+| 工具 | 注入条件 |
+|------|----------|
+| rag_query / rag_query_data / rag_graph_search | enable_rag=true 且 MCP 可用 |
+
+---
+
+## 附录 S. Admin 工具完整规格
+
+| 工具 | 只读 | L1 候选 | 备注 |
+|------|:----:|:-------:|------|
+| admin_get_product_page_api | 是 | 是 | |
+| admin_get_product_detail_api | 是 | 否 | |
+| admin_get_order_page_api | 是 | 是 | |
+| admin_get_order_detail_api | 是 | 否 | |
+| admin_get_seckill_promotion_page_api | 是 | 是 | |
+| admin_get_seckill_relation_page_api | 是 | 否 | |
+| admin_get_seckill_order_page_api | 是 | 否 | |
+| admin_get_seckill_stock_api | 是 | 否 | |
+| admin_get_user_page_api | 是 | 否 | |
+| admin_get_user_detail_api | 是 | 否 | |
+| generate_daily_report | 是 | **是** | 编排五路并发 |
+
+---
+
+## 附录 T. 推荐 scene 语义
+
+| scene | 含义 | 典型触发 | 是否需 itemId |
+|-------|------|----------|:-------------:|
+| home | 猜你喜欢 / 首页式 | L1「推荐」 | 否 |
+| detail | 看了又看 | 详情后 Upsell | 是 |
+| cart | 凑单 | 加购后 | 否（可参考车内） |
+
+后端可对未知 scene 回退 home 或 400——实现需明确；设计建议回退 home 并打日志。
+
+---
+
+## 附录 U. 画像事件字典
+
+| event_type | 权重 | 触发源（现行） | 备注 |
+|------------|------|----------------|------|
+| purchase | 5 | paySuccessListener | 强信号 |
+| cart | 3 | CartServiceImpl | 覆盖 UI+Agent |
+| view | 1 | 规划埋点 | 弱信号 |
+| favorite | 4 | 未实现 | 预留 |
+| negative | — | 未实现 | 口头「不喜欢」暂仅 thread 内 |
+
+---
+
+## 附录 V. LightRAG 查询模式选用指南（设计）
+
+| mode | 适用 | 不适用 |
+|------|------|--------|
+| mix | 默认综合问答 | 需要纯图谱遍历时 |
+| local | 局部实体邻域 | 宏观总结 |
+| global | 主题级总结 | 精确条款 |
+| hybrid | 折中 | — |
+| naive | 近似向量检索 | 关系推理 |
+| bypass | 调试/直通 | 生产默认 |
+
+运营文档应在 Skill 中给出「退换货用 mix、策略综述可用 global」等提示，避免每次由模型随机选 mode。
+
+---
+
+## 附录 W. 前端状态机（对话页）
+
+```
+Idle
+  ├─ sendMessage → Streaming
+  │     ├─ partial 更新 → Streaming
+  │     ├─ complete → Idle
+  │     ├─ interrupt → AwaitingHuman
+  │     └─ error → Idle（可重试）
+  ├─ AwaitingHuman
+  │     ├─ resume → Streaming
+  │     └─ cancel/goto end → Idle
+  └─ switchThread → 加载 state → Idle
+```
+
+与 LLM health 正交：`checking/offline` 只影响状态文案，不自动禁发（产品可另定）。
+
+---
+
+## 附录 X. 安全滥用用例
+
+| 用例 | 期望 |
+|------|------|
+| 枚举 thread_id | search/read 403 |
+| C 端 Token 调 admin_agent | introspect/类型不匹配失败 |
+| Admin Token 调 do_seckill | 工具不存在 |
+| enable_rag 探测内部文档 | 依赖知识库 ACL；开关≠授权 |
+| 改 resume 篡改价格 | 价格以工具内已查详情为准，resume 只作确认词 |
+| 伪造 Authorization | introspect 拒绝 |
+
+---
+
+## 附录 Y. 可观测性指标（建议）
+
+| 指标 | 用途 |
+|------|------|
+| L1 命中率 | 优化正则 |
+| interrupt 完成率/取消率 | 确认文案是否清晰 |
+| 推荐点击后加购率（需埋点） | 推荐质量 |
+| 画像命中率 | Redis 价值 |
+| RAG 调用占比与空结果率 | 知识运营 |
+| introspect 延迟/失败率 | 身份链路 |
+| LLM health 失败次数 | 模型可用性 |
+
+LangSmith 可选接入后，按 tool 名与 agent_type 切片。
+
+---
+
+## 附录 Z. 后续设计开放问题（已知未决）
+
+1. 生产 Checkpoint 选 Postgres 还是其他？TTL 策略？  
+2. 浏览埋点是否仍走 `/behaviors` 还是直接写 Redis？  
+3. 负反馈是否落入画像？  
+4. 通知 SSE 鉴权是否复用 LangGraph Auth 中间件？  
+5. 多模态（图搜同款）的工具边界？  
+6. 优惠券上线后 L2 确认模板？  
+
+开放问题不阻塞现行已实现能力；立项时回写本文对应章。
+
+---
+
+## 附录 AA. 架构决策记录（ADR 摘要）
+
+### ADR-001 采用 DeepAgents + LangGraph
+
+- **上下文**：自建 Agent 循环与状态机成本高。  
+- **决策**：DeepAgents create_agent + LangGraph Server。  
+- **后果**：获得 interrupt/Checkpoint/Studio；需遵循 SDK context 契约。  
+
+### ADR-002 Gateway introspect 为 userId 权威
+
+- **上下文**：Agent 不在 Gateway 后，收不到 user-info。  
+- **决策**：`/users/me` 与 `/admin/info` 探查。  
+- **后果**：多一次 RTT；可用短缓存；默认不 fallback 解码。  
+
+### ADR-003 开发态 inmem Checkpoint
+
+- **上下文**：曾规划 Redis db=1。  
+- **决策**：inmem + `.langgraph_api`。  
+- **后果**：单机友好；多副本需另案。  
+
+### ADR-004 画像后端写入
+
+- **上下文**：仅 Agent 写会漏 UI 加购并易双写。  
+- **决策**：CartService + paySuccessListener。  
+- **后果**：Java 与 Python 需共享 Key/权重约定。  
+
+### ADR-005 RAG 经 MCP 动态注入
+
+- **上下文**：常驻 RAG 工具污染工具表、增加误调。  
+- **决策**：enable_rag 开关 + Middleware 注入。  
+- **后果**：需独立 MCP 进程；失败可降级。  
+
+### ADR-006 Admin 纯只读
+
+- **上下文**：运营误操作风险。  
+- **决策**：Permission 剔除写工具 + 产品定位只读。  
+- **后果**：改价/上下架仍走原后台页面。  
+
+### ADR-007 通知独立 SSE（规划）
+
+- **上下文**：事件推送与对话混会污染状态。  
+- **决策**：独立通道。  
+- **后果**：前端多一条连接；鉴权需单独设计。  
+
+---
+
+## 附录 AB. 容量与扩展粗算（设计级）
+
+| 资源 | 粗算关注点 |
+|------|------------|
+| Checkpoint 磁盘 | 每 thread 消息数 × 用户活跃会话 |
+| 画像 Redis | 用户数 × Hash 字段；TTL 控制 |
+| LLM Token | L1 命中率越高越省；RAG/模式B 通知最费 |
+| MCP | 连接数与 LightRAG 并发 query |
+| Gateway | Agent 工具放大系数（日报五路并发） |
+
+正式容量规划需压测，不在本文给出绝对值。
+
+---
+
+## 附录 AC. 失败注入测试建议（设计）
+
+| 注入 | 期望观测 |
+|------|----------|
+| 关掉 Redis 画像 | 推荐/偏好仍可用（降级） |
+| 关掉 MCP | 对话可用，无 rag 工具 |
+| 关掉 DashScope | health 离线；对话失败或降级 |
+| Gateway 5xx | 工具错误文案 |
+| 错误 JWT | 无法建受保护会话 |
+| 磁盘满（.langgraph_api） | 告警；拒绝优于静默 |
+
+---
+
+## 附录 AD. 文档内导航（Part 速览）
+
+| 你想了解 | 去 |
+|----------|----|
+| 总架构图 | A§2 |
+| 工具规格 | A§3–4、附录 R/S |
+| 记忆与多租户 | A§5 |
+| 安全 | A§6 |
+| 前端契约 | A§10 |
+| RAG | A§12 |
+| 推荐模式与决策 | Part B |
+| 画像三层 | Part C1 |
+| 通知规划 | Part C2 |
+| 状态是否已做 | A§16 |
+
+---
+
+## 附录 AE. 完整性自检
+
+- [x] 无「第四部分 RAG」第二副本  
+- [x] Checkpoint 表述为 inmem 落盘  
+- [x] 画像 db=0 + profile:  
+- [x] introspect 双路径  
+- [x] 数量与 Skills 对齐权威事实  
+- [x] 推荐/RAG/画像已实现；通知规划中  
+- [x] 实现代码大段已移除，改为规格表与交叉引用  
+- [x] 写入端对齐 CartService + paySuccessListener  
+
+---
+
+## 附录 AF. 端到端时序：登录到首购（设计）
+
+```
+1. 用户登录 C 端 → 获 JWT
+2. 打开 /portal/chat → Client 带 Authorization
+3. Auth introspect GET /users/me → owner=customer:{uid}
+4. threads.create（metadata.owner）
+5. 「查看秒杀」→ L1 → 活动列表
+6. 「秒杀某商品」→ L3 抽参 → interrupt → resume → 下单
+7. 支付成功 → paySuccessListener 写 purchase 画像
+8. 「有什么推荐」→ L1 → /recommend 读画像 → 个性化列表
+```
+
+---
+
+## 附录 AG. 端到端时序：管理端日报 + RAG
+
+```
+1. 管理员登录 → admin JWT
+2. /admin/chat → introspect GET /admin/info → owner=admin:{id}
+3. 「运营日报」→ L1 → generate_daily_report 并发五查询
+4. 打开知识库开关 → enable_rag=true
+5. 「库存预警阈值怎么定？」→ RAGMiddleware 注入 → rag_query
+6. 全程无写工具可选
+```
+
+---
+
+## 附录 AH. Prompt 分层设计（契约）
+
+| 层 | 内容 | 变更频率 |
+|----|------|----------|
+| SYSTEM_PROMPT | 人格、红线、能力清单 | 低 |
+| Skills | 场景步骤 | 中 |
+| 工具 description | 参数与何时调用 | 中 |
+| Formatter 输出 | 结构化展示 | 中 |
+| 前端快捷语 | 引导高频意图 | 高 |
+
+禁止把整份运营手册塞进 SYSTEM_PROMPT；长知识走 RAG。
+
+---
+
+## 附录 AI. Formatter 设计原则
+
+1. 空列表 → 固定友好句，不抛异常。  
+2. 价格展示与商城单位约定一致。  
+3. 推荐输出保留 `[ID:xxx]` 便于指代与后续跳转。  
+4. 管理端解包后的字段缺失显示「—」。  
+5. 不在 Formatter 内二次请求网络（除明确设计的补充查询）。  
+
+实现函数体 → 实现说明。
+
+---
+
+## 附录 AJ. GatewayClient 设计约束
+
+| 约束 | 说明 |
+|------|------|
+| 基址 | `JAVA_GATEWAY_URL` |
+| Header | 透传用户 JWT |
+| 管理端 | 自动解包 `R<T>` |
+| 错误 | 转为工具可读字符串 |
+| 禁止 | 在 Client 内写死 userId 绕过鉴权 |
+
+---
+
+## 附录 AK. 正则规则治理
+
+| 规则 | 说明 |
+|------|------|
+| 分端维护 | customer/regex_rules 与 admin 分离 |
+| 写操作不进 L1 | 强制 |
+| 冲突时 | 先匹配先生效；应用单测锁序 |
+| 动态化 | 规划进 Nacos，变更需热加载设计 |
+
+---
+
+## 附录 AL. 与 hmall 微服务版本耦合
+
+Agent 工具是**适配层**：Java API 变更时优先改工具与 Formatter，尽量不改前端协议。弃用 API 应保留一版本窗口。推荐 Feign 路径属后端内部，对 Agent 只暴露 `/recommend`。
+
+---
+
+## 附录 AM. 本地开发最小拓扑
+
+| 必须 | 可选 |
+|------|------|
+| Gateway + 相关微服务 | LightRAG + MCP |
+| Redis（画像） | LangSmith |
+| Agent Server | Studio UI |
+| 前端 | 通知模块（未实现） |
+
+无 RAG 时勿开知识库开关；无画像 Redis 时推荐走降级。
+
+---
+
+## 附录 AN. 发布检查（设计视角）
+
+- [ ] graph 名未变或前端同步  
+- [ ] introspect 路径可用  
+- [ ] 危险写仍 interrupt  
+- [ ] Admin 无写工具  
+- [ ] .env 语义表已更新实现说明  
+- [ ] §16 状态表已更新  
+
+---
+
+## 附录 AO. 反模式清单
+
+| 反模式 | 为何禁止 |
+|--------|----------|
+| Agent 拼 SQL 查订单库 | 破坏服务边界 |
+| Prompt 禁止写入替代 Permission | 可被越狱 |
+| 把通知塞进 Thread | 污染推理 |
+| 设计文档粘贴整份 .env | 密钥与重复维护 |
+| 用 Redis db=1 当现行 Checkpoint | 与代码不符 |
+| 加购两边都 HINCRBY | 得分加倍 |
+| L1 拦截清空购物车 | 跳过确认 |
+
+---
+
+## 附录 AP. 词汇：owner 示例
+
+| agent_type | user_id | owner |
+|------------|---------|-------|
+| customer | 42 | `customer:42` |
+| admin | 7 | `admin:7` |
+
+二者不得互相 search 到对方 threads。
+
+---
+
+## 附录 AQ. 二次确认文案模板要素
+
+1. 动作名称（秒杀/取消/清空…）  
+2. 对象标识（订单号/商品名）  
+3. 关键金额或数量（若有）  
+4. 明确指示回复词  
+5. 取消方式说明  
+
+---
+
+## 附录 AR. 知识库运营流程（设计）
+
+1. 运营准备 Markdown/PDF。  
+2. WebUI 上传至对应库。  
+3. 等待索引完成。  
+4. 管理端开 RAG 抽检问答。  
+5. 对客库再开放 Customer。  
+6. 定期回顾空结果率，补文档。  
+
+Agent 发布节奏与知识运营可解耦。
+
+---
+
+## 附录 AS. 推荐理由生成约束（设计）
+
+| 允许 | 禁止 |
+|------|------|
+| 基于 basedOn/tags 组织语言 | 编造未返回的折扣 |
+| 结合本 thread 刚看过的商品 | 声称「系统保证最低价」 |
+| 引导查看详情/加购 | 伪造库存数字 |
+
+---
+
+## 附录 AT. 记忆工具使用约束（设计）
+
+| 应保存 | 不应保存 |
+|--------|----------|
+| 未完成购物意图 | 完整身份证号 |
+| 明确品牌偏好陈述 | 他人隐私 |
+| 预算区间 | 原始 JWT |
+
+过期意图应清理，避免「三年前想买的手机」误导。
+
+---
+
+## 附录 AU. 文档阅读路径推荐
+
+1. 新同学：项目说明 → 本文 §0–2 → §16  
+2. 后端：本文 §6、Part B6、Part C1  
+3. 前端：本文 §8、§10  
+4. 算法/推荐：Part B 全文  
+5. 运维：§12、§14 + 实现说明部署章  
+
+---
+
+## 附录 AV. 最终声明
+
+本文（v2.3）为 hmall Agent **设计契约**。若行文与仓库冲突，以代码与 [实现说明](./hmall_Agent实现说明文档.md) 为准，并应回写 §16 与附录 L。
+
+*—— 设计方案文档正文结束 ——*
+
+
+## 附录 AW. 双 Agent 能力对照总表
+
+| 能力域 | Customer | Admin |
+|--------|----------|-------|
+| 商品浏览/搜索 | ✅ | ✅（管理商品列表） |
+| 秒杀查询 | ✅ | ✅ |
+| 秒杀下单 | ✅ + interrupt | ❌ |
+| 购物车 | ✅ | ❌ |
+| 订单读写 | 读+取消/收货 | 只读 |
+| 地址 | ✅ | ❌ |
+| 推荐 | ✅ | ❌ |
+| 画像/记忆 | ✅ | ❌（不读写 C 端画像） |
+| 运营日报 | ❌ | ✅ |
+| RAG | ✅ 可选 | ✅ 可选 |
+| 写操作 | 受限 + 确认 | 无 |
+
+---
+
+## 附录 AX. 请求头与 context 字段规范
+
+### 请求头
+
+| Header | 必填场景 | 说明 |
+|--------|----------|------|
+| Authorization | 受保护会话 | Bearer JWT |
+| X-Hmall-Agent-Type | 建议始终 | customer / admin，辅助选 introspect |
+| Content-Type | JSON 请求 | application/json |
+
+### context 字段
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| agent_type | str | — | 与助手一致 |
+| user_token | str | 空 | 业务调 Gateway |
+| user_id | str | 空 | 中间件注入 |
+| enable_rag | bool | false | RAG 注入 |
+
+新增字段必须向后兼容默认值。
+
+---
+
+## 附录 AY. 空数据文案原则（各域）
+
+| 域 | 原则示例 |
+|----|----------|
+| 秒杀 | 「当前没有进行中的秒杀活动」 |
+| 购物车 | 「购物车是空的」 |
+| 订单 | 「暂无订单」 |
+| 推荐 | 「暂无个性化结果，为您展示热销」 |
+| 偏好 | 「暂无足够数据，告诉我您的兴趣」 |
+| RAG | 「知识库暂无相关资料」 |
+| 记忆 | 「暂无历史记忆」 |
+
+文案固定在工具/Formatter，避免 LLM 每次重写导致前端无法稳定展示。
+
+---
+
+## 附录 AZ. 版本演进兼容矩阵
+
+| 变更类型 | 兼容策略 |
+|----------|----------|
+| 新增工具 | 旧前端忽略即可 |
+| 删除工具 | 先停 Skill 引导再删 |
+| 改 tool 名 | 视为破坏性，需双注册过渡 |
+| 改 graph 名 | 破坏性，前后端同步发版 |
+| 改 interrupt payload | 增加字段兼容；删字段需前端同步 |
+| 改 owner 格式 | 破坏性，需迁移脚本 |
+
+---
+
+## 附录 BA. 设计评审检查单（可打印）
+
+### 架构
+
+- [ ] 三级路由边界清晰  
+- [ ] 权威架构图与端口正确  
+- [ ] RAG 仅一处权威描述  
+
+### 安全
+
+- [ ] introspect 路径正确  
+- [ ] owner 含 agent_type  
+- [ ] Admin 只读可证明  
+
+### 数据
+
+- [ ] Checkpoint ≠ Redis 画像  
+- [ ] profile 前缀与权重一致  
+- [ ] 写入端无双计  
+
+### 文档
+
+- [ ] 无大段实现粘贴  
+- [ ] 交叉引用有效  
+- [ ] §16 状态表真实  
+
+---
+
+## 附录 BB. 与「实现偏差」相关的设计态度
+
+设计文档允许演进，但必须：
+
+1. **标出偏差**（如写入端从 Agent 改为后端）。  
+2. **更新权威事实表**（§0.4 / §16）。  
+3. **不把过时方案当现行**（Redis Checkpoint）。  
+4. **把 How 留在实现说明**，避免两处粘贴命令分叉。  
+
+---
+
+## 附录 BC. 关闭语（维护者）
+
+维护本设计文档时，优先改表格与架构图，而不是追加第三份 RAG 长文。若发现与代码不符，先改 §0.4 与 §16，再改正文细节。
+
+---
+
+## 附录 BD. 关键路径索引（仓库）
+
+| 主题 | 典型路径 |
+|------|----------|
+| Customer Agent | `hmall-agent/src/agents/customer/` |
+| Admin Agent | `hmall-agent/src/agents/admin/` |
+| Auth | `hmall-agent/src/security/auth.py` |
+| introspect | `hmall-agent/src/gateway/introspect.py` |
+| RAG MCP | `hmall-agent/src/mcp_servers/rag_server.py` |
+| RAG MW | `hmall-agent/src/middleware/rag_context.py` |
+| 画像 | `hmall-agent/src/user_profile/` |
+| 加购画像写入 | `hmall/.../CartServiceImpl.java` |
+| 购买画像写入 | `hmall/.../paySuccessListener.java` |
+| 推荐 | `hmall/.../RecommendServiceImpl.java` |
+| graph 注册 | `hmall-agent/graph.json` |
+| 启动 | `hmall-agent/start_server.py` |
+
+（完整实现说明见另一文档。）
+
+---
+
+## 附录 BE. 术语英文对照
+
+| 中文 | English |
+|------|---------|
+| 三级路由 | three-tier routing |
+| 二次确认 | human-in-the-loop confirmation |
+| 多租户隔离 | multi-tenant isolation via owner |
+| 身份探查 | identity introspection |
+| 画像 | user profile |
+| 语义记忆 | semantic memory (store) |
+| 运营日报 | daily ops report |
+| 知识库开关 | RAG enable flag |
+| 降级 | graceful degradation |
+
+---
+
+## 附录 BF. 一页纸摘要（给评审）
+
+**系统**：DeepAgents + LangGraph；Customer / Admin 双助手；业务经 Gateway。  
+**路由**：L1 正则 → L2 interrupt → L3 LLM。  
+**安全**：双 JWT；introspect `/users/me` & `/admin/info`；owner 隔离；Admin 只读。  
+**记忆**：Checkpoint=inmem 落盘；画像=Redis db0 `profile:`；Store=语义记忆。  
+**已交付**：推荐、画像 Phase2、RAG、LLM health。  
+**规划**：主动通知、浏览埋点、CF/向量。  
+**文档**：本文=契约；实现说明=How；项目说明=入门。
+
+---
+
+## 附录 BG. 行文约定（本文）
+
+1. 用表格承载契约，用示意流程图承载交互，不用大段可运行源码冒充设计。  
+2. 「已实现 / 规划中」只写在状态表与章首提示，避免正文时态混乱。  
+3. 提到端口与数量时与 §0.4 对齐。  
+4. 引用实现时写文档名，不复制命令块。  
+5. 废止方案明确标「废止」，避免读者按旧路部署。  
+
+---
+
+## 附录 BH. 感谢与范围外
+
+本文不覆盖：hmall 非 Agent 微服务的内部表设计全文、前端视觉规范、云厂商账单优化。范围外议题请单独立项。
+
+---

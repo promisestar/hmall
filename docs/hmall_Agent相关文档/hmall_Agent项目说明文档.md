@@ -1,6 +1,25 @@
 # hmall Agent 项目说明文档
 
-> 本文档面向项目理解与快速上手，描述各功能的**设计动机**、**实现思路**和**最终效果**，不涉及具体代码引用与实现细节。
+> 本文档是 hmall Agent 的**入门总览**：说明设计动机、实现思路与最终效果。  
+> 不含源码摘录、不含完整 `.env`、不含逐步部署手册；配置全文与验收清单见实现说明。
+
+---
+
+## 0. 文档导航
+
+同目录下三份文档分工如下，阅读时可按「先总览 → 再契约 → 再落地」顺序使用：
+
+| 文档 | 定位 | 适合谁 |
+|------|------|--------|
+| [hmall_Agent项目说明文档.md](./hmall_Agent项目说明文档.md)（本文） | **入门总览**：Why / 思路 / 效果，快速上手最小路径 | 首次接触项目、需要建立整体心智模型的读者 |
+| [hmall_Agent设计方案文档.md](./hmall_Agent设计方案文档.md) | **Why / What 与契约**：架构选型、接口约定、RAG/画像/推荐等设计全文 | 做方案评审、对照设计做实现或排期的读者 |
+| [hmall_Agent实现说明文档.md](./hmall_Agent实现说明文档.md) | **How**：配置全文、部署验收、与设计的偏差、工具/文件级细节 | 本地联调、排障、核对实现状态的读者 |
+
+**交叉引用约定**：
+
+- 本文只保留摘要表与必填项；完整工具表、完整环境变量、启动检查清单一律写「详见实现说明」。
+- RAG 运维、知识库索引与开关细节详见设计方案 **Part A §12**；联调命令与验收项仍以实现说明为准。
+- 若本文数量/端口与代码不一致，以当前代码与实现说明为准。
 
 ---
 
@@ -8,679 +27,439 @@
 
 1. [项目定位](#1-项目定位)
 2. [总体架构](#2-总体架构)
-3. [CustomerAgent（C 端客服助手）](#3-customeragentc-端客服助手)
-4. [AdminAgent（管理助手）](#4-adminagent管理助手)
-5. [中间件体系（三级路由）](#5-中间件体系三级路由)
-6. [工具系统](#6-工具系统)
-7. [Skills 技能系统](#7-skills-技能系统)
-8. [用户画像持久化](#8-用户画像持久化)
-9. [个性化推荐](#9-个性化推荐)
-10. [语义记忆（Layer 3）](#10-语义记忆layer-3)
-11. [RAG 知识库集成](#11-rag-知识库集成)
-12. [Human-in-the-loop 二次确认](#12-human-in-the-loop-二次确认)
-13. [前端集成](#13-前端集成)
-14. [后端服务集成](#14-后端服务集成)
-15. [配置体系](#15-配置体系)
-16. [启动流程](#16-启动流程)
-17. [会话历史与多租户隔离](#17-会话历史与多租户隔离)
-18. [身份权威对齐（Gateway introspect）](#18-身份权威对齐gateway-introspect)
+3. [能力模块](#3-能力模块)
+4. [快速上手](#4-快速上手)
+5. [附录](#5-附录)
 
 ---
 
 ## 1. 项目定位
 
-hmall Agent 是**枫叶商城**（hmall）的 AI 智能助手，为电商平台提供自然语言交互的购物和管理体验。它能够：
+hmall Agent 是**枫叶商城**（hmall）的 AI 智能助手，基于 **DeepAgents + LangGraph** 构建：Python 侧负责对话编排、中间件路由与工具调用；业务数据一律经 HTTP 调用 Java 微服务集群完成。Agent 自身不承载商品/订单等业务库。
 
-- 作为 C 端客服，帮用户搜索商品、参与秒杀、管理购物车、跟踪订单、添加收货地址——全程自然语言对话
-- 作为管理后台助手，帮运营人员查询订单、管理商品库存、查看秒杀活动数据、生成运营日报
-- 记住用户的购物偏好，对话越久越懂用户喜欢什么
-- 通过 RAG 知识库回答商城政策、运营策略等专业问题
+它面向两类角色：
 
-hmall Agent 基于 DeepAgents + LangGraph 构建，后端使用 Python，通过 HTTP 调用 Java 微服务集群完成数据操作。
+- **C 端客服（CustomerAgent）**：用自然语言完成搜商品、秒杀、购物车、订单、地址与个性化推荐；对话越久越能记住未完成的购物意图，并在画像命中时更快给出偏好相关推荐。
+- **管理后台助手（AdminAgent）**：用自然语言查询订单、商品、秒杀与用户数据，并一键生成运营日报；全只读，不执行写操作，与 C 端身份体系隔离。
+
+相对「纯页面点选」的核心价值有三点：
+
+1. **路径收敛**：把原本需要 3～5 次页面跳转的操作收进一轮对话。  
+2. **个性化**：结构化画像（偏好）+ Layer 3 语义记忆（意图）+ 可选 RAG（政策文档），让回答既贴人又有据。  
+3. **可控安全**：危险写操作走 Human-in-the-loop；身份以 Gateway introspect 为准；会话按 `owner` 多租户隔离。
 
 ---
 
 ## 2. 总体架构
 
-### 部署拓扑
+### 2.1 部署拓扑
 
-```
-用户（H5/小程序/管理后台）
-  │  LangGraph SDK (HTTP + SSE)
-  ▼
-Agent Service (LangGraph Server :8090)
-  ├── CustomerAgent — 22 个工具，7 个 Skills
-  ├── AdminAgent — 11 个工具，3 个 Skills
-  ├── 中间件层 — 5 层中间件
-  └── 用户画像 — Redis db=0，与后端共享
-  │
-  │ HTTP (httpx)
-  ▼
-hm-gateway (:8080) → item/cart/trade/user/seckill/search 微服务
+```mermaid
+flowchart TB
+  U["用户（H5 / 小程序 / 管理后台）"]
+  A["Agent Service（LangGraph Server :8090）"]
+  G["hm-gateway（:8080）"]
+  MS["item / cart / trade / user / seckill / search / admin 等微服务"]
+
+  U -->|"LangGraph SDK（HTTP + SSE）"| A
+  A -->|"httpx 业务 API + introspect"| G
+  G --> MS
+
+  subgraph Agent内部
+    CA["CustomerAgent<br/>约 20 业务工具 + 记忆工具 · Skills 7"]
+    AA["AdminAgent<br/>11 工具 · Skills 3"]
+    MW["中间件：Auth / Permission / Regex / Skills / RAG"]
+    PF["画像 Redis db=0 · Store in_memory · Checkpoint inmem+落盘"]
+  end
+
+  A --- CA
+  A --- AA
+  A --- MW
+  A --- PF
 ```
 
-### 核心特点
+请求主路径可以概括为：前端 SDK 建连 Agent → 中间件完成鉴权/权限/捷径/技能（及可选 RAG）→ Agent 选择工具 → `GatewayClient` 携带同一 JWT 调用 Gateway → 下游微服务执行业务。会话状态落在 Checkpoint；跨会话偏好与意图分别落在 Redis 画像与 Store。
+
+### 2.2 核心特点
 
 | 特点 | 说明 |
 |------|------|
-| **三级路由** | L1 正则中间件（<5ms）→ L2 interrupt 状态机 → L3 LLM 兜底 |
-| **双 JWT 认证** | C 端用户 JWT 和管理后台 JWT 独立体系，互不串用 |
-| **Gateway introspect** | Agent 通过 `GET /users/me` / `GET /admin/info` 向后端索取权威 userId，与 Gateway 验签结果对齐 |
-| **多租户会话隔离** | LangGraph Auth 按 `metadata.owner={agent_type}:{user_id}` 隔离 threads，用户只能看见自己的会话 |
-| **Agent 零数据库** | 不直连 MySQL，所有业务数据操作通过 Gateway → 微服务 API 完成 |
-| **画像加速** | Redis 增量聚合画像，命中时偏好分析和推荐召回 0 次后端调用 |
+| **三级路由** | L1 正则中间件（毫秒级）→ L2 `interrupt` 人机确认 → L3 LLM ReAct 兜底 |
+| **双 JWT 体系** | C 端用户 JWT 与管理端 JWT 独立，互不串用；由 `agent_type` 选择探查路径 |
+| **Gateway introspect** | Agent 通过 `GET /users/me` / `GET /admin/info` 向后端索取权威 `userId`，不以本地 base64 解码为权威 |
+| **多租户会话隔离** | LangGraph Auth 按 `metadata.owner={agent_type}:{user_id}` 隔离 threads |
+| **Agent 零业务库** | 不直连 MySQL；业务读写只走 Gateway → 微服务 API |
+| **画像加速** | Redis 增量聚合画像（db=0，与后端共享）；命中时偏好分析可少走甚至免走业务聚合 |
+| **Checkpoint / Store** | Checkpoint：`langgraph-runtime-inmem` + `.langgraph_api/*.pckl` 落盘；Store：`in_memory`（语义记忆） |
 
-### 关键设计决策
+### 2.3 为什么不直连数据库？
 
-**为什么不直连数据库？**
-hmall 是标准的微服务架构，item/cart/trade/user 各有独立数据库。如果 Agent 直连各服务数据库，意味着需要理解每个微服务的表结构和分布式事务——耦合过高。通过 Gateway API 调用，Agent 只需理解业务接口（如 `GET /carts`、`POST /items/search`），微服务的数据库变更对 Agent 完全透明。
+hmall 是标准微服务拆分：商品、购物车、交易、用户等各有独立库与边界。若 Agent 直连各库，需要理解多套表结构与分布式一致性，耦合极高，且会绕过 Gateway 已有的鉴权、限流与业务校验。
 
----
-
-## 3. CustomerAgent（C 端客服助手）
-
-### 设计动机
-
-电商用户在日常购物中常有大量"用自然语言完成操作"的需求：
-- "帮我搜一下 2000 以内的蓝牙耳机"
-- "把我购物车里的 Nike 跑鞋数量改成 2"
-- "最近有什么秒杀活动"
-- "帮我推荐适合我的商品"
-
-传统电商 App 需要用户在搜索框、分类页、购物车页之间来回跳转。Agent 可以将这些操作融合为自然语言对话，用户一句话完成原本需要 3-5 次页面跳转的操作。
-
-### 实现思路
-
-CustomerAgent 基于 DeepAgents `create_agent` 声明式定义，通过 5 层中间件链串联处理流程。22 个工具按功能分为 7 组（商品浏览、秒杀、购物车、订单、地址、个性化推荐、用户记忆），每个工具封装一个后端 API 调用。
-
-**工具设计原则**：
-- **一工具一 API**：每个工具精确封装一个后端接口，参数和返回格式与 API 对齐
-- **格式化响应**：工具返回的不是裸 JSON，而是通过 `formatters.py` 转为用户可读的中文 Markdown 文本
-- **预处理降级**：秒杀场景下的版本号黑名单校验、商品库存/状态过滤在工具层完成，减少 LLM 推理负担
-
-### 最终效果
-
-- 用户说"帮我搜索 2000 以内的蓝牙耳机"→ Agent 调用 `search_items_api` → 返回商品卡片列表
-- 用户说"把第一个加入购物车"→ Agent 调用 `add_to_cart_api` → 返回确认消息
-- 用户说"查看我最近的订单"→ Agent 调用 `get_order_list_api` → 返回订单列表
-- 用户说"帮我推荐适合我的"→ Agent 先分析画像（`analyze_user_preferences`）→ 再查推荐（`get_recommendations_api`）→ 附上推荐理由
+通过 Gateway API，Agent 只消费稳定的业务契约（如搜索商品、读写购物车、下单），微服务内部改表或改存储对 Agent 透明。身份上，业务写路径仍由 Gateway / admin-service 再次验签，Agent 本地解析不会绑架真实 `userId`。这也是「Agent 零业务库」与「introspect 权威对齐」两条原则能够同时成立的基础。
 
 ---
 
-## 4. AdminAgent（管理助手）
+## 3. 能力模块
 
-### 设计动机
+本章各节统一采用「设计动机 / 实现思路 / 最终效果」三段式，描述能力边界与业务含义；实现级参数、文件清单与偏差说明见实现说明。
 
-运营人员在管理后台需要频繁查看订单状态、商品库存、秒杀活动效果，每次都要在不同页面之间切换、手动筛选条件。如果能用自然语言查询，效率会大大提升。
+### 3.1 CustomerAgent（C 端客服助手）
 
-### 实现思路
+#### 设计动机
 
-AdminAgent 与 CustomerAgent 使用**同一套中间件链**，区别在于：
-- **全只读模式**：`PermissionMiddleware` 拦截所有写操作工具（下单、取消订单等），AdminAgent 只能查询不能操作
-- **运营日报**：`generate_daily_report` 是一个组合工具——单次调用自动并发查询秒杀活动、订单统计、商品库存，聚合为 Markdown 日报
-- **独立 JWT**：使用 `admin.jks` 验证，与 C 端用户身份体系隔离
+日常购物中，用户常希望一句话说完「搜一下、加车、改数量、看订单、问推荐」，而传统 App 要在搜索、类目、购物车、订单页之间反复跳转。CustomerAgent 把这些高频操作收进自然语言对话，降低路径成本，并让「推荐 / 再看看」这类模糊意图也有承接方式。
 
-### 最终效果
+#### 实现思路
 
-- "查看秒杀活动 RPM00171 的参与情况"→ Agent 返回秒杀订单数据和参与用户统计
-- "生成今天的运营日报"→ Agent 并发查询多维度数据，返回结构化日报
-- "查看商品 1002 的库存状态"→ Agent 返回商品详情和库存预警
+基于 DeepAgents `create_agent` 声明式组装：约 **20 个业务工具**（商品 / 秒杀 / 购物车 / 订单 / 地址 / 推荐）+ **记忆工具**（`save_memory` / `get_memories`），配套 **7 个 Skills** 规范业务 SOP。工具原则是：
+
+- **一工具一 API**：参数与后端接口对齐，边界清晰。  
+- **可读返回**：经格式化转为中文 Markdown，而不是把裸 JSON 丢给用户。  
+- **危险操作走 interrupt**：真正写 API 前先二次确认或补齐参数。  
+
+中间件链负责鉴权注入、管理/C 端权限差异（对 C 端主要是放行写工具）、正则捷径与技能加载；可选 RAG 在开关打开时动态注入检索工具。
+
+#### 最终效果
+
+- 「搜 2000 以内蓝牙耳机」→ 商品列表类 Markdown 结果  
+- 「把第一个加购物车 / 改数量 / 看订单」→ 对应工具调用并返回确认文案  
+- 「帮我推荐适合我的」→ 先偏好分析再推荐，并附推荐理由  
+- 未完成意图可写入记忆，下次对话自然接上  
+
+### 3.2 AdminAgent（管理助手）
+
+#### 设计动机
+
+运营人员查看订单、库存、秒杀效果时往往要跨多个后台页筛选。自然语言查询可以把「看数据」从点选劳动变成一句话任务；日报类需求则适合一次组合查询，避免人工逐页抄数。
+
+#### 实现思路
+
+与 CustomerAgent **共用同一套中间件骨架**，差异在权限与工具集：
+
+- **全只读**：`PermissionMiddleware` 过滤写操作工具，管理端不可下单、不可改车。  
+- **11 个工具**：10 个查询（商品 / 订单 / 秒杀 / 用户）+ `generate_daily_report` 组合编排（并发拉取多维只读数据后聚合成日报）。  
+- **3 个 Skills**：日报、数据查询、RAG 查询。  
+- **独立 JWT**：管理端身份与 C 端隔离，introspect 走 `GET /admin/info`。
+
+#### 最终效果
+
+- 「查看某秒杀活动参与情况」→ 活动/订单/库存维度可读汇总  
+- 「生成今天运营日报」→ 多路只读查询聚合为结构化日报  
+- 「查商品库存 / 用户详情」→ 分页或详情类查询结果  
+- 即使模型误选写工具，也会在权限层被挡住  
+
+### 3.3 三级路由（中间件体系）
+
+#### 设计动机
+
+输入形态差异极大：有的是固定口令（「我的订单」），有的是危险写操作（「取消订单」），有的是模糊导购（「送女朋友预算 500」）。全部走 LLM 则简单指令也慢；全部正则则灵活度不够。需要在速度与灵活度之间分层。
+
+#### 实现思路
+
+| 层级 | 机制 | 典型场景 |
+|------|------|----------|
+| **L1** | `RegexShortcutMiddleware`，毫秒级意图→工具 | 「我的订单」「秒杀活动」等高频只读/捷径 |
+| **L2** | LangGraph `interrupt()` 状态机 | 取消订单、清空购物车、秒杀下单、地址采集等需确认或补参 |
+| **L3** | LLM ReAct 完整推理 | 模糊需求、多步规划、L1/L2 未命中 |
+
+中间件顺序大体为：鉴权（introspect 注入 `user_id`）→ 权限过滤 → 正则捷径 → Skills →（可选）RAG 动态工具注入。L1 命中时可跳过昂贵的模型调用；未命中再交给后续层，保证「能快则快、该慎则慎、其余交给模型」。
+
+#### 最终效果
+
+- 高频口令可跳过 LLM，体感接近「点按钮」  
+- 危险操作必现确认弹窗，降低误操作  
+- 复杂导购仍由 LLM 规划多工具协作  
+- 同一条中间件链可服务 Customer / Admin，差异主要在工具注册表与权限过滤  
+
+### 3.4 工具与 Skills 摘要
+
+#### 设计动机
+
+工具负责「能调用什么 API」；Skills 负责「在什么场景应按什么 SOP 使用工具」。二者分离，避免把全部业务规范塞进系统 Prompt 撑爆上下文，也便于按场景独立迭代规范而不改工具代码。
+
+#### 实现思路
+
+**CustomerAgent 工具分类（数量摘要）**
+
+| 分类 | 约数量 | 能力摘要 |
+|------|--------|----------|
+| 商品浏览 | 3 | 搜索 / 详情 / 分页 |
+| 秒杀 | 3 | 活动列表 / 商品详情 / 下单（需确认） |
+| 购物车 | 5 | 查 / 加 / 改数量 / 删 / 清空（删/清空需确认） |
+| 订单 | 4 | 列表 / 详情 / 取消 / 确认收货（后两者需确认） |
+| 地址 | 3 | 列表 / 新增（多轮） / 修改 |
+| 个性化推荐 | 2 | 偏好分析 / 推荐列表 |
+| 用户记忆 | 2 | 保存 / 读取 Layer 3 记忆 |
+| **合计** | **约 20 业务 + 记忆工具** | 完整工具名与参数见实现说明 |
+
+**AdminAgent 工具分类（数量摘要）**
+
+| 分类 | 数量 | 能力摘要 |
+|------|------|----------|
+| 商品管理查询 | 2 | 分页 / 详情 |
+| 订单管理查询 | 2 | 分页 / 详情 |
+| 秒杀管理查询 | 4 | 活动 / 关联商品 / 订单 / 库存 |
+| 用户管理查询 | 2 | 分页 / 详情 |
+| 运营日报 | 1 | `generate_daily_report` 组合编排 |
+| **合计** | **11（10 查询 + 日报）** | 完整工具表见实现说明 |
+
+**Skills 摘要**
+
+| Agent | 数量 | Skill 主题 |
+|-------|------|------------|
+| CustomerAgent | 7 | 购物导购、秒杀下单、购物车、订单、地址、个性化推荐、RAG 查询 |
+| AdminAgent | 3 | 运营日报、数据查询、RAG 查询 |
+
+Skills 以 `SKILL.md` 形式存放在工作区虚拟文件系统中，由 `SkillsMiddleware` 按场景注入为动态规范。工具侧还可做预处理降级（例如秒杀版本黑名单、空数据固定提示），减少无效 LLM 推理。
+
+#### 最终效果
+
+- 工具返回面向用户的 Markdown，而不是裸 JSON  
+- 秒杀降级、空数据提示等可在工具层完成，减轻模型负担  
+- Skill 约束「先详情再下单」「推荐必附理由」等业务纪律  
+- 完整工具参数表与返回约定不在本文展开，**详见实现说明**  
+
+### 3.5 用户画像持久化
+
+#### 设计动机
+
+若每次推荐都实时查订单/购物车再跨服务聚合，延迟高且 Agent 与后端推荐服务会重复计算。需要一层「行为发生时增量写、读取时直接取」的共享画像，让对话入口与页面入口共用同一偏好事实源。
+
+#### 实现思路
+
+- **存储**：Redis **db=0**，与后端 `spring.redis.database=0` 共享。  
+- **写入（后端）**：加购、支付成功等路径增量更新类目/品牌/价格与统计；Agent 调用加购/下单 API 成功后由后端联写，Agent 不重复写画像。  
+- **读取（Agent / 推荐）**：优先读画像；miss 再降级实时聚合并回写。  
+
+逻辑结构可理解为（具体 Key/TTL 以实现说明与代码为准）：
+
+| 维度 | 内容概要 |
+|------|----------|
+| 行为流 | 近期加购/购买等事件摘要 |
+| 类目 / 品牌分 | 累计偏好得分，供 TopN 使用 |
+| 价格样本 | 近期成交或相关价格，用于价格带估计 |
+| 统计字段 | 购买/加购次数、最近更新时间等 |
+
+画像记住的是结构化偏好，不是完整对话文本；后者属于 Layer 3 记忆或 Checkpoint 会话历史。
+
+#### 最终效果
+
+- 偏好分析在画像命中时接近本地 Redis 读取延迟，少绕业务聚合  
+- 无论用户通过 Agent 对话还是前端页面加购/下单，画像路径可一致更新  
+- 为推荐与「为什么推荐这些」的可解释性提供同一数据源  
+
+### 3.6 个性化推荐
+
+#### 设计动机
+
+教学级商城的目标不是上线最复杂的协同过滤 CTR 最优模型，而是让 Agent「像懂用户的导购」：先懂偏好，再召回商品，再用自然语言说清理由，并与后续加购/详情动作无缝衔接。
+
+#### 实现思路
+
+三步管线：
+
+1. **偏好分析**：画像命中则直接取 Top 类目/品牌/价格带；miss 则查订单/购物车加权聚合。  
+2. **召回排序**：按偏好条件检索候选商品，并处理库存/状态、已购排除等业务约束。  
+3. **理由生成**：由 LLM 结合偏好与商品信息生成可解释理由，而非纯模板拼接。  
+
+Agent 侧典型路径是先 `analyze_user_preferences`，再 `get_recommendations_api`；Skills 中的个性化推荐规范约束「先分析、后推荐、每条附理由、说明数据来源」。
+
+#### 最终效果
+
+- 「帮我推荐」→ 若干推荐商品 + 个性化理由  
+- 用户可追问「为什么推荐这些」→ 可回溯到偏好分析摘要  
+- 推荐结果可继续衔接「看详情 / 加购」等对话动作  
+
+### 3.7 语义记忆（Layer 3）
+
+#### 设计动机
+
+画像只能表达「喜欢什么类目/品牌」，记不住「想买手机但再看看」这类未完成意图。若每次开聊都从零开始，体验像失忆导购。需要在结构化偏好之上再增加一层「意图/备注」记忆。
+
+#### 实现思路
+
+在 Redis 结构化画像之上增加 **LangGraph Store** 语义记忆层：
+
+- `save_memory`：保存明确但未完成的意图或偏好备注  
+- `get_memories`：对话开始时读取，供模型自然融入回复  
+
+当前 `graph.json` 配置 **Store `type: in_memory`**，可按平台能力扩展持久化后端。注意与 Checkpoint 区分：Checkpoint 管的是某个 thread 的对话状态恢复；Store 管的是按用户维度的跨会话记忆条目。多租户下记忆 namespace 绑定当前用户，避免串读。
+
+#### 最终效果
+
+- 上次说「改天再看手机」→ 下次可被自然提起，而不是机械复读  
+- 换 thread 不自动带上旧消息气泡，但记忆与画像可按 `user_id` 跨会话保留  
+- 与 Redis 画像分工清晰：偏好 vs 意图  
+
+### 3.8 RAG 知识库集成
+
+#### 设计动机
+
+退换货、配送、支付方式等政策类问题不在商品库里。若仅靠 LLM 编造，容易出现虚假期限与错误流程。需要可检索的运营文档作为依据，把「会说」变成「有据可依」。
+
+#### 实现思路
+
+通过 MCP 桥接 LightRAG：Agent 侧按需注入检索类工具；前端可用「知识库」开关控制是否启用。知识图谱 + 向量检索返回片段后，由 LLM 基于片段作答。Customer / Admin 各自有 `rag-query` Skill，约束政策类问题先检索再回答。
+
+运维、索引、端口与开关细节较多，**完整说明见设计方案文档 Part A「§12 RAG 知识库」**；本地联调步骤与验收项见实现说明。本文只强调：RAG 可选、按需启用、不启用时应接近零开销。
+
+#### 最终效果
+
+- 「能货到付款吗 / 退货怎么处理」→ 基于文档回答，降低幻觉  
+- 不启用时可不拉起 MCP，避免无关开销  
+- 与商品工具并存：商品事实走业务 API，政策事实走知识库  
+
+### 3.9 Human-in-the-loop（二次确认）
+
+#### 设计动机
+
+取消订单、确认收货、清空购物车、秒杀下单等不可逆或高风险操作，不能由模型「直接替用户决定」。必须让用户看见确认意图后再执行，把「自动驾驶」限制在可逆、低风险范围内。
+
+#### 实现思路
+
+危险工具在执行前调用 LangGraph `interrupt()` 暂停图执行；前端弹出确认 UI，用户确认后恢复 run，取消则中止。地址新增等还可能用 interrupt 做多轮字段采集（缺省信息不猜全）。
+
+典型需确认或补参场景包括：取消订单、确认收货、删除购物车项、清空购物车、秒杀下单，以及地址相关的多轮交互。AdminAgent 因全只读，通常不进入写操作 HITL，但查询类多轮补参仍可复用 interrupt 思路（以实现为准）。
+
+#### 最终效果
+
+- 写操作有明确确认步骤，降低误触与模型误判  
+- 确认文案携带关键业务 ID（如订单号），用户可核对  
+- 与 L1 捷径、L3 推理兼容：确认发生在真正调用写 API 之前  
+
+### 3.10 前端集成
+
+#### 设计动机
+
+Agent 需要的不只是聊天框，还包括 JWT 注入、流式渲染、工具过程可见、interrupt 弹窗，以及按登录身份隔离会话列表。否则「能聊」但不可用：要么越权，要么确认断层，要么换号串会话。
+
+#### 实现思路
+
+前端通过 `@langchain/langgraph-sdk` 以 HTTP + SSE 连接 Agent（默认 `:8090`）。关键约定：
+
+- 请求携带 `Authorization` 与 `X-Hmall-Agent-Type`。  
+- 业务 token 同时进入 LangGraph Auth（多租户 + introspect）与工具侧 `context.user_token`（调 Gateway）。  
+- 创建/搜索 thread 写入或过滤 `metadata.owner`。  
+- 换账号清空本地 `threadId`，避免沿用他人会话 ID。  
+- Markdown 中的商品链接由前端解析为可点击跳转；interrupt 与原生确认 UI 打通。  
+
+#### 最终效果
+
+- 流式文本与工具结果交替展示，体感接近实时客服  
+- 商品类 Markdown 可解析为可点击跳转  
+- interrupt 确认与前端 UI 一体，无需另造协议  
+- 用户只能看到自己的会话列表  
+
+### 3.11 后端集成与安全（introspect + 多租户）
+
+#### 设计动机
+
+Agent 是独立入口（浏览器直连 `:8090`），**收不到** Gateway 转发头里的 `user-info`。若只本地解码 JWT，则与 Gateway 验签结果「碰巧一致」不可靠，也无法继承黑名单/过期等后端能力。同时，若不按用户隔离 thread，知道 `thread_id` 就可能越权读会话。因此需要「身份权威对齐」与「会话归属强制」两道闸。
+
+#### 实现思路
+
+**业务调用**：`GatewayClient`（httpx）统一访问 `JAVA_GATEWAY_URL`，工具携带同一 JWT；Gateway 验签后下游读 `UserContext`。画像写入仍由后端在加购/支付等路径完成，覆盖 Agent 与页面两种入口。
+
+**身份权威（introspect）**：
+
+| 端 | 权威接口 | 含义 |
+|----|----------|------|
+| C 端 | `GET /users/me` | Gateway 验签后返回官方 `userId` |
+| 管理端 | `GET /admin/info` | admin-service 侧权威管理员 ID |
+
+默认短 TTL 缓存 introspect 结果，降低 threads API 额外往返；失败时默认不静默回退本地解码（保持与 Gateway 强一致）。该 `userId` 用于 Auth 的 `owner`、画像 Key、记忆 namespace，以及中间件写入的 `context.user_id`。本地 JWT 解析仅可用于猜测 introspect 路径或可选回退，**默认不是权威**。
+
+**多租户会话**：自定义 LangGraph Auth——鉴权得到 `owner={agent_type}:{user_id}`；threads 的创建/搜索/读写/跑流均按 `owner` 过滤。Checkpoint 由 **langgraph-runtime-inmem** 托管，冷路径 pickle 到工作目录 **`.langgraph_api/*.pckl`**（不是 Redis Checkpoint）。这与早期文档中的「Redis Checkpoint」表述不同，以当前实现为准。
+
+#### 最终效果
+
+- 伪造 payload 的假 JWT：introspect 被拒 → 进不了受保护会话 API  
+- 用户 A 无法用自己的 token 操作用户 B 的 thread  
+- 业务写路径仍经 Gateway，身份不被 Agent 本地解析绑架  
+- 进程重启后，落盘 Checkpoint 仍可能恢复既有会话（开发态行为以实现与平台版本为准）  
 
 ---
 
-## 5. 中间件体系（三级路由）
+## 4. 快速上手
 
-### 设计动机
+本节只给「能跑起来」的最小路径。完整配置全文、启动顺序与验收检查清单见 [hmall_Agent实现说明文档.md](./hmall_Agent实现说明文档.md)。
 
-电商 Agent 面临一个核心问题：用户输入千变万化——有些是精确的操作指令（"查看我的订单"），有些是模糊的意图（"想买个东西送人"），有些是闲聊（"今天天气怎么样"）。如果所有输入都交给 LLM 处理，简单操作会有 1-3 秒的延迟，用户体验差；如果只用正则匹配，灵活度不够。
+### 4.1 环境要求
 
-### 实现思路
+- Python ≥ 3.12，包管理建议使用 uv  
+- Redis 可用（用户画像，**db=0** 与后端一致）  
+- hmall Java 微服务与 **Gateway** 已启动（Agent 不直连业务库）  
+- 可用的通义千问（DashScope）API Key  
+- 前端联调时还需对应门户/管理端前端工程与登录态  
 
-设计**三级路由**架构，在"速度快"和"灵活度高"之间取最优解：
+### 4.2 最小三步启动
 
-```
-用户消息
-  │
-  ▼
-L1 RegexShortcutMiddleware（正则匹配，<5ms）
-  ├── 命中 → 直接路由到工具（跳过 LLM）
-  └── 未命中 ▼
-  L2 interrupt 状态机（Human-in-the-loop）
-      ├── 命中 → 二次确认 → 执行
-      └── 未命中 ▼
-      L3 LLM 推理（1-3s）
-          └── 完整 ReAct 循环
-```
+1. **安装依赖**：进入 `hmall-agent` 目录执行依赖同步（如 `uv sync`）。  
+2. **配置环境**：复制 `.env.example` 为 `.env`，至少填好下表必填项。  
+3. **启动 Agent**：运行 `start_server.py`（或项目约定的等价启动命令），确认健康检查可用。  
 
-**L1 正则快捷路由**：维护一个"意图 → 工具"的映射表（如"我的订单" → `get_order_list_api`）。正则匹配到意图后，直接从消息中提取参数（用 `interrupt` 补充缺失参数），跳过 LLM 直接调用工具。适合"查看订单"、"加入购物车"等高频场景。
+建议依赖顺序的心智模型是：基础设施（MySQL / Redis / Nacos / MQ 等）→ Java 微服务与 Gateway → Agent → 前端。逐步命令、健康检查项与常见失败点**详见实现说明**，本文不展开成部署手册。
 
-**L2 interrupt 状态机**：危险操作（取消订单、确认收货、秒杀下单）不直接执行，而是通过 LangGraph 的 `interrupt()` 机制暂停执行，在前端弹出确认弹窗。用户确认后恢复执行。
+RAG 为可选能力：需额外启动 LightRAG 与 RAG MCP 服务，并在前端打开知识库开关；设计细节见设计方案 RAG 章节，联调见实现说明。
 
-**L3 LLM 推理**：当 L1/L2 都无法匹配时（如"帮我挑个合适的礼物送女朋友"），交给 LLM 完成完整的理解→规划→执行循环。
+### 4.3 必填配置摘要
 
-### 最终效果
+| 配置项 | 作用 |
+|--------|------|
+| `DASHSCOPE_API_KEY` | LLM（通义千问）调用密钥 |
+| `JAVA_GATEWAY_URL` | hmall Gateway 根地址（业务 API + introspect） |
+| `AGENT_PORT` | Agent / LangGraph Server 监听端口（默认 8090） |
+| 画像 Redis 相关 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` / `PROFILE_REDIS_DB`（须为 **0** 且与后端一致） |
+| introspect 相关 | 如 `INTROSPECT_CACHE_TTL`、`INTROSPECT_FALLBACK_JWT`（默认失败不回退本地解码） |
 
-- 用户说"查看我的订单"→ L1 正则命中，<5ms 响应，秒级返回结果
-- 用户点"取消订单 1005"→ L2 interrupt → 弹窗"确定取消订单 1005？"→ 确认后执行
-- 用户说"帮我推荐一个适合送女朋友的礼物，预算 500 以内"→ L3 LLM 分析偏好 → 搜索商品 → 格式化推荐
+完整 `.env` 项、JWT/JKS、RAG、日志等级等说明见实现说明，本文不展开。
 
----
+### 4.4 端口速查
 
-## 6. 工具系统
+| 服务 | 默认端口 | 说明 |
+|------|----------|------|
+| Agent / LangGraph | 8090 | API / Docs / Studio / 健康检查入口 |
+| hm-gateway | 8080 | 业务 API 与 introspect 入口 |
+| RAG MCP（可选） | 8008 | Agent 侧 MCP 桥 |
+| LightRAG（可选） | 9621 | 知识检索引擎 |
 
-### CustomerAgent 工具（22 个）
+### 4.5 完整配置与检查清单
 
-| 类别 | 工具 | 说明 |
-|------|------|------|
-| 商品浏览 | `search_items_api` | 多条件搜索（关键词/类目/品牌/价格区间/排序/分页） |
-| | `get_item_detail_api` | 商品详情（含库存/状态） |
-| | `get_item_page_api` | 商品分页浏览 |
-| 秒杀 | `get_seckill_activities_api` | 秒杀活动列表 |
-| | `get_seckill_product_api` | 秒杀商品详情 |
-| | `do_seckill_api` | 参与秒杀（需 L2 interrupt 确认） |
-| 购物车 | `get_cart_list_api` | 查看购物车 |
-| | `add_to_cart_api` | 加入购物车 |
-| | `update_cart_quantity_api` | 修改商品数量 |
-| | `delete_cart_item_api` | 删除商品（需 L2 interrupt 确认） |
-| | `clear_cart_api` | 清空购物车（需 L2 interrupt 确认） |
-| 订单 | `get_order_list_api` | 订单列表查询 |
-| | `get_order_detail_api` | 订单详情 |
-| | `cancel_order_api` | 取消订单（需 L2 interrupt 确认） |
-| | `confirm_receive_api` | 确认收货（需 L2 interrupt 确认） |
-| 地址 | `get_address_list_api` | 收货地址列表 |
-| | `add_address_api` | 新增地址（多轮交互收集信息） |
-| | `update_address_api` | 修改地址 |
-| 个性化推荐 | `get_recommendations_api` | 获取个性化推荐商品 |
-| | `analyze_user_preferences` | 分析用户购物偏好 |
-| 用户记忆 | `save_memory` | 保存对话记忆 |
-| | `get_memories` | 读取历史记忆 |
-
-### AdminAgent 工具（11 个）
-
-| 类别 | 工具 | 说明 |
-|------|------|------|
-| 商品管理 | `admin_get_product_page_api` | 商品分页管理 |
-| | `admin_get_product_detail_api` | 商品详情管理 |
-| 订单管理 | `admin_get_order_page_api` | 订单分页查询 |
-| | `admin_get_order_detail_api` | 订单详情查询 |
-| 秒杀管理 | `admin_get_seckill_promotion_page_api` | 秒杀活动分页 |
-| | `admin_get_seckill_relation_page_api` | 秒杀商品关联 |
-| | `admin_get_seckill_order_page_api` | 秒杀订单查询 |
-| | `admin_get_seckill_stock_api` | 秒杀库存查询 |
-| 用户管理 | `admin_get_user_page_api` | 用户分页查询 |
-| | `admin_get_user_detail_api` | 用户详情查询 |
-| 运营日报 | `generate_daily_report` | 生成运营日报（组合工具） |
-
-### 工具设计原则
-
-**格式化响应**：每个工具返回的不是裸 JSON，而是通过 `formatters.py` 中的专用格式化函数转为用户可读的中文 Markdown。例如购物车列表返回表格而非原始数组，商品推荐返回带 emoji 和理由的卡片而非 JSON。
-
-**预处理降级**：秒杀工具的版本号校验、黑名单过滤在工具层完成——工具调用后先校验秒杀商品的 version 号是否在黑名单（`degraded_versions`）中，是则直接返回降级消息，不进入 LLM 推理环节。这减少了 LLM 的 Token 消耗和推理延迟。
-
-**画像联动**：加购工具调用成功后，后端 `CartServiceImpl` 自动将 cart 行为写入用户画像；支付成功后 `paySuccessListener` 写入 purchase 画像。Agent 在推荐前先读画像，命中时无需查订单/购物车即可完成偏好分析。
+本地联调建议按实现说明中的顺序完成依赖启动后，至少验证：登录态是否能通过 introspect、会话列表是否按 owner 隔离、C 端读写工具与 Admin 只读边界、画像/推荐是否可用，以及（可选）RAG 开关与检索是否生效。**完整配置与检查清单见实现说明**。
 
 ---
 
-## 7. Skills 技能系统
+## 5. 附录
 
-### 设计动机
+### 5.1 术语表
 
-通用 Agent 在面对具体业务场景时，需要明确的"操作指南"来规范化行为——比如秒杀下单前必须展示商品详情、推荐商品时必须附上理由、退货查询前必须先确认订单号。这些业务规范如果全部写入 Prompt，会迅速撑爆上下文窗口。
+| 术语 | 含义 |
+|------|------|
+| CustomerAgent | C 端客服助手图，面向购物全链路对话 |
+| AdminAgent | 管理助手图，只读查询 + 运营日报 |
+| 三级路由 | L1 正则捷径 → L2 interrupt 确认 → L3 LLM 兜底 |
+| Skill / SKILL.md | 场景化业务 SOP，由 Skills 中间件注入 |
+| Gateway introspect | 用业务 JWT 调 `/users/me` 或 `/admin/info` 获取权威用户 ID |
+| owner | 多租户会话归属键，格式 `{agent_type}:{user_id}` |
+| Checkpoint | 会话状态持久化；当前为 inmem 运行时 + `.langgraph_api` 落盘 |
+| Store | LangGraph 键值/语义存储；当前 `in_memory`，承载 Layer 3 记忆 |
+| 用户画像 | Redis 结构化偏好（类目/品牌/价格等），与后端共享 db=0 |
+| Layer 3 记忆 | 对话级意图/备注记忆，区别于画像偏好 |
+| HITL | Human-in-the-loop，危险操作二次确认 |
+| RAG | 基于知识库检索增强生成，降低政策类幻觉 |
+| MCP | Model Context Protocol，本文用于桥接 LightRAG 工具 |
+| DeepAgents | 声明式 Agent 组装框架，提供 Skills 等中间件能力 |
+| LangGraph | 图执行与状态持久化运行时，提供 Server / Auth / interrupt 等能力 |
 
-### 实现思路
+### 5.2 相关文档索引
 
-Skill 是 Markdown 格式的业务操作规范文档（`SKILL.md`），存储在 `src/workspace/{agent_type}/skills/` 目录下。每个 Skill 描述一个具体业务场景的标准操作流程（SOP）。
-
-Skills 通过 `FilesystemBackend`（虚拟文件系统）加载，在 Agent 初始化时以**动态提示词**的形式注入。Agent 在对话中根据意图自动选择相关 Skill 作为参考。
-
-**CustomerAgent 的 7 个 Skills**：
-| Skill | 内容 |
-|-------|------|
-| `shopping-guide` | 商品搜索与浏览的 SOP——关键词提取、多条件组合、结果排序 |
-| `seckill-order` | 秒杀下单 SOP——活动校验、商品详情确认、下单确认 |
-| `cart-management` | 购物车管理 SOP——增删改查、清空前确认 |
-| `order-management` | 订单管理 SOP——状态查询、取消/收货确认 |
-| `address-management` | 地址管理 SOP——多轮交互收集、格式验证 |
-| `personalized-recommendation` | 推荐 SOP——偏好分析→推荐→附理由 |
-| `rag-query` | 知识库查询 SOP——政策类问题的检索流程 |
-
-**AdminAgent 的 3 个 Skills**：
-| Skill | 内容 |
-|-------|------|
-| `daily-report` | 运营日报生成 SOP——多维度数据并发查询与聚合 |
-| `data-query` | 数据查询 SOP——分页查询、条件筛选、排序 |
-| `rag-query` | 知识库查询 SOP |
-
-### 最终效果
-
-- Agent 在秒杀场景下会严格遵循 `seckill-order` Skill：先展示商品详情 → 展示秒杀价格 → 让用户确认 → 下单
-- Agent 在推荐场景下会遵循 `personalized-recommendation` Skill：先分析偏好 → 查推荐 → 每条附理由 → 提醒"数据基于您的历史行为"
-- Skill 作为外部知识注入，不占 Prompt 主窗口空间
+| 文档 | 内容侧重 |
+|------|----------|
+| [hmall_Agent设计方案文档.md](./hmall_Agent设计方案文档.md) | 架构与技术选型、接口与安全契约、推荐/画像/RAG 设计全文 |
+| [hmall_Agent实现说明文档.md](./hmall_Agent实现说明文档.md) | 实现细节、完整工具表、完整配置、部署验收、与设计偏差 |
+| 本文 | 入门总览与快速上手最小路径 |
 
 ---
 
-## 8. 用户画像持久化
-
-### 设计动机
-
-传统推荐系统在每次请求时都要查数据库做偏好聚合——查订单详情的 category/brand、查购物车的商品信息、按购买数量加权。每次请求 3-5 次 Feign 跨服务调用，延迟约 200ms。
-
-更严重的是，Agent 和新独立的推荐服务（`RecommendServiceImpl`）需要**各自做一遍**同样的聚合计算——两端的重复计算完全冗余。
-
-### 实现思路
-
-设计**画像缓存层**：行为发生时增量更新 Redis 画像，读取时直接取聚合结果。
-
-**写入端（行为发生时）**：
-
-| 行为 | 写入方 | 权重 |
-|------|--------|:---:|
-| 加购 | `CartServiceImpl.addItem2Cart`（后端） | 3 |
-| 支付成功 | `paySuccessListener`（后端 MQ 消费者） | 5 |
-
-后端两处均使用 `StringRedisTemplate` + `executePipelined` 批量执行，HINCRBY 原子增量更新，1 次网络往返完成所有写入。
-
-**读取端（分析/推荐时）**：
-
-```
-analyze_user_preferences / RecommendServiceImpl.recommend()
-  ↓
-1. 优先读 Redis 画像 profile:{uid}:categories/brands/prices
-   ✅ 命中 → 直接使用（0 次后端调用，<5ms）
-   ❌ miss → 降级 Phase 1 实时计算 → 回写画像
-```
-
-**Redis 存储结构**（db=0，与后端 `spring.redis.database=0` 共享）：
-
-| Key | 类型 | 内容 | TTL |
-|-----|------|------|-----|
-| `profile:{uid}:events` | List | 行为流（最近 50 条） | 7 天 |
-| `profile:{uid}:categories` | Hash | 类目 → 累计得分 | 30 天 |
-| `profile:{uid}:brands` | Hash | 品牌 → 累计得分 | 30 天 |
-| `profile:{uid}:prices` | List | 最近购买价格（20 条） | 30 天 |
-| `profile:{uid}:stats` | Hash | purchase_count / cart_count / last_update | 30 天 |
-
-### 最终效果
-
-- **Agent 偏好分析**：画像命中时 0 次 Gateway 调用（原需 3-5 次），延迟 <5ms
-- **后端推荐召回**：画像命中时跳过 Feign 聚合（原需查 trade-service + item-service），直接 ES 检索
-- **覆盖全路径**：后端写入覆盖 Agent 对话 + 前端 UI 两种入口（用户无论通过哪种方式加购/下单，画像都会更新）
-- **高并发安全**：HINCRBY 原子操作，无需分布式锁
-
----
-
-## 9. 个性化推荐
-
-### 设计动机
-
-电商的"猜你喜欢"通常依赖专业推荐引擎（如协同过滤、深度学习排序模型）。但对于一个教学级电商项目，核心目标不是 CTR 最优，而是让 Agent 能"像懂用户的导购一样推荐商品"。
-
-### 实现思路
-
-三步管线，平衡效果与复杂度：
-
-```
-用户："帮我推荐"
-  ↓
-Step 1: 偏好分析
-  ├── 画像命中 → 秒级返回 Top3 类目 + Top3 品牌 + 价格区间
-  └── 画像 miss → 查订单/购物车 → 按购买数量加权聚合
-
-Step 2: 召回排序
-  └── ES 多字段检索（类目 + 品牌 + 价格区间 + 已购排除）
-      + MySQL 补充库存/状态
-
-Step 3: 理由生成
-  └── LLM 结合偏好和商品信息生成推荐理由（非后端模板拼接）
-```
-
-**推荐理由的可解释性**：每件推荐商品都有理由——"你最近买过 Nike 跑鞋，这款是 Nike 最新款"或"根据你的价格偏好（200-500 元），这款性价比很高"。理由由 LLM 根据用户偏好和商品信息实时生成，而不是后端写死的模板。
-
-### 最终效果
-
-- 用户说"帮我推荐"→ Agent 展示 5 件推荐商品，每件附带个性化的推荐理由
-- 偏好数据透明：用户问"为什么推荐这些"→ Agent 展示偏好分析（"基于你 3 笔订单 + 5 件购物车商品"）
-- 点击商品卡片可查看详情，无缝衔接后续的"加入购物车"、"查看详情"等操作
-
----
-
-## 10. 语义记忆（Layer 3）
-
-### 设计动机
-
-用户画像只能记住"偏好"（类目、品牌、价格），但记不住"意图"——用户说"想买手机但再看看"、"先收藏改天再说"。这些未完成的购物意图如果在下一次对话中被遗忘，Agent 就像一个每次都从零开始的"失忆导购"。
-
-### 实现思路
-
-在 Redis 结构化画像之上增加第三层——LangGraph Store 语义记忆。Agent 提供两个专用工具：
-
-- **`save_memory`**：当用户表达明确但未完成的意图时调用，存储为键值对（如 `{"key": "shopping_intent", "value": "想买 3000 以内的手机，偏好华为"}`）
-- **`get_memories`**：每次对话开始时自动调用，读取历史记忆
-
-记忆通过 LangGraph Store API（`aput` / `asearch`）持久化，支持语义检索。当前使用内存存储（`graph.json` 配置 `"store": {"type": "in_memory"}`），可无缝扩展为持久化后端。
-
-### 最终效果
-
-- 用户第一次对话："想买手机，但再看看，改天再说"→ Agent 调用 `save_memory` 保存意图
-- 用户第二次打开对话：Agent 自动读取记忆 → "欢迎回来！上次您在看手机，今天新到了一批华为新款"
-- Agent 不会生硬复述记忆内容，而是自然地融入对话
-
----
-
-## 11. RAG 知识库集成
-
-### 设计动机
-
-电商有大量"政策类问题"——退换货规则、配送时效、支付方式、售后服务——这些答案不在商品数据库里，而是在运营文档中。如果让 LLM 凭空编造，会出现"幻觉"（如虚构退货期限）。
-
-### 实现思路
-
-hmall Agent 通过 MCP（Model Context Protocol）协议集成 LightRAG 知识检索引擎：
-
-```
-Agent
-  │  MCP Client (langchain-mcp-adapters)
-  ▼
-RAG MCP Server (FastMCP, :8008)
-  │  接受 search_documents / list_documents 调用
-  ▼
-LightRAG Server (:9621)
-  └── 知识图谱 + 向量检索
-```
-
-**工作原理**：
-1. 运营文档（退换货政策、配送说明、运营指南）提前索引入 LightRAG 知识库
-2. 用户提问时，Agent 通过 RAG 中间件动态注入 `search_documents` 工具
-3. LightRAG 使用知识图谱 + 向量双重检索，返回最相关的文档片段
-4. LLM 基于检索结果回答，零幻觉
-
-**RAG 中间件**：`Enable_RAG=true` 时（前端开关控制），动态连接 MCP Server 并注入检索工具。这样 RAG 功能按需启用，不使用时零开销。
-
-### 最终效果
-
-- AdminAgent："退货流程怎么处理"→ RAG 检索退换货政策文档 → 返回准确流程
-- CustomerAgent："能货到付款吗"→ RAG 检索支付方式说明 → 返回准确答案
-- 前端对话面板头部有"知识库"开关按钮，一键启用/禁用
-
----
-
-## 12. Human-in-the-loop 二次确认
-
-### 设计动机
-
-Agent 不能像"自动驾驶"一样替用户做决策——尤其是取消订单、确认收货、清空购物车这类不可逆操作。必须让用户亲眼确认后再执行。
-
-### 实现思路
-
-利用 LangGraph 的 `interrupt()` 机制实现人机协作。危险操作的工具不直接执行，而是：
-
-1. 工具调用时，Agent 先通过 `interrupt()` 暂停执行
-2. 前端弹出确认弹窗（"确定取消订单 1005？"）
-3. 用户点击"确认"→ 后端恢复 Agent 执行 → 调用 API 完成操作
-4. 用户点击"取消"→ 返回"已取消操作"
-
-**哪些操作需要二次确认**：
-- 取消订单、删除购物车商品、清空购物车
-- 确认收货
-- 秒杀下单
-- 新增收货地址（需两轮交互收集信息）
-
-### 最终效果
-
-- 用户说"取消订单 1005"→ 弹窗"确定取消订单 1005？"→ 确认后执行
-- 用户说"确认收货"→ 弹窗"确定已收到订单「1005」的商品？回复'确认收货'执行"→ 确认后执行
-- 不可逆操作都有明确的确认步骤，避免 LLM "脑子一热"误判
-
----
-
-## 13. 前端集成
-
-### 设计动机
-
-Agent 不仅需要一个聊天界面，还需要认证注入、工具调用可视化、Skill 开关切换。
-
-### 实现思路
-
-hmall 前端通过 `@langchain/langgraph-sdk` 连接 Agent 服务，使用 SSE（Server-Sent Events）流式接收 Agent 回复。
-
-**核心流程**：
-1. 用户发送消息 → `POST /threads/{id}/runs/stream` 建立 SSE 连接（请求头携带 `Authorization` + `X-Hmall-Agent-Type`）
-2. Agent 流式返回：文本片段（chunk）、工具调用开始/结束、interrupt 确认弹窗
-3. 前端实时渲染：Markdown 文本 + 工具结果卡片交替展示
-4. 前端通过 `context` 注入 `user_token` / `agent_type`；同时 SDK `defaultHeaders` 携带 JWT，供 LangGraph Auth 做多租户鉴权与 Gateway introspect
-
-**关键集成点**：
-- 登录后获取 JWT → `useLangGraph` 每次请求附带 `Authorization: Bearer <token>` 与 `X-Hmall-Agent-Type`
-- 创建 / 搜索会话时写入或过滤 `metadata.owner`（服务端 Auth 也会强制按 owner 隔离）
-- Agent 返回的 Markdown 中包含商品卡片链接 → 前端解析渲染为可点击的跳转链接
-- `interrupt` 确认弹窗与前端 UI 深度集成 → 用户确认/取消的操作直接驱动 Agent 继续/中断
-- 切换登录账号时清空本地 `threadId`，避免串会话
-
-### 最终效果
-
-- 用户在前端聊天框输入"帮我搜索蓝牙耳机"→ Agent 流式返回搜索结果
-- 工具调用实时可见（如"正在搜索商品..."→ 搜索结果卡片）
-- 商品详情链接可点击，跳转到商详页
-- 二次确认弹窗原生展示，无需额外开发
-
----
-
-## 14. 后端服务集成
-
-### 设计动机
-
-hmall Agent 自身不存储业务数据，所有数据操作必须通过 Java 微服务集群完成。如何高效、安全地调用微服务接口是核心挑战。
-
-### 实现思路
-
-Agent 通过 `gateway/http_client.py` 中的 `GatewayClient` 统一调用后端 API：
-
-```
-Agent 工具
-  │  httpx.AsyncClient (连接池复用)
-  ▼
-hm-gateway (:8080)
-  ├── /items/search/:8081    item-service
-  ├── /carts                  cart-service
-  ├── /orders                 trade-service
-  ├── /users                  user-service
-  ├── /seckill                seckill-service
-  └── /search                 search-service
-```
-
-**认证传递**：
-
-1. 前端把登录 JWT 同时用于：LangGraph Server 的 `Authorization`（多租户 Auth + introspect）以及 `context.user_token`（工具调 Gateway）。
-2. Agent 工具经 `GatewayClient` 原样携带同一 JWT 调用 Gateway；C 端由 `AuthGlobalFilter` 验签后写入 `user-info`，下游微服务读 `UserContext`。
-3. Agent 本地的 `user_id` **不以 JWT base64 解码为权威**，而是调用 `GET /users/me`（C 端）或 `GET /admin/info`（管理端）向后端索取官方 ID，保证与 Gateway / admin-service 验签结果一致。
-
-**连接池管理**：使用 `httpx.AsyncClient`，按需建连，避免工具调用间长期占用连接。
-
-**画像联写**：Agent 的加购/下单工具调用后端 API 成功后，**后端**自动将行为写入 Redis 画像（而非 Agent 再写一次）。这确保了不管用户通过 Agent 还是前端 UI 操作，画像都能更新。
-
-### 最终效果
-
-- Agent 工具调用后端 API 的平均延迟 ~50ms（含 Gateway 转发 + 微服务处理）
-- Token 透传对业务代码完全透明——Agent 工具只需关心业务参数
-- 后端画像写入覆盖 Agent + 前端 UI 两种入口
-
----
-
-## 15. 配置体系
-
-### 配置层级
-
-```
-优先级：.env 环境变量 > 代码默认值
-
-环境变量 (.env / .env.example)
-├── LLM 配置：DASHSCOPE_API_KEY、LLM_MODEL_NAME、LLM_API_BASE
-├── Redis 配置：REDIS_HOST、REDIS_PORT、REDIS_PASSWORD、PROFILE_REDIS_DB
-├── 后端配置：JAVA_GATEWAY_URL
-├── 服务配置：AGENT_PORT、LOG_LEVEL
-├── JWT 配置：JWT_VERIFY_LOCAL、CUSTOMER_JKS_PATH、ADMIN_JKS_PATH
-├── 身份探查：INTROSPECT_CACHE_TTL、INTROSPECT_FALLBACK_JWT
-└── RAG 配置：RAG_BASE_URL、RAG_USERNAME、RAG_PASSWORD、RAG_MCP_PORT
-
-graph.json
-├── graphs — Agent 注册（customer_agent / admin_agent 的 .py 路径）
-├── store  — LangGraph Store 配置（当前 in_memory，落盘 .langgraph_api/store.pckl）
-├── auth   — 自定义 Auth（`./src/security/auth.py:auth`，多租户 + introspect）
-└── env    — .env 文件路径
-```
-
-### 关键配置说明
-
-| 配置项 | 作用 | 默认值 |
-|--------|------|--------|
-| `DASHSCOPE_API_KEY` | 通义千问 API 密钥（必填） | — |
-| `LLM_MODEL_NAME` | 使用的 LLM 模型 | `qwen-turbo` |
-| `PROFILE_REDIS_DB` | 画像数据存储的 Redis 数据库编号 | `0`（须与后端 spring.redis.database 一致） |
-| `JWT_VERIFY_LOCAL` | 是否在 Agent 本地用 jks 验签 | `false`（默认走 Gateway introspect） |
-| `INTROSPECT_CACHE_TTL` | introspect 结果缓存秒数 | `60`（`0` 禁用） |
-| `INTROSPECT_FALLBACK_JWT` | introspect 失败是否回退本地 JWT 解码 | `false`（保持与 Gateway 强一致） |
-| `JAVA_GATEWAY_URL` | hmall Gateway 地址 | `http://localhost:8080` |
-| `AGENT_PORT` | Agent 服务监听端口 | `8090` |
-
----
-
-## 16. 启动流程
-
-### 环境要求
-
-- Python >= 3.12
-- uv（Python 包管理工具）
-- Redis 运行中（用于用户画像存储）
-- hmall Java 微服务集群运行中（item / cart / trade / user / seckill / search / gateway）
-
-### 启动步骤
-
-```bash
-# 1. 安装依赖
-cd hmall-agent
-uv sync
-
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env，填入 DASHSCOPE_API_KEY 等
-
-# 3. 启动 Agent 服务
-uv run python start_server.py
-```
-
-### 服务地址
-
-| 端点 | 地址 | 说明 |
-|------|------|------|
-| API | `http://localhost:8090` | LangGraph API 入口 |
-| Docs | `http://localhost:8090/docs` | Swagger API 文档 |
-| Studio | `http://localhost:8090/ui` | LangGraph Studio 调试界面 |
-| Health | `http://localhost:8090/ok` | 健康检查 |
-
-### 启动顺序
-
-```
-1. 基础设施：MySQL / Redis / Nacos / RabbitMQ
-2. Java 微服务：item → user → cart → trade → pay → search → seckill → gateway
-3. Agent 服务：uv run python start_server.py
-4. 前端：npm run dev
-```
-
-### RAG 知识库（可选）
-
-如需启用 RAG 知识库检索：
-
-```bash
-# 额外启动两个服务
-cd LightRAG && lightrag-server        # LightRAG Server（:9621）
-uv run python start_rag_server.py     # RAG MCP Server（:8008）
-```
-
-启动后在前端对话面板头部点击"知识库"开关按钮启用。
-
-### API 端点
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/assistants/search` | POST | 获取可用 Agent 列表 |
-| `/threads` | POST | 创建对话线程 |
-| `/threads/{id}/runs/stream` | POST | 流式执行（SSE） |
-| `/threads/{id}` | DELETE | 删除对话线程 |
-| `/api/v1/batch-report` | POST | 批量运营报告 |
-| `/api/v1/health` | GET | 健康检查 |
-
----
-
-## 17. 会话历史与多租户隔离
-
-### 设计动机
-
-LangGraph 的会话历史按 `thread_id` 存在 Checkpointer 中。若不对 thread 做用户归属，任意客户端只要知道（或枚举）`thread_id`，就可能读到他人对话——这在多用户共用同一 Agent Server 时不可接受。
-
-### 实现思路
-
-采用 LangGraph 官方推荐的 **自定义 Auth**：
-
-1. **鉴权（`@auth.authenticate`）**：校验请求 `Authorization`，经 Gateway introspect 得到权威 `user_id`，构造 `owner = {agent_type}:{user_id}`（避免 C 端与管理端数字 ID 冲突）。
-2. **授权（`@auth.on.threads.*`）**：创建 thread 时写入 `metadata.owner`；search / read / delete / create_run 一律按 `owner` 过滤。
-3. **Store**：语义记忆 namespace 约定为 `("user_memory", user_id)`，Store 授权校验第二段必须匹配当前用户。
-
-开发态 Checkpointer 由 `langgraph-runtime-inmem` 托管：热路径在内存，冷路径周期性 pickle 到工作目录 `.langgraph_api/`（含 `.langgraph_checkpoint.*.pckl`、`.langgraph_ops.pckl`、`store.pckl`），进程重启后会话仍可恢复。这与「纯内存、重启即丢」不同，也不同于早期文档中的 Redis Checkpoint 方案。
-
-前端配合：
-
-- SDK Client 携带 `Authorization` + `X-Hmall-Agent-Type`
-- `threads.create({ metadata: { owner, user_id, agent_type } })`
-- `threads.search({ metadata: { owner } })`
-- 换账号时清空本地 `threadId`
-
-### 最终效果
-
-- 用户 A 只能列出 / 续聊 / 删除自己的会话；无法用 A 的 token 操作 B 的 `thread_id`
-- 同一用户的多个对话仍是多个 thread；换 thread 不自动带上旧会话消息，但 Layer 3 语义记忆与 Redis 画像按 `user_id` 跨会话保留
-- Studio 可通过 `disable_studio_auth` 在本地调试时放宽；业务前端必须登录
-
----
-
-## 18. 身份权威对齐（Gateway introspect）
-
-### 设计动机
-
-hmall 业务微服务挂在 Gateway 后：Gateway 验签 → 写 `user-info` → 服务读 `UserContext`。  
-hmall-agent 是**独立入口**（浏览器直连 `:8090`），**收不到** Gateway 的 `user-info`。若 Agent 只本地 base64 解码 JWT，则：
-
-- 与 Gateway 解出的 userId 仅靠 claim 约定「碰巧一致」；
-- 默认还不验签，无法继承黑名单 / 过期等 Gateway 能力。
-
-因此引入方案 3：**Agent 拿同一 JWT 去问后端「你认不认、官方 userId 是谁」**。
-
-### 实现思路
-
-| 端 | 权威接口 | 验签位置 | 返回 |
-|----|----------|----------|------|
-| C 端 | `GET /users/me`（user-service，**勿**加白名单） | Gateway `AuthGlobalFilter` → `UserContext` | `{ userId, agentType: "customer" }` |
-| 管理端 | `GET /admin/info` | Gateway 对 `/admin/**` 放行；**admin-service** 自验 admin JWT | `AdminInfoVO.id` |
-
-Agent 侧 `src/gateway/introspect.py`：
-
-- 根据 `X-Hmall-Agent-Type`（或 JWT 猜测）选择接口；
-- 短 TTL 缓存（默认 60s，key=sha256(token)），降低每次 threads API 的额外 RT；
-- 默认 `INTROSPECT_FALLBACK_JWT=false`：失败直接 401/503，不静默回退本地解码。
-
-接入点：
-
-1. LangGraph `src/security/auth.py` → 多租户 `identity` / `owner`
-2. `AuthMiddleware` 异步路径 → 写入 `context.user_id` 供画像与记忆工具使用
-3. 工具调业务 API 仍携带原 JWT，由 Gateway / admin-service **再次**验签决定业务身份
-
-JWT claim 约定（与 Java 签发对齐）：C 端 `payload.user`，管理端 `payload.sub` + `type=ADMIN`。本地 `jwt_payload.py` 仅用于选 introspect 路径或可选回退，**默认不是权威**。
-
-### 最终效果
-
-- Agent 多租户 owner、Redis 画像 Key、Store namespace 使用的 userId，与 Gateway（或 admin-service）验签结果同源；
-- 伪造 payload 的假 JWT：introspect 被后端拒绝 → Agent 拒绝进会话；
-- 业务写路径（加购/下单）仍经 Gateway，不被 Agent 本地解析绑架。
-
----
-
-*本文档基于 hmall Agent v2.0+（含多租户 Auth 与 Gateway introspect）编写，各功能的最新状态以实际代码为准。*
+*本文档描述 hmall Agent v2.0+（含多租户 Auth 与 Gateway introspect）的入门视角；数量与端口以当前代码为准，细节冲突时以实现说明与代码为准。*
